@@ -1,15 +1,12 @@
 package com.audiophile.player.ui.components
 
 import android.graphics.Color as AndroidColor
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,8 +31,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -82,11 +79,42 @@ fun VeylColorWheelPickerSheet(
     val haptic = LocalHapticFeedback.current
     val currentColors = LocalVeylColors.current
 
+    val savedPrimary by controller.customPrimary.collectAsState()
+    val savedSecondary by controller.customSecondary.collectAsState()
+    val savedBackground by controller.customBackground.collectAsState()
+
     var activeTarget by remember { mutableStateOf(PaletteTarget.PRIMARY) }
 
-    var primaryColor by remember { mutableStateOf(currentColors.accentSignal) }
-    var secondaryColor by remember { mutableStateOf(currentColors.textMono) }
-    var backgroundColor by remember { mutableStateOf(currentColors.background) }
+    var primaryColor by remember { mutableStateOf(savedPrimary) }
+    var secondaryColor by remember { mutableStateOf(savedSecondary) }
+    var backgroundColor by remember { mutableStateOf(savedBackground) }
+
+    // Separate HSV state for each target to ensure zero state corruption
+    var primaryHsv by remember {
+        val arr = FloatArray(3)
+        AndroidColor.colorToHSV(savedPrimary.toArgb(), arr)
+        if (arr[2] < 0.4f) arr[2] = 0.90f
+        mutableStateOf(arr)
+    }
+
+    var secondaryHsv by remember {
+        val arr = FloatArray(3)
+        AndroidColor.colorToHSV(savedSecondary.toArgb(), arr)
+        if (arr[2] < 0.4f) arr[2] = 0.85f
+        mutableStateOf(arr)
+    }
+
+    var backgroundHsv by remember {
+        val arr = FloatArray(3)
+        AndroidColor.colorToHSV(savedBackground.toArgb(), arr)
+        mutableStateOf(arr)
+    }
+
+    val activeHsv = when (activeTarget) {
+        PaletteTarget.PRIMARY -> primaryHsv
+        PaletteTarget.SECONDARY -> secondaryHsv
+        PaletteTarget.BACKGROUND -> backgroundHsv
+    }
 
     val activeColor = when (activeTarget) {
         PaletteTarget.PRIMARY -> primaryColor
@@ -94,24 +122,66 @@ fun VeylColorWheelPickerSheet(
         PaletteTarget.BACKGROUND -> backgroundColor
     }
 
-    // Convert active color to HSV
-    val hsv = remember(activeColor) {
-        val array = FloatArray(3)
-        AndroidColor.colorToHSV(activeColor.toArgb(), array)
-        array
+    fun onWheelColorChange(newHue: Float, newSat: Float) {
+        val minB = if (activeTarget == PaletteTarget.BACKGROUND) 0.08f else 0.45f
+        val v = activeHsv[2].coerceAtLeast(minB)
+        val newHsv = floatArrayOf(newHue, newSat, v)
+        val newColor = Color(AndroidColor.HSVToColor(newHsv))
+
+        when (activeTarget) {
+            PaletteTarget.PRIMARY -> {
+                primaryHsv = newHsv
+                primaryColor = newColor
+            }
+            PaletteTarget.SECONDARY -> {
+                secondaryHsv = newHsv
+                secondaryColor = newColor
+            }
+            PaletteTarget.BACKGROUND -> {
+                backgroundHsv = newHsv
+                backgroundColor = newColor
+            }
+        }
     }
 
-    var hue by remember(activeTarget) { mutableFloatStateOf(hsv[0]) }
-    var saturation by remember(activeTarget) { mutableFloatStateOf(hsv[1]) }
-    var brightness by remember(activeTarget) { mutableFloatStateOf(hsv[2]) }
+    fun onBrightnessChange(newV: Float) {
+        val newHsv = floatArrayOf(activeHsv[0], activeHsv[1], newV)
+        val newColor = Color(AndroidColor.HSVToColor(newHsv))
 
-    fun updateColorFromHsv(h: Float, s: Float, v: Float) {
-        val rgb = AndroidColor.HSVToColor(floatArrayOf(h, s, v))
-        val newColor = Color(rgb)
         when (activeTarget) {
-            PaletteTarget.PRIMARY -> primaryColor = newColor
-            PaletteTarget.SECONDARY -> secondaryColor = newColor
-            PaletteTarget.BACKGROUND -> backgroundColor = newColor
+            PaletteTarget.PRIMARY -> {
+                primaryHsv = newHsv
+                primaryColor = newColor
+            }
+            PaletteTarget.SECONDARY -> {
+                secondaryHsv = newHsv
+                secondaryColor = newColor
+            }
+            PaletteTarget.BACKGROUND -> {
+                backgroundHsv = newHsv
+                backgroundColor = newColor
+            }
+        }
+    }
+
+    fun onSelectSwatch(swatch: Color) {
+        val arr = FloatArray(3)
+        AndroidColor.colorToHSV(swatch.toArgb(), arr)
+        when (activeTarget) {
+            PaletteTarget.PRIMARY -> {
+                if (arr[2] < 0.4f) arr[2] = 0.90f
+                primaryHsv = arr
+                primaryColor = swatch
+            }
+            PaletteTarget.SECONDARY -> {
+                if (arr[2] < 0.4f) arr[2] = 0.85f
+                secondaryHsv = arr
+                secondaryColor = swatch
+            }
+            PaletteTarget.BACKGROUND -> {
+                backgroundHsv = arr
+                backgroundColor = swatch
+            }
         }
     }
 
@@ -150,19 +220,57 @@ fun VeylColorWheelPickerSheet(
                     )
                 }
 
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(currentColors.glassButtonBg)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(
-                        imageVector = VeylIcons.Close,
-                        contentDescription = "Close",
-                        tint = currentColors.textSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    // Reset to default
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(currentColors.glassButtonBg)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                val defP = Color(0xFFFFB7B4)
+                                val defS = Color(0xFFB2CAD3)
+                                val defBg = Color(0xFF1B0906)
+                                primaryColor = defP
+                                secondaryColor = defS
+                                backgroundColor = defBg
+                                val arrP = FloatArray(3)
+                                AndroidColor.colorToHSV(defP.toArgb(), arrP)
+                                primaryHsv = arrP
+                                val arrS = FloatArray(3)
+                                AndroidColor.colorToHSV(defS.toArgb(), arrS)
+                                secondaryHsv = arrS
+                                val arrBg = FloatArray(3)
+                                AndroidColor.colorToHSV(defBg.toArgb(), arrBg)
+                                backgroundHsv = arrBg
+                            }
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Reset",
+                            style = VeylTypography.MonoBadge,
+                            color = currentColors.textSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(currentColors.glassButtonBg)
+                    ) {
+                        Icon(
+                            imageVector = VeylIcons.Close,
+                            contentDescription = "Close",
+                            tint = currentColors.textSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
@@ -209,25 +317,23 @@ fun VeylColorWheelPickerSheet(
                 )
             }
 
-            // 3. Interactive Color Wheel Canvas
+            // 3. Interactive Color Wheel Canvas with Scroll-Isolation
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(220.dp),
+                    .height(230.dp),
                 contentAlignment = Alignment.Center
             ) {
                 ColorWheelCanvas(
-                    hue = hue,
-                    saturation = saturation,
+                    hue = activeHsv[0],
+                    saturation = activeHsv[1],
                     onColorChange = { newHue, newSat ->
-                        hue = newHue
-                        saturation = newSat
-                        updateColorFromHsv(newHue, newSat, brightness)
+                        onWheelColorChange(newHue, newSat)
                     }
                 )
             }
 
-            // 4. Brightness / Value Slider
+            // 4. Brightness & Lightness Slider
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -235,25 +341,24 @@ fun VeylColorWheelPickerSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Brightness & Density",
+                        text = if (activeTarget == PaletteTarget.BACKGROUND) "Canvas Dark Depth" else "Brightness & Luminance",
                         style = VeylTypography.TitleMedium,
                         color = currentColors.textPrimary,
                         fontSize = 13.sp
                     )
                     Text(
-                        text = "${(brightness * 100).toInt()}%",
+                        text = "${(activeHsv[2] * 100).toInt()}%",
                         style = VeylTypography.MonoSpec,
                         color = currentColors.accentSignal
                     )
                 }
 
                 Slider(
-                    value = brightness,
+                    value = activeHsv[2],
                     onValueChange = {
-                        brightness = it
-                        updateColorFromHsv(hue, saturation, it)
+                        onBrightnessChange(it)
                     },
-                    valueRange = 0.05f..1.0f,
+                    valueRange = if (activeTarget == PaletteTarget.BACKGROUND) 0.00f..0.30f else 0.15f..1.0f,
                     colors = SliderDefaults.colors(
                         thumbColor = activeColor,
                         activeTrackColor = activeColor,
@@ -262,7 +367,7 @@ fun VeylColorWheelPickerSheet(
                 )
             }
 
-            // 5. Hex Code Display & Quick Presets
+            // 5. Hex Code Display & Current Target
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -277,82 +382,92 @@ fun VeylColorWheelPickerSheet(
                             .size(24.dp)
                             .clip(CircleShape)
                             .background(activeColor)
-                            .border(1.dp, currentColors.borderActive, CircleShape)
+                            .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape)
                     )
                     Text(
                         text = activeColor.toHex(),
                         style = VeylTypography.MonoBadge,
                         color = currentColors.textPrimary,
-                        fontSize = 13.sp
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
                 Text(
-                    text = "Role: ${activeTarget.name}",
+                    text = "Tinting: ${activeTarget.name}",
                     style = VeylTypography.MonoSpec,
-                    color = currentColors.textSecondary,
+                    color = currentColors.accentSignal,
                     fontSize = 11.sp
                 )
             }
 
-            // Quick Swatches
+            // Quick Swatches for Current Target
+            Text(
+                text = if (activeTarget == PaletteTarget.BACKGROUND) "CANVAS TONE PRESETS" else "AUDIOPHILE ACCENT PRESETS",
+                style = VeylTypography.MonoBadge,
+                color = currentColors.textSecondary,
+                fontSize = 10.sp
+            )
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 val swatches = if (activeTarget == PaletteTarget.BACKGROUND) {
                     listOf(
-                        Color(0xFF1B0906), // Obsidian
-                        Color(0xFF000000), // OLED
-                        Color(0xFF0D1117), // Navy
-                        Color(0xFF121212), // Carbon
-                        Color(0xFF08140E), // Forest
-                        Color(0xFF120C06)  // Amber
+                        Color(0xFF1B0906), // Warm Obsidian (Default)
+                        Color(0xFF000000), // OLED True Black
+                        Color(0xFF0D1117), // Deep Slate Navy
+                        Color(0xFF121212), // Neutral Studio Carbon
+                        Color(0xFF08140E), // Analogue Console Forest
+                        Color(0xFF13091B)  // Royal Velvet Plum
                     )
                 } else {
                     listOf(
-                        Color(0xFFFFB7B4), // Coral
+                        Color(0xFFFFB7B4), // Coral Blush
                         Color(0xFF00F0FF), // Electric Cyan
-                        Color(0xFFFF9E00), // Amber
-                        Color(0xFF58A6FF), // Arctic
-                        Color(0xFF2ECC71), // Emerald
-                        Color(0xFFD8B4FE), // Lavender
-                        Color(0xFFFFFFFF), // White
-                        Color(0xFFB2CAD3)  // Slate
+                        Color(0xFFFF9E00), // Radiant Amber
+                        Color(0xFF58A6FF), // Arctic Glacier
+                        Color(0xFF2ECC71), // Console Emerald
+                        Color(0xFFD8B4FE), // Electric Lavender
+                        Color(0xFFFFFFFF), // Crisp White
+                        Color(0xFFB2CAD3)  // Soft Slate
                     )
                 }
 
                 swatches.forEach { swatch ->
+                    val isSelected = activeColor == swatch
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
                             .background(swatch)
                             .border(
-                                width = if (swatch == activeColor) 2.dp else 1.dp,
-                                color = if (swatch == activeColor) currentColors.textPrimary else Color.Transparent,
+                                width = if (isSelected) 2.5.dp else 1.dp,
+                                color = if (isSelected) currentColors.textPrimary else Color.White.copy(alpha = 0.2f),
                                 shape = CircleShape
                             )
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                when (activeTarget) {
-                                    PaletteTarget.PRIMARY -> primaryColor = swatch
-                                    PaletteTarget.SECONDARY -> secondaryColor = swatch
-                                    PaletteTarget.BACKGROUND -> backgroundColor = swatch
-                                }
-                                val arr = FloatArray(3)
-                                AndroidColor.colorToHSV(swatch.toArgb(), arr)
-                                hue = arr[0]
-                                saturation = arr[1]
-                                brightness = arr[2]
-                            }
-                    )
+                                onSelectSwatch(swatch)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (swatch.red > 0.6f && swatch.green > 0.6f) Color.Black else Color.White)
+                            )
+                        }
+                    }
                 }
             }
 
-            // 6. Live Swatch Mini Preview Card
+            // 6. Live Swatch Mini Preview Matrix
             Text(
-                text = "PREVIEW SWATCH MATRIX",
+                text = "LIVE THEME PREVIEW",
                 style = VeylTypography.MonoBadge,
                 color = currentColors.textSecondary,
                 fontSize = 10.sp
@@ -535,44 +650,45 @@ private fun ColorWheelCanvas(
     saturation: Float,
     onColorChange: (hue: Float, saturation: Float) -> Unit
 ) {
-    var canvasSize by remember { mutableStateOf(Offset.Zero) }
-
     Canvas(
         modifier = Modifier
-            .fillMaxSize()
+            .size(220.dp)
             .pointerInput(Unit) {
-                detectTapGestures { offset ->
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
                     val centerX = size.width / 2f
                     val centerY = size.height / 2f
-                    val radius = minOf(centerX, centerY) * 0.90f
-                    val dx = offset.x - centerX
-                    val dy = offset.y - centerY
-                    val dist = hypot(dx, dy)
-                    val newSat = (dist / radius).coerceIn(0f, 1f)
-                    var angle = (atan2(dy, dx) * 180f / PI).toFloat()
-                    if (angle < 0) angle += 360f
-                    onColorChange(angle, newSat)
-                }
-            }
-            .pointerInput(Unit) {
-                detectDragGestures { change, _ ->
-                    val centerX = canvasSize.x / 2f
-                    val centerY = canvasSize.y / 2f
-                    val radius = minOf(centerX, centerY) * 0.90f
-                    val dx = change.position.x - centerX
-                    val dy = change.position.y - centerY
-                    val dist = hypot(dx, dy)
-                    val newSat = (dist / radius).coerceIn(0f, 1f)
-                    var angle = (atan2(dy, dx) * 180f / PI).toFloat()
-                    if (angle < 0) angle += 360f
-                    onColorChange(angle, newSat)
+                    val radius = minOf(centerX, centerY) * 0.88f
+
+                    fun processPosition(pos: Offset) {
+                        val dx = pos.x - centerX
+                        val dy = pos.y - centerY
+                        val dist = hypot(dx, dy)
+                        val newSat = (dist / radius).coerceIn(0f, 1f)
+                        var angle = (atan2(dy, dx) * 180f / PI).toFloat()
+                        if (angle < 0) angle += 360f
+                        onColorChange(angle, newSat)
+                    }
+
+                    processPosition(down.position)
+                    down.consume()
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (change.pressed) {
+                            processPosition(change.position)
+                            change.consume()
+                        } else {
+                            break
+                        }
+                    }
                 }
             }
     ) {
-        canvasSize = Offset(size.width, size.height)
         val centerX = size.width / 2f
         val centerY = size.height / 2f
-        val radius = minOf(centerX, centerY) * 0.90f
+        val radius = minOf(centerX, centerY) * 0.88f
 
         // 1. Sweep Gradient for 360-degree Hue
         val sweepBrush = Brush.sweepGradient(
@@ -609,29 +725,29 @@ private fun ColorWheelCanvas(
 
         // 3. Subtle Outer Ring Border
         drawCircle(
-            color = Color.White.copy(alpha = 0.3f),
+            color = Color.White.copy(alpha = 0.35f),
             radius = radius,
             center = Offset(centerX, centerY),
-            style = Stroke(width = 1.5.dp.toPx())
+            style = Stroke(width = 2.dp.toPx())
         )
 
         // 4. Selector Thumb Indicator
         val rad = (hue * PI / 180f).toFloat()
-        val thumbDist = saturation * radius
+        val thumbDist = saturation.coerceIn(0f, 1f) * radius
         val thumbX = centerX + thumbDist * cos(rad)
         val thumbY = centerY + thumbDist * sin(rad)
 
         // Thumb Outer Glow / Shadow Ring
         drawCircle(
-            color = Color.Black.copy(alpha = 0.5f),
-            radius = 12.dp.toPx(),
+            color = Color.Black.copy(alpha = 0.55f),
+            radius = 13.dp.toPx(),
             center = Offset(thumbX, thumbY)
         )
 
         // Thumb White Outer Ring
         drawCircle(
             color = Color.White,
-            radius = 10.dp.toPx(),
+            radius = 11.dp.toPx(),
             center = Offset(thumbX, thumbY),
             style = Stroke(width = 2.5.dp.toPx())
         )
@@ -640,7 +756,7 @@ private fun ColorWheelCanvas(
         val selectedRgb = AndroidColor.HSVToColor(floatArrayOf(hue, saturation, 1f))
         drawCircle(
             color = Color(selectedRgb),
-            radius = 7.dp.toPx(),
+            radius = 8.dp.toPx(),
             center = Offset(thumbX, thumbY)
         )
     }

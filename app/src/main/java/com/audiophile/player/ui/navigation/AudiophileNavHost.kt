@@ -76,7 +76,8 @@ fun AudiophileNavHost(
     modifier: Modifier = Modifier
 ) {
     val isDarkMode by controller.isDarkMode.collectAsState()
-    VeylTheme(isDarkMode = isDarkMode) {
+    val colorScheme by controller.currentVeylColorScheme.collectAsState()
+    VeylTheme(isDarkMode = isDarkMode, colorScheme = colorScheme) {
         val colors = LocalVeylColors.current
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()

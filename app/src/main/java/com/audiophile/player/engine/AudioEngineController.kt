@@ -193,7 +193,15 @@ class AudioEngineController private constructor(private val context: Context) {
     fun applyThemePreset(presetId: String) {
         val preset = CuratedPresets.find { it.id == presetId } ?: return
         _selectedThemeId.value = presetId
-        prefs.edit().putString("theme_id", presetId).apply()
+        _customPrimary.value = preset.primary
+        _customSecondary.value = preset.secondary
+        _customBackground.value = preset.background
+        prefs.edit()
+            .putString("theme_id", presetId)
+            .putString("custom_primary_hex", preset.primary.toHex())
+            .putString("custom_secondary_hex", preset.secondary.toHex())
+            .putString("custom_bg_hex", preset.background.toHex())
+            .apply()
         _currentVeylColorScheme.value = buildVeylColorScheme(
             primary = preset.primary,
             secondary = preset.secondary,
