@@ -76,7 +76,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val isDarkMode by controller.isDarkMode.collectAsState()
-            VeylTheme(isDarkMode = isDarkMode) {
+            val colorScheme by controller.currentVeylColorScheme.collectAsState()
+            VeylTheme(isDarkMode = isDarkMode, colorScheme = colorScheme) {
                 AudiophileNavHost(
                     controller = controller,
                     onSelectRootFolder = {

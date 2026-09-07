@@ -28,6 +28,14 @@ import uniffi.audiophile_core.TrackInfo
 import java.io.File
 import java.util.Collections
 import java.util.Random
+import androidx.compose.ui.graphics.Color
+import com.audiophile.player.ui.theme.CuratedPresets
+import com.audiophile.player.ui.theme.ThemePreset
+import com.audiophile.player.ui.theme.VeylColorScheme
+import com.audiophile.player.ui.theme.VeylDarkColorScheme
+import com.audiophile.player.ui.theme.buildVeylColorScheme
+import com.audiophile.player.ui.theme.parseColorFromHex
+import com.audiophile.player.ui.theme.toHex
 
 enum class RepeatMode {
     OFF,
@@ -142,6 +150,82 @@ class AudioEngineController private constructor(private val context: Context) {
     // Dark / Light Theme Mode
     private val _isDarkMode = MutableStateFlow(prefs.getBoolean("is_dark_mode", true))
     val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
+
+    // -------------------------------------------------------------------------
+    // Dynamic Color Palette & Theme Engine
+    // -------------------------------------------------------------------------
+    private val _selectedThemeId = MutableStateFlow(
+        prefs.getString("theme_id", "resonate_obsidian") ?: "resonate_obsidian"
+    )
+    val selectedThemeId: StateFlow<String> = _selectedThemeId.asStateFlow()
+
+    private val _customPrimary = MutableStateFlow(
+        parseColorFromHex(prefs.getString("custom_primary_hex", "#FFB7B4") ?: "#FFB7B4", Color(0xFFFFB7B4))
+    )
+    val customPrimary: StateFlow<Color> = _customPrimary.asStateFlow()
+
+    private val _customSecondary = MutableStateFlow(
+        parseColorFromHex(prefs.getString("custom_secondary_hex", "#B2CAD3") ?: "#B2CAD3", Color(0xFFB2CAD3))
+    )
+    val customSecondary: StateFlow<Color> = _customSecondary.asStateFlow()
+
+    private val _customBackground = MutableStateFlow(
+        parseColorFromHex(prefs.getString("custom_bg_hex", "#1B0906") ?: "#1B0906", Color(0xFF1B0906))
+    )
+    val customBackground: StateFlow<Color> = _customBackground.asStateFlow()
+
+    private fun loadInitialColorScheme(): VeylColorScheme {
+        val themeId = prefs.getString("theme_id", "resonate_obsidian") ?: "resonate_obsidian"
+        val isDark = prefs.getBoolean("is_dark_mode", true)
+        if (themeId == "custom") {
+            val p = parseColorFromHex(prefs.getString("custom_primary_hex", "#FFB7B4") ?: "#FFB7B4", Color(0xFFFFB7B4))
+            val s = parseColorFromHex(prefs.getString("custom_secondary_hex", "#B2CAD3") ?: "#B2CAD3", Color(0xFFB2CAD3))
+            val bg = parseColorFromHex(prefs.getString("custom_bg_hex", "#1B0906") ?: "#1B0906", Color(0xFF1B0906))
+            return buildVeylColorScheme(p, s, Color(0xFF92EAFF), bg, isDark = isDark)
+        }
+        val preset = CuratedPresets.find { it.id == themeId } ?: CuratedPresets.first()
+        return buildVeylColorScheme(preset.primary, preset.secondary, preset.tertiary, preset.background, isDark = isDark)
+    }
+
+    private val _currentVeylColorScheme = MutableStateFlow(loadInitialColorScheme())
+    val currentVeylColorScheme: StateFlow<VeylColorScheme> = _currentVeylColorScheme.asStateFlow()
+
+    fun applyThemePreset(presetId: String) {
+        val preset = CuratedPresets.find { it.id == presetId } ?: return
+        _selectedThemeId.value = presetId
+        prefs.edit().putString("theme_id", presetId).apply()
+        _currentVeylColorScheme.value = buildVeylColorScheme(
+            primary = preset.primary,
+            secondary = preset.secondary,
+            tertiary = preset.tertiary,
+            background = preset.background,
+            isDark = _isDarkMode.value
+        )
+    }
+
+    fun applyCustomPalette(primary: Color, secondary: Color, background: Color) {
+        _selectedThemeId.value = "custom"
+        _customPrimary.value = primary
+        _customSecondary.value = secondary
+        _customBackground.value = background
+        prefs.edit()
+            .putString("theme_id", "custom")
+            .putString("custom_primary_hex", primary.toHex())
+            .putString("custom_secondary_hex", secondary.toHex())
+            .putString("custom_bg_hex", background.toHex())
+            .apply()
+        _currentVeylColorScheme.value = buildVeylColorScheme(
+            primary = primary,
+            secondary = secondary,
+            tertiary = Color(0xFF92EAFF),
+            background = background,
+            isDark = _isDarkMode.value
+        )
+    }
+
+    fun resetThemeToDefault() {
+        applyThemePreset("resonate_obsidian")
+    }
 
     private val _selectedRootPath = MutableStateFlow<String?>(null)
     val selectedRootPath: StateFlow<String?> = _selectedRootPath.asStateFlow()
@@ -358,6 +442,7 @@ class AudioEngineController private constructor(private val context: Context) {
         val newDark = !_isDarkMode.value
         _isDarkMode.value = newDark
         prefs.edit().putBoolean("is_dark_mode", newDark).apply()
+        _currentVeylColorScheme.value = loadInitialColorScheme()
     }
 
     fun setRepeatMode(mode: RepeatMode) {

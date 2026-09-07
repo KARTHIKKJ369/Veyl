@@ -50,7 +50,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import com.audiophile.player.engine.AudioEngineController
+import com.audiophile.player.ui.components.VeylColorWheelPickerSheet
+import com.audiophile.player.ui.theme.CuratedPresets
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylSpacing
@@ -89,10 +92,13 @@ fun VeylSettingsScreen(
     val gaplessEnabled by controller.gaplessEnabled.collectAsState()
     val crossfadeSeconds by controller.crossfadeSeconds.collectAsState()
     val autoFetchLyrics by controller.autoFetchLyrics.collectAsState()
+    val selectedThemeId by controller.selectedThemeId.collectAsState()
+    val isDarkMode by controller.isDarkMode.collectAsState()
 
     var mmapExclusiveEnabled by remember { mutableStateOf(true) }
     var dsdGainCompensation by remember { mutableStateOf(true) }
     var cachedLyricsCount by remember { mutableIntStateOf(com.audiophile.player.engine.LyricsManager.getCachedLyricsCount()) }
+    var showColorWheelSheet by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -157,7 +163,216 @@ fun VeylSettingsScreen(
                 }
             }
 
-            // 2. Attached USB DAC Telemetry Card (Vanity & Trust Signal)
+            // 2. Appearance & Studio Themes Section
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
+                        .background(colors.surfacePanel)
+                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
+                        .padding(VeylSpacing.md)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(VeylSpacing.sm)) {
+                        // Section Header with Dark Mode switch
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "STUDIO AESTHETICS",
+                                    style = VeylTypography.MonoBadge,
+                                    color = colors.accentSignal
+                                )
+                                Text(
+                                    text = "Appearance & Themes",
+                                    style = VeylTypography.TitleMedium,
+                                    color = colors.textPrimary
+                                )
+                            }
+
+                            // Dark / Light toggle
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = if (isDarkMode) "Dark" else "Light",
+                                    style = VeylTypography.MonoSpec,
+                                    color = colors.textSecondary,
+                                    fontSize = 11.sp
+                                )
+                                Switch(
+                                    checked = isDarkMode,
+                                    onCheckedChange = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        controller.toggleTheme()
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = colors.background,
+                                        checkedTrackColor = colors.accentSignal,
+                                        uncheckedThumbColor = colors.textMuted,
+                                        uncheckedTrackColor = colors.surfaceElevated
+                                    )
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Curated Audiophile Presets",
+                            style = VeylTypography.BodySmall,
+                            color = colors.textSecondary,
+                            fontSize = 11.sp
+                        )
+
+                        // Horizontal Theme Presets Carousel
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CuratedPresets.forEach { preset ->
+                                val isSelected = selectedThemeId == preset.id
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                                        .background(if (isSelected) colors.surfaceElevated else colors.surfacePill.copy(alpha = 0.5f))
+                                        .border(
+                                            width = if (isSelected) 1.5.dp else 1.dp,
+                                            color = if (isSelected) colors.accentSignal else colors.borderHairline,
+                                            shape = RoundedCornerShape(VeylSpacing.RadiusSm)
+                                        )
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            controller.applyThemePreset(preset.id)
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                                ) {
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalAlignment = Alignment.Start
+                                    ) {
+                                        // 3 color dots
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(14.dp)
+                                                    .clip(CircleShape)
+                                                    .background(preset.primary)
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(10.dp)
+                                                    .clip(CircleShape)
+                                                    .background(preset.secondary)
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .clip(CircleShape)
+                                                    .background(preset.background)
+                                                    .border(0.5.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                                            )
+                                            if (isSelected) {
+                                                Spacer(modifier = Modifier.width(2.dp))
+                                                Icon(
+                                                    imageVector = VeylIcons.Check,
+                                                    contentDescription = null,
+                                                    tint = colors.accentSignal,
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Text(
+                                            text = preset.name,
+                                            style = VeylTypography.TitleMedium,
+                                            color = if (isSelected) colors.accentSignal else colors.textPrimary,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Active Theme Details & Custom Palette Trigger
+                        val activePreset = CuratedPresets.find { it.id == selectedThemeId }
+                        val themeDescription = if (selectedThemeId == "custom") {
+                            "Custom hand-crafted palette active via Color Wheel"
+                        } else {
+                            activePreset?.description ?: "Default studio profile"
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                                .background(colors.surfaceElevated)
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (selectedThemeId == "custom") "Custom Palette" else (activePreset?.name ?: "Custom"),
+                                    style = VeylTypography.TitleMedium,
+                                    color = colors.textPrimary,
+                                    fontSize = 12.sp
+                                )
+                                Text(
+                                    text = themeDescription,
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Trigger Button for Color Wheel Sheet
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                                    .background(colors.accentSignal)
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showColorWheelSheet = true
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = VeylIcons.Palette,
+                                        contentDescription = null,
+                                        tint = if (colors.accentSignal.red > 0.6f && colors.accentSignal.green > 0.6f) Color.Black else Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Color Wheel",
+                                        style = VeylTypography.TitleMedium,
+                                        color = if (colors.accentSignal.red > 0.6f && colors.accentSignal.green > 0.6f) Color.Black else Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Attached USB DAC Telemetry Card (Vanity & Trust Signal)
             item {
                 Box(
                     modifier = Modifier
@@ -807,5 +1022,13 @@ fun VeylSettingsScreen(
                 Spacer(modifier = Modifier.height(96.dp))
             }
         }
+
+        if (showColorWheelSheet) {
+            VeylColorWheelPickerSheet(
+                controller = controller,
+                onDismiss = { showColorWheelSheet = false }
+            )
+        }
     }
 }
+
