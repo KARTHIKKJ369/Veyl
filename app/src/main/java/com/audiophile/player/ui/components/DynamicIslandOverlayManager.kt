@@ -5,14 +5,12 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -36,10 +34,8 @@ import kotlinx.coroutines.launch
 /**
  * System-Level Camera Cutout Dynamic Island Overlay Manager.
  *
- * Automatically attaches an interactive floating pill to the WindowManager directly
- * at the device camera cutout when the app is minimized / in background.
- *
- * Utilizes TYPE_APPLICATION_OVERLAY + LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS.
+ * Optional floating pill for devices that lack native HyperOS Super Island.
+ * Controlled by `screenOverlayIslandEnabled` in AudioEngineController (default false).
  */
 object DynamicIslandOverlayManager {
 
@@ -69,13 +65,13 @@ object DynamicIslandOverlayManager {
 
         monitorJob = CoroutineScope(Dispatchers.Main).launch {
             combine(
-                controller.dynamicIslandEnabled,
+                controller.screenOverlayIslandEnabled,
                 controller.currentTrack,
                 controller.playbackState
-            ) { enabled, track, _ ->
-                Triple(enabled, track != null, Settings.canDrawOverlays(context))
-            }.collect { (enabled, hasTrack, canDraw) ->
-                evaluateOverlay(enabled, hasTrack, canDraw)
+            ) { overlayEnabled, track, _ ->
+                Triple(overlayEnabled, track != null, Settings.canDrawOverlays(context))
+            }.collect { (overlayEnabled, hasTrack, canDraw) ->
+                evaluateOverlay(overlayEnabled, hasTrack, canDraw)
             }
         }
     }
@@ -85,14 +81,14 @@ object DynamicIslandOverlayManager {
         val controller = engineController ?: return
         val context = applicationContext ?: return
         val canDraw = Settings.canDrawOverlays(context)
-        val enabled = controller.dynamicIslandEnabled.value
+        val overlayEnabled = controller.screenOverlayIslandEnabled.value
         val hasTrack = controller.currentTrack.value != null
 
-        evaluateOverlay(enabled, hasTrack, canDraw)
+        evaluateOverlay(overlayEnabled, hasTrack, canDraw)
     }
 
     private fun evaluateOverlay(enabled: Boolean, hasTrack: Boolean, canDrawOverlays: Boolean) {
-        // Show overlay only when app is minimized, music is active, feature is enabled, and permission is granted
+        // Show overlay only when app is minimized, music is active, manual overlay is enabled, and permission granted
         val shouldShow = !isAppForeground && enabled && hasTrack && canDrawOverlays
 
         if (shouldShow && !isOverlayShowing) {
@@ -106,6 +102,7 @@ object DynamicIslandOverlayManager {
         val context = applicationContext ?: return
         val wm = windowManager ?: return
         val controller = engineController ?: return
+        val density = context.resources.displayMetrics.density
 
         try {
             val owner = OverlayLifecycleOwner()
@@ -124,31 +121,35 @@ object DynamicIslandOverlayManager {
                         VeylDynamicIsland(
                             controller = controller,
                             onOpenNowPlaying = {
-                                // Bring Veyl to foreground and open Now Playing
                                 val intent = Intent(context, MainActivity::class.java).apply {
                                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                                     putExtra("NAVIGATE_TO_NOW_PLAYING", true)
                                 }
                                 context.startActivity(intent)
                             },
-                            modifier = Modifier.padding(top = 4.dp)
+                            onExpandChanged = { expanded ->
+                                updateWindowSize(expanded)
+                            }
                         )
                     }
                 }
             }
 
+            val initialWidth = (136 * density).toInt()
+            val initialHeight = (44 * density).toInt()
+
             val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
+                initialWidth,
+                initialHeight,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 x = 0
-                y = 0
+                y = (4 * density).toInt()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                 }
@@ -158,60 +159,79 @@ object DynamicIslandOverlayManager {
             overlayView = view
             isOverlayShowing = true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("DynamicIslandOverlay", "Error displaying overlay window", e)
             isOverlayShowing = false
         }
     }
 
-    private fun hide() {
+    private fun updateWindowSize(expanded: Boolean) {
+        val wm = windowManager ?: return
+        val view = overlayView ?: return
+        val context = applicationContext ?: return
+        val density = context.resources.displayMetrics.density
+
+        val params = (view.layoutParams as? WindowManager.LayoutParams) ?: return
+        if (expanded) {
+            params.width = (356 * density).toInt()
+            params.height = (156 * density).toInt()
+        } else {
+            params.width = (136 * density).toInt()
+            params.height = (44 * density).toInt()
+        }
+        try {
+            wm.updateViewLayout(view, params)
+        } catch (e: Exception) {
+            Log.w("DynamicIslandOverlay", "Error resizing overlay window", e)
+        }
+    }
+
+    fun hide() {
         val wm = windowManager
         val view = overlayView
         val owner = lifecycleOwner
 
-        try {
-            if (view != null && wm != null) {
+        if (wm != null && view != null && isOverlayShowing) {
+            try {
+                owner?.onDestroy()
                 wm.removeView(view)
+            } catch (e: Exception) {
+                Log.w("DynamicIslandOverlay", "Error removing overlay view", e)
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        } finally {
-            owner?.destroy()
-            overlayView = null
-            lifecycleOwner = null
-            isOverlayShowing = false
         }
+        overlayView = null
+        lifecycleOwner = null
+        isOverlayShowing = false
     }
-}
-
-/**
- * Dedicated LifecycleOwner, SavedStateRegistryOwner, and ViewModelStoreOwner
- * for running Jetpack Compose smoothly within WindowManager overlays.
- */
-class OverlayLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
-    private val lifecycleRegistry = LifecycleRegistry(this)
-    private val savedStateRegistryController = SavedStateRegistryController.create(this)
-    private val _viewModelStore = ViewModelStore()
-
-    init {
-        savedStateRegistryController.performAttach()
-        savedStateRegistryController.performRestore(null)
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
-    }
-
-    override val lifecycle: Lifecycle get() = lifecycleRegistry
-    override val savedStateRegistry: SavedStateRegistry get() = savedStateRegistryController.savedStateRegistry
-    override val viewModelStore: ViewModelStore get() = _viewModelStore
 
     fun destroy() {
-        try {
+        monitorJob?.cancel()
+        hide()
+        applicationContext = null
+        engineController = null
+        windowManager = null
+    }
+
+    private class OverlayLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
+        private val lifecycleRegistry = LifecycleRegistry(this)
+        private val savedStateRegistryController = SavedStateRegistryController.create(this)
+        private val store = ViewModelStore()
+
+        init {
+            savedStateRegistryController.performRestore(null)
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        }
+
+        fun onDestroy() {
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
-            _viewModelStore.clear()
-        } catch (e: Exception) {
-            e.printStackTrace()
+            store.clear()
         }
+
+        override val lifecycle: Lifecycle get() = lifecycleRegistry
+        override val savedStateRegistry: SavedStateRegistry get() = savedStateRegistryController.savedStateRegistry
+        override val viewModelStore: ViewModelStore get() = store
     }
 }

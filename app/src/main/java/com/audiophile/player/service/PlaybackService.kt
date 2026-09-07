@@ -225,16 +225,22 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            try {
+                notificationManager?.deleteNotificationChannel("veyl_playback_channel")
+            } catch (_: Exception) {}
+
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Veyl Audio Playback",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Active music playback controls and media notifications"
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
-            val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager?.createNotificationChannel(channel)
         }
     }
@@ -385,11 +391,19 @@ class PlaybackService : MediaBrowserServiceCompat() {
             "${it.artist} • ${it.formatName} ${it.sampleRate / 1000u}kHz"
         } ?: "Bit-Perfect Audio Engine"
 
+        val trackTitle = (track?.title ?: "Veyl").replace("\"", "\\\"")
+        val artistName = (track?.artist ?: "Lossless Audio").replace("\"", "\\\"")
+        val hyperIslandJson = """{"param_v2":{"business":"media","updatable":true,"orderId":"veyl_playback","param_island":{"islandProperty":1,"bigIslandArea":{"imageTextInfoLeft":{"type":1,"text":"$trackTitle","subText":"$artistName"}}}}}"""
+
         val oemExtras = Bundle().apply {
             putString("android.media.session.tag", "VeylMediaSession")
+            putBoolean("miui.focus.notification", true)
+            putBoolean("miui.notification.custom", true)
+            putBoolean("miui.notification.focus", true)
+            putString("miui.focus.param", hyperIslandJson)
             putBoolean("oppo.notification.live", true)
             putBoolean("coloros.notification.capsule", true)
-            putBoolean("miui.notification.custom", true)
+            putString("vivo.notification.capsule", "true")
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -443,6 +457,28 @@ class PlaybackService : MediaBrowserServiceCompat() {
         result.sendResult(mutableListOf())
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.i("PlaybackService", "App swiped away from recent tasks, stopping playback and background service.")
+        try {
+            engineController.pause()
+            com.audiophile.player.ui.components.DynamicIslandOverlayManager.hide()
+            abandonAudioFocus()
+            unregisterNoisyReceiver()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.cancel(NOTIFICATION_ID)
+            stopSelf()
+        } catch (e: Exception) {
+            Log.e("PlaybackService", "Error in onTaskRemoved", e)
+        }
+    }
+
     override fun onDestroy() {
         unregisterNoisyReceiver()
         abandonAudioFocus()
@@ -456,7 +492,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     companion object {
-        const val CHANNEL_ID = "veyl_playback_channel"
+        const val CHANNEL_ID = "veyl_playback_channel_v2"
         const val NOTIFICATION_ID = 1001
     }
 }

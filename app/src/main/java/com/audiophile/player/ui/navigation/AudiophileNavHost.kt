@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
-import com.audiophile.player.ui.components.VeylDynamicIsland
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -363,18 +362,6 @@ fun AudiophileNavHost(
                         }
                     )
                 }
-            }
-
-            // Dynamic Island Capsule under camera cutout
-            if (currentTrack != null && dynamicIslandEnabled && !isNowPlayingOpen) {
-                VeylDynamicIsland(
-                    controller = controller,
-                    onOpenNowPlaying = { isNowPlayingOpen = true },
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .statusBarsPadding()
-                        .padding(top = 6.dp)
-                )
             }
         }
 

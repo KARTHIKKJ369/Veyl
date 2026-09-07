@@ -104,6 +104,7 @@ fun VeylSettingsScreen(
     val isDarkMode by controller.isDarkMode.collectAsState()
     val savedCustomThemes by controller.savedCustomThemes.collectAsState()
     val dynamicIslandEnabled by controller.dynamicIslandEnabled.collectAsState()
+    val screenOverlayIslandEnabled by controller.screenOverlayIslandEnabled.collectAsState()
 
     var mmapExclusiveEnabled by remember { mutableStateOf(true) }
     var dsdGainCompensation by remember { mutableStateOf(true) }
@@ -480,13 +481,13 @@ fun VeylSettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                                 Text(
-                                    text = "Dynamic Island Capsule",
+                                    text = "System Dynamic Island (HyperOS / OEM)",
                                     style = VeylTypography.TitleMedium,
                                     color = colors.textPrimary,
                                     fontSize = 12.sp
                                 )
                                 Text(
-                                    text = "Camera cutout floating playback pill with OEM Fluid Cloud & HyperOS live status",
+                                    text = "Natively triggers HyperOS Super Island & OEM dynamic notch from media playback (No overlay permission needed)",
                                     style = VeylTypography.BodySmall,
                                     color = colors.textSecondary,
                                     fontSize = 10.sp,
@@ -510,7 +511,49 @@ fun VeylSettingsScreen(
                             )
                         }
 
-                        if (dynamicIslandEnabled) {
+                        // Optional Manual Window Overlay Toggle (For non-HyperOS devices)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                                .background(colors.surfaceElevated)
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = "Floating Cutout Overlay (Alternative)",
+                                    style = VeylTypography.TitleMedium,
+                                    color = colors.textPrimary,
+                                    fontSize = 12.sp
+                                )
+                                Text(
+                                    text = "Manual WindowManager floating pill for non-HyperOS phones (Android shows 'displaying over other apps')",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    fontSize = 10.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Switch(
+                                checked = screenOverlayIslandEnabled,
+                                onCheckedChange = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    controller.setScreenOverlayIslandEnabled(it)
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = colors.background,
+                                    checkedTrackColor = colors.accentSignal,
+                                    uncheckedThumbColor = colors.textSecondary,
+                                    uncheckedTrackColor = colors.surfacePill
+                                )
+                            )
+                        }
+
+                        if (screenOverlayIslandEnabled) {
                             val context = LocalContext.current
                             var hasOverlayPermission by remember {
                                 mutableStateOf(android.provider.Settings.canDrawOverlays(context))
@@ -554,13 +597,13 @@ fun VeylSettingsScreen(
                                 ) {
                                     Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                         Text(
-                                            text = "Camera Cutout Floating Overlay",
+                                            text = "Camera Cutout Window Permission",
                                             style = VeylTypography.TitleMedium,
                                             color = colors.accentPeak,
                                             fontSize = 11.sp
                                         )
                                         Text(
-                                            text = "Grant 'Display over other apps' to float pill at camera cutout when app is minimized",
+                                            text = "Grant 'Display over other apps' to float pill over camera cutout when minimized",
                                             style = VeylTypography.BodySmall,
                                             color = colors.textSecondary,
                                             fontSize = 9.sp
@@ -598,7 +641,7 @@ fun VeylSettingsScreen(
                                             .background(colors.accentSignal)
                                     )
                                     Text(
-                                        text = "Cutout Overlay Active on App Minimize",
+                                        text = "Cutout Overlay Window Active on App Minimize",
                                         style = VeylTypography.MonoBadge,
                                         color = colors.accentSignal,
                                         fontSize = 9.sp

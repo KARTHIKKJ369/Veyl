@@ -1,6 +1,5 @@
 package com.audiophile.player.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -11,8 +10,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,8 +29,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -61,19 +56,17 @@ import com.audiophile.player.ui.theme.VeylTypography
 import uniffi.audiophile_core.PlaybackStateEnum
 
 /**
- * Handcrafted Audiophile Dynamic Island Capsule.
+ * Audiophile Dynamic Island Capsule (Matching HyperOS / iOS native island reference).
  *
- * Sits directly under the camera cutout.
- * Collapsed: Minimal pill with rotating vinyl album art, live bit-perfect format indicator,
- * and pulsating visualizer bars adhering to active theme accentSignal.
- * Expanded: Interactive audiophile card with high-res artwork, bit-perfect telemetry,
- * scrub timeline, and transport controls.
+ * Collapsed: Pure black pill centered at camera cutout. Left: Album art. Right: 3 orange wave bars.
+ * Expanded: Native card with scrubber, timestamps, track info, and playback controls.
  */
 @Composable
 fun VeylDynamicIsland(
     controller: AudioEngineController,
     onOpenNowPlaying: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onExpandChanged: (Boolean) -> Unit = {}
 ) {
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
@@ -88,9 +81,8 @@ fun VeylDynamicIsland(
 
     var isExpanded by remember { mutableStateOf(false) }
 
-    // Spring animations for morphing capsule pill <-> expanded card
     val islandWidth by animateDpAsState(
-        targetValue = if (isExpanded) 348.dp else 200.dp,
+        targetValue = if (isExpanded) 344.dp else 124.dp,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMediumLow
@@ -98,7 +90,7 @@ fun VeylDynamicIsland(
         label = "islandWidth"
     )
     val islandHeight by animateDpAsState(
-        targetValue = if (isExpanded) 136.dp else 36.dp,
+        targetValue = if (isExpanded) 144.dp else 34.dp,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMediumLow
@@ -106,7 +98,7 @@ fun VeylDynamicIsland(
         label = "islandHeight"
     )
     val islandCornerRadius by animateDpAsState(
-        targetValue = if (isExpanded) 26.dp else 18.dp,
+        targetValue = if (isExpanded) 26.dp else 17.dp,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMedium
@@ -114,7 +106,6 @@ fun VeylDynamicIsland(
         label = "islandCornerRadius"
     )
 
-    // Smooth continuous vinyl rotation when playing
     val infiniteTransition = rememberInfiniteTransition(label = "vinylSpin")
     val vinylRotation by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -126,10 +117,9 @@ fun VeylDynamicIsland(
         label = "rotation"
     )
 
-    // Dancing visualizer bar heights
     val bar1Height by infiniteTransition.animateFloat(
         initialValue = 4f,
-        targetValue = 14f,
+        targetValue = 13f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 450, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -137,7 +127,7 @@ fun VeylDynamicIsland(
         label = "bar1"
     )
     val bar2Height by infiniteTransition.animateFloat(
-        initialValue = 13f,
+        initialValue = 12f,
         targetValue = 5f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 360, easing = FastOutSlowInEasing),
@@ -147,7 +137,7 @@ fun VeylDynamicIsland(
     )
     val bar3Height by infiniteTransition.animateFloat(
         initialValue = 6f,
-        targetValue = 15f,
+        targetValue = 14f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 520, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -159,7 +149,6 @@ fun VeylDynamicIsland(
         modifier = modifier,
         contentAlignment = Alignment.TopCenter
     ) {
-        // Dynamic Island Capsule
         Box(
             modifier = Modifier
                 .width(islandWidth)
@@ -167,53 +156,45 @@ fun VeylDynamicIsland(
                 .clip(RoundedCornerShape(islandCornerRadius))
                 .background(Color(0xFF000000))
                 .border(
-                    width = 1.dp,
-                    color = if (isExpanded) colors.accentSignal.copy(alpha = 0.45f) else colors.borderHairline.copy(alpha = 0.6f),
+                    width = 0.5.dp,
+                    color = Color(0x33FFFFFF),
                     shape = RoundedCornerShape(islandCornerRadius)
                 )
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            if (isExpanded) {
-                                onOpenNowPlaying()
-                            } else {
-                                isExpanded = true
-                            }
+                            val nextState = !isExpanded
+                            isExpanded = nextState
+                            onExpandChanged(nextState)
                         },
                         onLongPress = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            if (!isExpanded) {
-                                isExpanded = true
-                            } else {
-                                isExpanded = false
-                            }
+                            onOpenNowPlaying()
                         }
                     )
                 }
         ) {
             if (isExpanded) {
-                // Expanded Island Layout
+                // Expanded Island Layout (Matches Screenshot 4 reference)
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Top Row: Artwork + Track Info + Collapse Button
+                    // Top Row: Artwork + Track Info + Lossless Pill
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Artwork Thumbnail
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(colors.surfaceElevated)
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF222222))
                                 .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onOpenNowPlaying()
                                 }
                         ) {
@@ -223,15 +204,16 @@ fun VeylDynamicIsland(
                             )
                         }
 
-                        // Title, Artist, and Format Pill
                         Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onOpenNowPlaying() },
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Text(
                                 text = track?.title ?: "No track loaded",
-                                style = VeylTypography.BodyMedium,
-                                color = colors.textPrimary,
+                                style = VeylTypography.TitleMedium,
+                                color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -239,114 +221,102 @@ fun VeylDynamicIsland(
                             Text(
                                 text = track?.artist ?: "Unknown Artist",
                                 style = VeylTypography.BodySmall,
-                                color = colors.textMuted,
-                                fontSize = 11.sp,
+                                color = Color(0xFFAAAAAA),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Text(
-                                text = "Bit-Perfect Direct • ${track?.formatName ?: "FLAC"} ${track?.bitDepth ?: 24}b",
-                                style = VeylTypography.MonoSpec,
-                                color = colors.accentSignal,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
                         }
 
-                        // Collapse icon button
-                        IconButton(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                isExpanded = false
-                            },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.ChevronUp,
-                                contentDescription = "Collapse Island",
-                                tint = colors.textMuted,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
+                        Text(
+                            text = track?.formatName ?: "FLAC",
+                            style = VeylTypography.MonoBadge,
+                            color = Color(0xFFFF9500),
+                            fontSize = 9.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0x22FF9500))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
                     }
 
-                    // Middle: Sleek Progress Bar Line
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(colors.surfaceElevated)
+                    // Middle: Scrubber bar with timestamps (00:27 / 03:58)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth(progressFraction.coerceIn(0f, 1f))
-                                .fillMaxHeight()
-                                .background(colors.accentSignal)
-                        )
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0x44FFFFFF))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(progressFraction.coerceIn(0f, 1f))
+                                    .fillMaxHeight()
+                                    .background(Color.White)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = formatIslandDuration(positionSec),
+                                style = VeylTypography.MonoSpec,
+                                color = Color(0xFF888888),
+                                fontSize = 9.sp
+                            )
+                            Text(
+                                text = formatIslandDuration(dur),
+                                style = VeylTypography.MonoSpec,
+                                color = Color(0xFF888888),
+                                fontSize = 9.sp
+                            )
+                        }
                     }
 
-                    // Bottom Row: Transport Controls
+                    // Bottom Row: Transport Controls (⏮ ⏸/▶ ⏭)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "TAP TO OPEN",
-                            style = VeylTypography.MonoSpec,
-                            color = colors.textMuted,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable {
-                                onOpenNowPlaying()
-                            }
-                        )
-
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            horizontalArrangement = Arrangement.spacedBy(40.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Previous
                             Icon(
                                 imageVector = VeylIcons.SkipPrevious,
                                 contentDescription = "Previous",
-                                tint = colors.textPrimary,
+                                tint = Color.White,
                                 modifier = Modifier
-                                    .size(20.dp)
+                                    .size(24.dp)
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         controller.skipPrevious()
                                     }
                             )
 
-                            // Play / Pause
-                            Box(
+                            Icon(
+                                imageVector = if (isPlaying) VeylIcons.Pause else VeylIcons.Play,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                tint = Color.White,
                                 modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.accentSignal)
+                                    .size(28.dp)
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         controller.togglePlayPause()
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isPlaying) VeylIcons.Pause else VeylIcons.Play,
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
-                                    tint = colors.surfacePanel,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
+                                    }
+                            )
 
-                            // Next
                             Icon(
                                 imageVector = VeylIcons.SkipNext,
                                 contentDescription = "Next",
-                                tint = colors.textPrimary,
+                                tint = Color.White,
                                 modifier = Modifier
-                                    .size(20.dp)
+                                    .size(24.dp)
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         controller.skipNext()
@@ -356,7 +326,7 @@ fun VeylDynamicIsland(
                     }
                 }
             } else {
-                // Collapsed Pill Layout
+                // Collapsed Pill Layout (Matches Screenshot 3 reference)
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -364,12 +334,12 @@ fun VeylDynamicIsland(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Left: Rotating Vinyl Album Art
+                    // Left: Album Art circular / squircle thumbnail
                     Box(
                         modifier = Modifier
-                            .size(24.dp)
+                            .size(22.dp)
                             .clip(CircleShape)
-                            .background(colors.surfaceElevated)
+                            .background(Color(0xFF222222))
                             .then(if (isPlaying) Modifier.rotate(vinylRotation) else Modifier)
                     ) {
                         AsyncAlbumArt(
@@ -379,74 +349,50 @@ fun VeylDynamicIsland(
                         )
                     }
 
-                    // Center: Format Badge & Bit-Perfect Indicator
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    ) {
-                        val badgeText = when {
-                            track?.formatName?.contains("DSD", true) == true -> "DSD"
-                            (track?.sampleRate ?: 0u) >= 192000u -> "192k"
-                            (track?.sampleRate ?: 0u) >= 96000u -> "96k"
-                            else -> track?.formatName?.take(4) ?: "FLAC"
-                        }
-                        Text(
-                            text = badgeText,
-                            style = VeylTypography.MonoSpec,
-                            color = colors.accentSignal,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(4.dp)
-                                .clip(CircleShape)
-                                .background(colors.accentSignal)
-                        )
-                        val titleText = currentTrack?.title?.let { if (it.length > 10) it.take(10) + "…" else it } ?: "Veyl"
-                        Text(
-                            text = titleText,
-                            style = VeylTypography.BodySmall,
-                            color = colors.textPrimary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1
-                        )
-                    }
+                    // Center: Camera Cutout Spacer
+                    Spacer(modifier = Modifier.width(36.dp))
 
-                    // Right: Dancing Visualizer Bars (Theme Accent Signal)
+                    // Right: 3 Dancing Visualizer Bars in system orange
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.5.dp),
                         modifier = Modifier
                             .height(18.dp)
                             .padding(end = 4.dp)
                     ) {
+                        val barColor = Color(0xFFFF9500)
                         Box(
                             modifier = Modifier
                                 .width(2.5.dp)
                                 .height(if (isPlaying) bar1Height.dp else 4.dp)
                                 .clip(RoundedCornerShape(1.dp))
-                                .background(colors.accentSignal)
+                                .background(barColor)
                         )
                         Box(
                             modifier = Modifier
                                 .width(2.5.dp)
                                 .height(if (isPlaying) bar2Height.dp else 4.dp)
                                 .clip(RoundedCornerShape(1.dp))
-                                .background(colors.accentSignal)
+                                .background(barColor)
                         )
                         Box(
                             modifier = Modifier
                                 .width(2.5.dp)
                                 .height(if (isPlaying) bar3Height.dp else 4.dp)
                                 .clip(RoundedCornerShape(1.dp))
-                                .background(colors.accentSignal)
+                                .background(barColor)
                         )
                     }
                 }
             }
         }
     }
+}
+
+private fun formatIslandDuration(seconds: Double): String {
+    if (seconds.isNaN() || seconds < 0) return "00:00"
+    val totalSec = seconds.toInt()
+    val min = totalSec / 60
+    val sec = totalSec % 60
+    return String.format("%02d:%02d", min, sec)
 }

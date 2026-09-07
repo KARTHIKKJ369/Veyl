@@ -354,6 +354,14 @@ class AudioEngineController private constructor(private val context: Context) {
         prefs.edit().putBoolean("dynamic_island_enabled", enabled).apply()
     }
 
+    private val _screenOverlayIslandEnabled = MutableStateFlow(prefs.getBoolean("screen_overlay_island_enabled", false))
+    val screenOverlayIslandEnabled: StateFlow<Boolean> = _screenOverlayIslandEnabled.asStateFlow()
+
+    fun setScreenOverlayIslandEnabled(enabled: Boolean) {
+        _screenOverlayIslandEnabled.value = enabled
+        prefs.edit().putBoolean("screen_overlay_island_enabled", enabled).apply()
+    }
+
     fun resetThemeToDefault() {
         applyThemePreset("monochrome_carbon")
     }
