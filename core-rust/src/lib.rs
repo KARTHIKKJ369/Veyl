@@ -137,7 +137,7 @@ impl AudiophileEngineHandle {
             let config = output::AudioOutputConfig {
                 sample_rate: sample_rate as u32,
                 channels,
-                sharing_mode: output::OutputSharingMode::Exclusive,
+                sharing_mode: output::OutputSharingMode::Shared,
                 sample_format: output::OutputSampleFormat::F32,
                 buffer_size_frames: None,
                 device_id: None,
@@ -190,25 +190,43 @@ impl AudiophileEngineHandle {
             device_id,
         };
 
-        self.engine.set_output_sample_rate(sample_rate as f32);
-
         #[cfg(target_os = "android")]
         {
             let mut out_guard = self.audio_output.lock();
-            if let Some(mut old_stream) = out_guard.take() {
-                let _ = old_stream.stop();
-            }
             let new_stream = output::android_oboe::AndroidAudioOutput::open(
                 config,
                 Arc::clone(&self.engine) as Arc<dyn output::AudioRenderCallback>,
             );
             match new_stream {
                 Ok(s) => {
+                    if let Some(mut old_stream) = out_guard.take() {
+                        let _ = old_stream.stop();
+                    }
+                    let actual_rate = s.sample_rate() as f32;
+                    self.engine.set_output_sample_rate(actual_rate);
                     *out_guard = Some(s);
                     true
                 }
                 Err(e) => {
                     log::error!("Failed to reconfigure AAudio output stream: {:?}", e);
+                    if out_guard.is_none() {
+                        log::warn!("Audio output stream is None, creating emergency fallback 48000 Hz Shared stream");
+                        let fallback_config = output::AudioOutputConfig {
+                            sample_rate: 48000,
+                            channels: 2,
+                            sharing_mode: output::OutputSharingMode::Shared,
+                            sample_format: output::OutputSampleFormat::F32,
+                            buffer_size_frames: None,
+                            device_id: None,
+                        };
+                        if let Ok(emergency_stream) = output::android_oboe::AndroidAudioOutput::open(
+                            fallback_config,
+                            Arc::clone(&self.engine) as Arc<dyn output::AudioRenderCallback>,
+                        ) {
+                            self.engine.set_output_sample_rate(48000.0);
+                            *out_guard = Some(emergency_stream);
+                        }
+                    }
                     false
                 }
             }
@@ -217,13 +235,14 @@ impl AudiophileEngineHandle {
         #[cfg(not(target_os = "android"))]
         {
             let mut out_guard = self.audio_output.lock();
-            out_guard.take();
             let new_stream = output::desktop_cpal::DesktopAudioOutput::open(
                 config,
                 Arc::clone(&self.engine) as Arc<dyn output::AudioRenderCallback>,
             );
             match new_stream {
                 Ok(s) => {
+                    out_guard.take();
+                    self.engine.set_output_sample_rate(sample_rate as f32);
                     *out_guard = Some(s);
                     true
                 }

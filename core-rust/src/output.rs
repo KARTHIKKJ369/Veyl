@@ -93,29 +93,31 @@ pub mod android_oboe {
     }
 
     impl AndroidAudioOutput {
-        pub fn open(
-            config: AudioOutputConfig,
+        fn try_create_and_start(
+            sample_rate: Option<i32>,
+            sharing_mode: SharingMode,
+            perf_mode: PerformanceMode,
+            device_id: Option<i32>,
+            buffer_size: Option<u32>,
             callback: Arc<dyn AudioRenderCallback>,
-        ) -> Result<Self, OutputError> {
-            let sharing_mode = match config.sharing_mode {
-                OutputSharingMode::Exclusive => SharingMode::Exclusive,
-                OutputSharingMode::Shared => SharingMode::Shared,
-            };
-
+        ) -> Result<AudioStreamAsync<Output, OboeCallbackWrapper>, OutputError> {
             let cb_wrapper = OboeCallbackWrapper {
-                callback: Arc::clone(&callback),
+                callback,
             };
 
             let mut builder = AudioStreamBuilder::default()
-                .set_performance_mode(PerformanceMode::LowLatency)
-                .set_sharing_mode(sharing_mode)
-                .set_sample_rate(config.sample_rate as i32);
+                .set_performance_mode(perf_mode)
+                .set_sharing_mode(sharing_mode);
 
-            if let Some(dev_id) = config.device_id {
+            if let Some(sr) = sample_rate {
+                builder = builder.set_sample_rate(sr);
+            }
+
+            if let Some(dev_id) = device_id {
                 builder = builder.set_device_id(dev_id);
             }
 
-            if let Some(buf_size) = config.buffer_size_frames {
+            if let Some(buf_size) = buffer_size {
                 builder = builder.set_buffer_capacity_in_frames(buf_size as i32);
             }
 
@@ -124,40 +126,91 @@ pub mod android_oboe {
                 .set_format::<f32>()
                 .set_callback(cb_wrapper);
 
-            let mut stream = match async_builder.open_stream() {
-                Ok(s) => s,
-                Err(e) if config.sharing_mode == OutputSharingMode::Exclusive => {
-                    log::warn!("Failed to open AAudio Exclusive stream ({:?}), falling back to Shared mode", e);
-                    let cb_wrapper_fallback = OboeCallbackWrapper { callback };
-                    let mut fallback_builder = AudioStreamBuilder::default()
-                        .set_performance_mode(PerformanceMode::LowLatency)
-                        .set_sharing_mode(SharingMode::Shared)
-                        .set_sample_rate(config.sample_rate as i32);
+            let mut stream = async_builder
+                .open_stream()
+                .map_err(|e| OutputError::OpenFailed(format!("{:?}", e)))?;
 
-                    if let Some(dev_id) = config.device_id {
-                        fallback_builder = fallback_builder.set_device_id(dev_id);
-                    }
+            stream
+                .start()
+                .map_err(|e| OutputError::StartFailed(format!("{:?}", e)))?;
 
-                    let fallback_async = fallback_builder
-                        .set_channel_count::<Stereo>()
-                        .set_format::<f32>()
-                        .set_callback(cb_wrapper_fallback);
+            Ok(stream)
+        }
 
-                    fallback_async
-                        .open_stream()
-                        .map_err(|err| OutputError::OpenFailed(format!("{:?}", err)))?
+        pub fn open(
+            config: AudioOutputConfig,
+            callback: Arc<dyn AudioRenderCallback>,
+        ) -> Result<Self, OutputError> {
+            let target_rate = config.sample_rate as i32;
+
+            // Tier 1: If exclusive mode was explicitly requested, try Exclusive with LowLatency
+            if config.sharing_mode == OutputSharingMode::Exclusive {
+                log::info!("Attempting to open AAudio Exclusive output stream at {} Hz (Device: {:?})", target_rate, config.device_id);
+                if let Ok(stream) = Self::try_create_and_start(
+                    Some(target_rate),
+                    SharingMode::Exclusive,
+                    PerformanceMode::LowLatency,
+                    config.device_id,
+                    config.buffer_size_frames,
+                    Arc::clone(&callback),
+                ) {
+                    let is_exclusive = stream.get_sharing_mode() == SharingMode::Exclusive;
+                    log::info!("Successfully opened AAudio stream (Exclusive: {})", is_exclusive);
+                    return Ok(Self { stream, is_exclusive });
                 }
-                Err(e) => return Err(OutputError::OpenFailed(format!("{:?}", e))),
-            };
+                log::warn!("AAudio Exclusive stream failed, falling back to Shared mode");
+            }
 
-            let is_exclusive = stream.get_sharing_mode() == SharingMode::Exclusive;
+            // Tier 2: Shared mode with target sample rate and LowLatency
+            if let Ok(stream) = Self::try_create_and_start(
+                Some(target_rate),
+                SharingMode::Shared,
+                PerformanceMode::LowLatency,
+                config.device_id,
+                None,
+                Arc::clone(&callback),
+            ) {
+                return Ok(Self { stream, is_exclusive: false });
+            }
 
-            stream.start().map_err(|e| OutputError::StartFailed(format!("{:?}", e)))?;
+            // Tier 3: Shared mode at standard 48000 Hz with LowLatency (native Android HAL rate)
+            log::warn!("AAudio Shared mode at {} Hz failed, trying standard 48000 Hz Shared", target_rate);
+            if let Ok(stream) = Self::try_create_and_start(
+                Some(48000),
+                SharingMode::Shared,
+                PerformanceMode::LowLatency,
+                config.device_id,
+                None,
+                Arc::clone(&callback),
+            ) {
+                return Ok(Self { stream, is_exclusive: false });
+            }
 
-            Ok(Self {
-                stream,
-                is_exclusive,
-            })
+            // Tier 4: Shared mode at 48000 Hz with standard latency (PerformanceMode::None)
+            log::warn!("AAudio LowLatency failed, trying PerformanceMode::None at 48000 Hz");
+            if let Ok(stream) = Self::try_create_and_start(
+                Some(48000),
+                SharingMode::Shared,
+                PerformanceMode::None,
+                None,
+                None,
+                Arc::clone(&callback),
+            ) {
+                return Ok(Self { stream, is_exclusive: false });
+            }
+
+            // Tier 5: Safe universal fallback (auto-detect all parameters from Oboe/AAudio)
+            log::warn!("AAudio 48000 Hz failed, attempting universal auto-config fallback");
+            let stream = Self::try_create_and_start(
+                None,
+                SharingMode::Shared,
+                PerformanceMode::None,
+                None,
+                None,
+                callback,
+            )?;
+
+            Ok(Self { stream, is_exclusive: false })
         }
 
         pub fn is_exclusive(&self) -> bool {

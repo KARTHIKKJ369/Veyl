@@ -3,6 +3,7 @@ package com.audiophile.player.engine
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -793,6 +794,8 @@ class AudioEngineController private constructor(private val context: Context) {
                 _selectedRootPath.value = detectedPath
                 prefs.edit().putString("root_audio_dir", detectedPath).apply()
                 scanDirectory(detectedPath)
+            } else {
+                scanMediaStore()
             }
         }
     }
@@ -813,14 +816,122 @@ class AudioEngineController private constructor(private val context: Context) {
                     Log.i("AudioEngineController", "Scanned ${tracks.size} tracks from $path")
                     withContext(Dispatchers.Main) {
                         _libraryTracks.value = tracks
+                        updateDerivedTrackLists(tracks)
                         if (_originalQueue.value.isEmpty() && tracks.isNotEmpty()) {
                             _originalQueue.value = tracks
                             _queue.value = tracks
                         }
                     }
+                    if (tracks.isEmpty()) {
+                        scanMediaStore()
+                    }
+                } else {
+                    scanMediaStore()
                 }
             } catch (e: Exception) {
                 Log.e("AudioEngineController", "Error scanning directory $path", e)
+                scanMediaStore()
+            } finally {
+                _isScanning.value = false
+            }
+        }
+    }
+
+    fun scanMediaStore() {
+        scope.launch(Dispatchers.IO) {
+            _isScanning.value = true
+            try {
+                val tracks = mutableListOf<TrackInfo>()
+                val projection = arrayOf(
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.DATA,
+                    MediaStore.Audio.Media.TITLE,
+                    MediaStore.Audio.Media.ARTIST,
+                    MediaStore.Audio.Media.ALBUM,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.YEAR,
+                    MediaStore.Audio.Media.TRACK,
+                    MediaStore.Audio.Media.SIZE
+                )
+                val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+                val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
+
+                context.contentResolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    null,
+                    sortOrder
+                )?.use { cursor ->
+                    val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                    val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                    val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val yearCol = cursor.getColumnIndex(MediaStore.Audio.Media.YEAR)
+                    val trackCol = cursor.getColumnIndex(MediaStore.Audio.Media.TRACK)
+
+                    while (cursor.moveToNext()) {
+                        val path = cursor.getString(dataCol) ?: continue
+                        val file = File(path)
+                        if (!file.exists() || file.length() == 0L) continue
+
+                        val title = cursor.getString(titleCol) ?: file.nameWithoutExtension
+                        val artist = cursor.getString(artistCol) ?: "Unknown Artist"
+                        val album = cursor.getString(albumCol) ?: "Unknown Album"
+                        val durationMs = cursor.getLong(durationCol)
+                        val year = if (yearCol != -1) cursor.getInt(yearCol).takeIf { it > 0 }?.toUInt() else null
+                        val trackNum = if (trackCol != -1) cursor.getInt(trackCol).takeIf { it > 0 }?.toUInt() else null
+
+                        val ext = file.extension.lowercase()
+                        val formatName = when (ext) {
+                            "flac" -> "FLAC"
+                            "wav" -> "WAV"
+                            "mp3" -> "MP3"
+                            "m4a", "aac" -> "AAC"
+                            "ogg", "opus" -> "OGG/Opus"
+                            "dsf", "dff" -> "DSD"
+                            else -> ext.uppercase()
+                        }
+
+                        tracks.add(
+                            TrackInfo(
+                                uri = path,
+                                title = title,
+                                artist = if (artist == "<unknown>") "Unknown Artist" else artist,
+                                album = if (album == "<unknown>") "Unknown Album" else album,
+                                albumArtist = null,
+                                genre = null,
+                                year = year,
+                                trackNumber = trackNum,
+                                discNumber = null,
+                                durationSeconds = (durationMs / 1000.0).coerceAtLeast(1.0),
+                                sampleRate = 44100u,
+                                bitDepth = 16u,
+                                bitrate = null,
+                                channels = 2u,
+                                formatName = formatName,
+                                hasArtwork = true
+                            )
+                        )
+                    }
+                }
+
+                if (tracks.isNotEmpty()) {
+                    Log.i("AudioEngineController", "Discovered ${tracks.size} tracks from MediaStore")
+                    withContext(Dispatchers.Main) {
+                        if (_libraryTracks.value.isEmpty()) {
+                            _libraryTracks.value = tracks
+                            updateDerivedTrackLists(tracks)
+                            if (_originalQueue.value.isEmpty()) {
+                                _originalQueue.value = tracks
+                                _queue.value = tracks
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AudioEngineController", "Error querying MediaStore", e)
             } finally {
                 _isScanning.value = false
             }
@@ -900,7 +1011,10 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun playTrack(track: TrackInfo) {
         scope.launch {
-            if (_bitPerfectEnabled.value) {
+            // Only switch hardware sample-rate and exclusive mode for external USB DACs!
+            // Internal phone speakers, 3.5mm jack, and Bluetooth must remain on standard shared 48kHz output.
+            val dac = connectedDac.value
+            if (_bitPerfectEnabled.value && dac != null) {
                 val isDsd = track.formatName.contains("DSD", ignoreCase = true) ||
                             track.uri.endsWith(".dsf", ignoreCase = true) ||
                             track.uri.endsWith(".dff", ignoreCase = true)
@@ -915,14 +1029,14 @@ class AudioEngineController private constructor(private val context: Context) {
                     track.sampleRate.toInt()
                 }
 
-                val dac = connectedDac.value
                 val optimalRate = usbDacManager.getOptimalSampleRate(targetRate).toUInt()
-                val dacDeviceId = dac?.id
-
                 if (optimalRate != currentOutputSampleRate) {
                     Log.i("AudioEngineController", "Switching DAC sample rate to $optimalRate Hz for bit-perfect playback")
-                    reconfigureHardwareOutput(optimalRate, dacDeviceId, exclusive = true)
+                    reconfigureHardwareOutput(optimalRate, dac.id, exclusive = true)
                 }
+            } else if (dac == null && currentOutputSampleRate != 48000u) {
+                Log.i("AudioEngineController", "Restoring standard 48000 Hz shared output for internal audio")
+                reconfigureHardwareOutput(48000u, null, exclusive = false)
             }
 
             isTransitioning = false
@@ -991,13 +1105,20 @@ class AudioEngineController private constructor(private val context: Context) {
     fun togglePlayPause() {
         val current = _status.value?.state ?: PlaybackStateEnum.STOPPED
         if (current == PlaybackStateEnum.PLAYING) {
-            nativeEngine?.pause()
+            pause()
         } else {
-            nativeEngine?.play()
+            play()
         }
     }
 
     fun play() {
+        if (_status.value?.currentTrack == null) {
+            val trackToPlay = _queue.value.firstOrNull() ?: _libraryTracks.value.firstOrNull()
+            if (trackToPlay != null) {
+                playTrack(trackToPlay)
+                return
+            }
+        }
         nativeEngine?.play()
     }
 

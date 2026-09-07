@@ -114,7 +114,24 @@ class MainActivity : ComponentActivity() {
     private fun handleIncomingIntent(intent: Intent?) {
         val uri = intent?.data ?: return
         if (intent.action == Intent.ACTION_VIEW) {
-            val path = uri.path ?: uri.toString()
+            val path = if (uri.scheme == "file") {
+                uri.path ?: uri.toString()
+            } else if (uri.scheme == "content") {
+                var resolvedPath: String? = null
+                try {
+                    val proj = arrayOf(android.provider.MediaStore.Audio.Media.DATA)
+                    contentResolver.query(uri, proj, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val idx = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DATA)
+                            resolvedPath = cursor.getString(idx)
+                        }
+                    }
+                } catch (_: Exception) {}
+                resolvedPath ?: uri.path ?: uri.toString()
+            } else {
+                uri.path ?: uri.toString()
+            }
+
             val track = uniffi.audiophile_core.TrackInfo(
                 uri = path,
                 title = uri.lastPathSegment ?: "Audio Track",
@@ -181,8 +198,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkStorageAccessAndScan() {
-        controller.selectedRootPath.value?.let { path ->
+        val path = controller.selectedRootPath.value
+        if (path != null) {
             controller.scanDirectory(path)
+        } else {
+            controller.scanMediaStore()
         }
     }
 }

@@ -47,11 +47,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          target_commitish: ${{ github.sha }}
           name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Veyl Latest Build' }}
           body: |
             ## 🎵 Veyl — Audiophile Android Music Player
 
-            ### 🚀 Features in this build:
+            ### 🚀 Features & Fixes in this build:
+            - **Audio Playback Engine Fixed**: Fixed hardware stream reconfigure and Oboe multi-tier fallback so music plays flawlessly on internal phone speakers, Bluetooth, wired headphones, and USB DACs.
+            - **Native MediaStore Library Discovery**: Automatically discovers all local audio tracks on phone storage out-of-the-box.
             - **Native HyperOS Super Island Integration**: Direct media notification integration via `miui.focus.param` (Reference Screenshots 3 & 4). No intrusive permissions or "displaying over other apps" alerts.
             - **Luxury Typography**: Custom geometric **Outfit** display fonts and precision **JetBrains Mono** telemetry.
             - **Clean Background Lifecycle**: Automatic teardown and playback pause when swiped away from Recents.
@@ -62,6 +65,7 @@ jobs:
             Download and install **`veyl-debug.apk`** from the Assets below.
           draft: false
           prerelease: false
+          make_latest: true
           files: |
             app/build/outputs/apk/debug/veyl-debug.apk
         env:

@@ -31,8 +31,18 @@ pub struct LocalFileSource {
 
 impl LocalFileSource {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        let p = path.as_ref();
+        let clean_path = if let Some(s) = p.to_str() {
+            if let Some(stripped) = s.strip_prefix("file://") {
+                PathBuf::from(stripped)
+            } else {
+                p.to_path_buf()
+            }
+        } else {
+            p.to_path_buf()
+        };
         Self {
-            path: path.as_ref().to_path_buf(),
+            path: clean_path,
         }
     }
 

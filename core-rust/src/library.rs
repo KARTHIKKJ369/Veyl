@@ -49,8 +49,19 @@ pub struct AlbumArtwork {
 pub struct MetadataExtractor;
 
 impl MetadataExtractor {
+    fn clean_path<P: AsRef<Path>>(path: P) -> std::path::PathBuf {
+        let p = path.as_ref();
+        if let Some(s) = p.to_str() {
+            if let Some(stripped) = s.strip_prefix("file://") {
+                return std::path::PathBuf::from(stripped);
+            }
+        }
+        p.to_path_buf()
+    }
+
     pub fn extract_metadata<P: AsRef<Path>>(path: P) -> Result<TrackMetadata, LibraryError> {
-        let path = path.as_ref();
+        let clean_buf = Self::clean_path(path);
+        let path = clean_buf.as_path();
         let file_size_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
 
@@ -198,7 +209,8 @@ impl MetadataExtractor {
     }
 
     pub fn extract_artwork<P: AsRef<Path>>(path: P) -> Result<Option<AlbumArtwork>, LibraryError> {
-        let path = path.as_ref();
+        let clean_buf = Self::clean_path(path);
+        let path = clean_buf.as_path();
         let tagged_file = match Probe::open(path).and_then(|p| p.read()) {
             Ok(tf) => tf,
             Err(_) => return Ok(None),
