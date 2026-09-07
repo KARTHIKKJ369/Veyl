@@ -1,6 +1,10 @@
-# Audiophile — Rust-Powered Android Audio Player
+# Veyl — Rust-Powered Audiophile Android Music Player
 
-**Audiophile** is a reference-grade, bit-perfect native Android music player engineered for audiophiles. It combines a pure Rust audio DSP & decoding core with a precision Jetpack Compose interface.
+**Veyl** is a reference-grade, bit-perfect native Android music player engineered for audiophiles. It combines a pure Rust audio DSP & decoding core with a precision Jetpack Compose interface, system-level camera cutout dynamic island, and bespoke audiophile typography.
+
+### 📥 Latest Compiled APK
+Download the compiled application directly onto your Android device:
+- **[Download veyl-debug.apk](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)**
 
 ---
 
