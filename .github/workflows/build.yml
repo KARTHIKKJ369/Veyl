@@ -1,11 +1,15 @@
-name: Build Veyl Android App
+name: Build and Release Veyl Android App
 
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -16,7 +20,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -28,9 +32,37 @@ jobs:
       - name: Assemble Debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
+      - name: Prepare Release APK Asset
+        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/veyl-debug.apk
+
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: veyl-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/veyl-debug.apk
           retention-days: 14
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Veyl Latest Build' }}
+          body: |
+            ## 🎵 Veyl — Audiophile Android Music Player
+
+            ### 🚀 Features in this build:
+            - **Native HyperOS Super Island Integration**: Direct media notification integration via `miui.focus.param` (Reference Screenshots 3 & 4). No intrusive permissions or "displaying over other apps" alerts.
+            - **Luxury Typography**: Custom geometric **Outfit** display fonts and precision **JetBrains Mono** telemetry.
+            - **Clean Background Lifecycle**: Automatic teardown and playback pause when swiped away from Recents.
+            - **Audiophile DSP & Themes**: 10-band biquad parametric EQ, HSV color wheel, hardware presets (Sony Walkman Gold, Abbey Road, Monochrome Carbon).
+            - **Modern Library Views**: Multi-column grid mode, category chips, and alphabet scrubber.
+
+            ### 📥 Download
+            Download and install **`veyl-debug.apk`** from the Assets below.
+          draft: false
+          prerelease: false
+          files: |
+            app/build/outputs/apk/debug/veyl-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
