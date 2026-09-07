@@ -52,12 +52,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import com.audiophile.player.engine.AudioEngineController
+import com.audiophile.player.engine.SavedCustomTheme
 import com.audiophile.player.ui.components.VeylColorWheelPickerSheet
 import com.audiophile.player.ui.theme.CuratedPresets
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylSpacing
 import com.audiophile.player.ui.theme.VeylTypography
+import com.audiophile.player.ui.theme.isColorLight
+import com.audiophile.player.ui.theme.parseColorFromHex
 import uniffi.audiophile_core.DsdModeEnum
 
 /**
@@ -94,6 +97,7 @@ fun VeylSettingsScreen(
     val autoFetchLyrics by controller.autoFetchLyrics.collectAsState()
     val selectedThemeId by controller.selectedThemeId.collectAsState()
     val isDarkMode by controller.isDarkMode.collectAsState()
+    val savedCustomThemes by controller.savedCustomThemes.collectAsState()
 
     var mmapExclusiveEnabled by remember { mutableStateOf(true) }
     var dsdGainCompensation by remember { mutableStateOf(true) }
@@ -302,12 +306,113 @@ fun VeylSettingsScreen(
                             }
                         }
 
+                        // Saved Custom Themes Carousel
+                        if (savedCustomThemes.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Your Saved Custom Palettes",
+                                style = VeylTypography.BodySmall,
+                                color = colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                savedCustomThemes.forEach { savedTheme ->
+                                    val isSelected = selectedThemeId == savedTheme.id
+                                    val p = parseColorFromHex(savedTheme.primaryHex, colors.accentSignal)
+                                    val s = parseColorFromHex(savedTheme.secondaryHex, colors.textSecondary)
+                                    val bg = parseColorFromHex(savedTheme.backgroundHex, colors.background)
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                                            .background(if (isSelected) colors.surfaceElevated else colors.surfacePill.copy(alpha = 0.5f))
+                                            .border(
+                                                width = if (isSelected) 1.5.dp else 1.dp,
+                                                color = if (isSelected) colors.accentSignal else colors.borderHairline,
+                                                shape = RoundedCornerShape(VeylSpacing.RadiusSm)
+                                            )
+                                            .clickable {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                controller.applySavedCustomTheme(savedTheme)
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Swatch Preview
+                                            Row(horizontalArrangement = Arrangement.spacedBy((-4).dp)) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clip(CircleShape)
+                                                        .background(bg)
+                                                        .border(1.dp, colors.borderHairline, CircleShape)
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clip(CircleShape)
+                                                        .background(s)
+                                                        .border(1.dp, colors.borderHairline, CircleShape)
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clip(CircleShape)
+                                                        .background(p)
+                                                        .border(1.dp, colors.borderHairline, CircleShape)
+                                                )
+                                            }
+
+                                            Text(
+                                                text = savedTheme.name,
+                                                style = VeylTypography.TitleMedium,
+                                                color = if (isSelected) colors.accentSignal else colors.textPrimary,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+
+                                            // Delete Button
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .clip(CircleShape)
+                                                    .background(colors.glassButtonBg)
+                                                    .clickable {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        controller.deleteCustomTheme(savedTheme.id)
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = VeylIcons.Trash,
+                                                    contentDescription = "Delete theme",
+                                                    tint = colors.textMuted,
+                                                    modifier = Modifier.size(11.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Active Theme Details & Custom Palette Trigger
                         val activePreset = CuratedPresets.find { it.id == selectedThemeId }
-                        val themeDescription = if (selectedThemeId == "custom") {
-                            "Custom hand-crafted palette active via Color Wheel"
-                        } else {
-                            activePreset?.description ?: "Default studio profile"
+                        val savedTheme = savedCustomThemes.find { it.id == selectedThemeId }
+                        val (themeTitle, themeDescription) = when {
+                            savedTheme != null -> savedTheme.name to "User-saved custom studio palette"
+                            activePreset != null -> activePreset.name to activePreset.description
+                            selectedThemeId.startsWith("custom") -> "Custom Palette" to "Custom hand-crafted palette active via Color Wheel"
+                            else -> "Monochrome Carbon" to "Pure OLED black, tactile carbon panels, surgical white precision"
                         }
 
                         Row(
@@ -321,7 +426,7 @@ fun VeylSettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = if (selectedThemeId == "custom") "Custom Palette" else (activePreset?.name ?: "Custom"),
+                                    text = themeTitle,
                                     style = VeylTypography.TitleMedium,
                                     color = colors.textPrimary,
                                     fontSize = 12.sp
@@ -355,13 +460,13 @@ fun VeylSettingsScreen(
                                     Icon(
                                         imageVector = VeylIcons.Palette,
                                         contentDescription = null,
-                                        tint = if (colors.accentSignal.red > 0.6f && colors.accentSignal.green > 0.6f) Color.Black else Color.White,
+                                        tint = if (isColorLight(colors.accentSignal)) Color.Black else Color.White,
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Text(
                                         text = "Color Wheel",
                                         style = VeylTypography.TitleMedium,
-                                        color = if (colors.accentSignal.red > 0.6f && colors.accentSignal.green > 0.6f) Color.Black else Color.White,
+                                        color = if (isColorLight(colors.accentSignal)) Color.Black else Color.White,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )

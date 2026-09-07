@@ -26,6 +26,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -56,6 +58,7 @@ import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylSpacing
 import com.audiophile.player.ui.theme.VeylTypography
 import com.audiophile.player.ui.theme.buildVeylColorScheme
+import com.audiophile.player.ui.theme.isColorLight
 import com.audiophile.player.ui.theme.toHex
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -88,6 +91,8 @@ fun VeylColorWheelPickerSheet(
     var primaryColor by remember { mutableStateOf(savedPrimary) }
     var secondaryColor by remember { mutableStateOf(savedSecondary) }
     var backgroundColor by remember { mutableStateOf(savedBackground) }
+    var themeName by remember { mutableStateOf("") }
+    var previewDark by remember { mutableStateOf(controller.isDarkMode.value) }
 
     // Separate HSV state for each target to ensure zero state corruption
     var primaryHsv by remember {
@@ -466,20 +471,65 @@ fun VeylColorWheelPickerSheet(
             }
 
             // 6. Live Swatch Mini Preview Matrix
-            Text(
-                text = "LIVE THEME PREVIEW",
-                style = VeylTypography.MonoBadge,
-                color = currentColors.textSecondary,
-                fontSize = 10.sp
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "LIVE THEME PREVIEW",
+                    style = VeylTypography.MonoBadge,
+                    color = currentColors.textSecondary,
+                    fontSize = 10.sp
+                )
 
-            val previewScheme = remember(primaryColor, secondaryColor, backgroundColor) {
+                // Dark / Light Preview Toggle
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(currentColors.surfaceElevated)
+                        .padding(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (previewDark) currentColors.primaryContainer else Color.Transparent)
+                            .clickable { previewDark = true }
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "DARK",
+                            style = VeylTypography.MonoBadge,
+                            color = if (previewDark) currentColors.accentSignal else currentColors.textSecondary,
+                            fontSize = 9.sp
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (!previewDark) currentColors.primaryContainer else Color.Transparent)
+                            .clickable { previewDark = false }
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "LIGHT",
+                            style = VeylTypography.MonoBadge,
+                            color = if (!previewDark) currentColors.accentSignal else currentColors.textSecondary,
+                            fontSize = 9.sp
+                        )
+                    }
+                }
+            }
+
+            val previewScheme = remember(primaryColor, secondaryColor, backgroundColor, previewDark) {
                 buildVeylColorScheme(
                     primary = primaryColor,
                     secondary = secondaryColor,
                     tertiary = Color(0xFF92EAFF),
                     background = backgroundColor,
-                    isDark = true
+                    isDark = previewDark
                 )
             }
 
@@ -544,7 +594,7 @@ fun VeylColorWheelPickerSheet(
                             Icon(
                                 imageVector = VeylIcons.Play,
                                 contentDescription = null,
-                                tint = if (previewScheme.accentSignal.red > 0.6f && previewScheme.accentSignal.green > 0.6f) Color.Black else Color.White,
+                                tint = if (isColorLight(previewScheme.accentSignal)) Color.Black else Color.White,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -571,7 +621,7 @@ fun VeylColorWheelPickerSheet(
                         }
 
                         Text(
-                            text = "1.4 ms latency",
+                            text = if (previewDark) "1.4 ms latency" else "Direct ALSA • 192kHz",
                             style = VeylTypography.MonoSpec,
                             color = previewScheme.textSecondary,
                             fontSize = 9.sp
@@ -580,26 +630,93 @@ fun VeylColorWheelPickerSheet(
                 }
             }
 
-            // 7. Apply Theme Button
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(VeylSpacing.RadiusLg))
-                    .background(primaryColor)
-                    .clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        controller.applyCustomPalette(primaryColor, secondaryColor, backgroundColor)
-                        onDismiss()
-                    }
-                    .padding(vertical = 14.dp),
-                contentAlignment = Alignment.Center
-            ) {
+            // 7. Custom Theme Naming
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "Apply Custom Palette",
-                    style = VeylTypography.TitleMedium,
-                    color = if (primaryColor.red > 0.6f && primaryColor.green > 0.6f) Color.Black else Color.White,
-                    fontWeight = FontWeight.Bold
+                    text = "SAVE TO MY PALETTES (OPTIONAL)",
+                    style = VeylTypography.MonoBadge,
+                    color = currentColors.textSecondary,
+                    fontSize = 10.sp
                 )
+
+                OutlinedTextField(
+                    value = themeName,
+                    onValueChange = { themeName = it },
+                    placeholder = {
+                        Text(
+                            text = "e.g. Cyberpunk Neon, Autumn Wood...",
+                            color = currentColors.textMuted,
+                            fontSize = 13.sp
+                        )
+                    },
+                    singleLine = true,
+                    textStyle = VeylTypography.BodyMedium.copy(color = currentColors.textPrimary),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = currentColors.textPrimary,
+                        unfocusedTextColor = currentColors.textPrimary,
+                        focusedBorderColor = currentColors.accentSignal,
+                        unfocusedBorderColor = currentColors.borderHairline,
+                        cursorColor = currentColors.accentSignal,
+                        focusedContainerColor = currentColors.surfaceElevated,
+                        unfocusedContainerColor = currentColors.surfaceElevated
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // 8. Action Buttons (Quick Apply vs Save & Apply)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Apply without saving
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(VeylSpacing.RadiusLg))
+                        .background(currentColors.surfaceElevated)
+                        .border(1.dp, currentColors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusLg))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            controller.applyCustomPalette(primaryColor, secondaryColor, backgroundColor)
+                            onDismiss()
+                        }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Apply Now",
+                        style = VeylTypography.TitleMedium,
+                        color = currentColors.textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp
+                    )
+                }
+
+                // Save to Custom Themes & Apply
+                Box(
+                    modifier = Modifier
+                        .weight(1.3f)
+                        .clip(RoundedCornerShape(VeylSpacing.RadiusLg))
+                        .background(primaryColor)
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            val finalName = if (themeName.trim().isEmpty()) "Custom Palette" else themeName.trim()
+                            controller.saveCustomTheme(finalName, primaryColor, secondaryColor, backgroundColor)
+                            onDismiss()
+                        }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Save & Apply",
+                        style = VeylTypography.TitleMedium,
+                        color = if (isColorLight(primaryColor)) Color.Black else Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
             }
         }
     }

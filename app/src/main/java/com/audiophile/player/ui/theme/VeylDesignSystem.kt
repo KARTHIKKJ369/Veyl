@@ -76,67 +76,67 @@ data class ThemePreset(
 
 val CuratedPresets = listOf(
     ThemePreset(
-        id = "resonate_obsidian",
-        name = "Resonate Obsidian",
-        description = "Warm studio dusk with coral blush & soft slate",
-        primary = Color(0xFFFFB7B4),
-        secondary = Color(0xFFB2CAD3),
-        tertiary = Color(0xFF92EAFF),
-        background = Color(0xFF1B0906)
-    ),
-    ThemePreset(
-        id = "oled_pure_black",
-        name = "OLED True Black",
-        description = "Zero-pixel black with electric cyan & ice blue",
-        primary = Color(0xFF00F0FF),
-        secondary = Color(0xFF70A5FF),
-        tertiary = Color(0xFF39FF14),
-        background = Color(0xFF000000)
-    ),
-    ThemePreset(
-        id = "cyberpunk_amber",
-        name = "Cyberpunk Amber",
-        description = "Warm vacuum tube glow with radiant amber & brass",
-        primary = Color(0xFFFF9E00),
-        secondary = Color(0xFFFFD166),
-        tertiary = Color(0xFFFF5400),
-        background = Color(0xFF120C06)
-    ),
-    ThemePreset(
-        id = "nordic_slate",
-        name = "Nordic Slate",
-        description = "Deep midnight with arctic glacier blue & mint",
-        primary = Color(0xFF58A6FF),
-        secondary = Color(0xFF7EE787),
-        tertiary = Color(0xFFBC8CFF),
-        background = Color(0xFF0D1117)
-    ),
-    ThemePreset(
-        id = "emerald_studio",
-        name = "Emerald Studio",
-        description = "Vintage console meters with analog emerald & sage",
-        primary = Color(0xFF2ECC71),
-        secondary = Color(0xFF50E3C2),
-        tertiary = Color(0xFFF1C40F),
-        background = Color(0xFF08140E)
-    ),
-    ThemePreset(
         id = "monochrome_carbon",
         name = "Monochrome Carbon",
-        description = "Mastering minimalism with crisp studio white & platinum",
-        primary = Color(0xFFF8FAFC),
+        description = "Mastering studio minimalism with carbon & crisp platinum",
+        primary = Color(0xFFFFFFFF),
         secondary = Color(0xFF94A3B8),
         tertiary = Color(0xFF38BDF8),
         background = Color(0xFF121212)
     ),
     ThemePreset(
-        id = "royal_violet",
-        name = "Royal Velvet",
-        description = "Rich twilight atmosphere with electric lavender & rose",
-        primary = Color(0xFFD8B4FE),
-        secondary = Color(0xFFF472B6),
-        tertiary = Color(0xFF818CF8),
-        background = Color(0xFF13091B)
+        id = "braun_rams",
+        name = "Braun Dieter Rams",
+        description = "Bauhaus functionalism with iconic Braun orange & matte graphite",
+        primary = Color(0xFFFF5722),
+        secondary = Color(0xFFA1A1AA),
+        tertiary = Color(0xFF60A5FA),
+        background = Color(0xFF18181B)
+    ),
+    ThemePreset(
+        id = "mcintosh_blue",
+        name = "McIntosh Laboratory",
+        description = "Legendary audiophile blue VU meters & warm tube glow",
+        primary = Color(0xFF00A3E0),
+        secondary = Color(0xFFFFB800),
+        tertiary = Color(0xFF00E5FF),
+        background = Color(0xFF0A0D14)
+    ),
+    ThemePreset(
+        id = "teenage_op1",
+        name = "Teenage Engineering",
+        description = "Tactile synthesizer lab with punchy yellow & sharp cyan",
+        primary = Color(0xFFFEE75C),
+        secondary = Color(0xFF00E5FF),
+        tertiary = Color(0xFFFF5722),
+        background = Color(0xFF161719)
+    ),
+    ThemePreset(
+        id = "sony_signature",
+        name = "Sony Walkman Gold",
+        description = "WM1ZM2 oxygen-free copper chassis & royal champagne gold",
+        primary = Color(0xFFFFD700),
+        secondary = Color(0xFFD49A6A),
+        tertiary = Color(0xFFFFA726),
+        background = Color(0xFF14100C)
+    ),
+    ThemePreset(
+        id = "abbey_road",
+        name = "Abbey Road Studio",
+        description = "Warm 1970s analogue tape console with vintage VU amber",
+        primary = Color(0xFFFF8C00),
+        secondary = Color(0xFFD4C7B8),
+        tertiary = Color(0xFFE65100),
+        background = Color(0xFF1A120E)
+    ),
+    ThemePreset(
+        id = "midnight_studio",
+        name = "Midnight Studio",
+        description = "Deep midnight void with vivid electric indigo & glacier sky",
+        primary = Color(0xFF6366F1),
+        secondary = Color(0xFF38BDF8),
+        tertiary = Color(0xFFA855F7),
+        background = Color(0xFF0B0E14)
     )
 )
 
@@ -170,10 +170,52 @@ fun isColorLight(color: Color): Boolean {
 }
 
 fun shiftColorLightness(base: Color, deltaL: Float): Color {
-    val hsl = FloatArray(3)
-    androidx.core.graphics.ColorUtils.colorToHSL(base.toArgb(), hsl)
-    hsl[2] = (hsl[2] + deltaL).coerceIn(0.04f, 0.96f)
-    return Color(androidx.core.graphics.ColorUtils.HSLToColor(hsl))
+    val r = base.red
+    val g = base.green
+    val b = base.blue
+
+    val max = maxOf(r, g, b)
+    val min = minOf(r, g, b)
+    val d = max - min
+
+    val l = (max + min) / 2f
+    val h: Float
+    val s: Float
+
+    if (d == 0f) {
+        h = 0f
+        s = 0f
+    } else {
+        s = if (l > 0.5f) d / (2f - max - min) else d / (max + min)
+        h = when (max) {
+            r -> ((g - b) / d + (if (g < b) 6f else 0f)) / 6f
+            g -> ((b - r) / d + 2f) / 6f
+            else -> ((r - g) / d + 4f) / 6f
+        }
+    }
+
+    val newL = (l + deltaL).coerceIn(0.04f, 0.96f)
+
+    fun hue2rgb(p: Float, q: Float, t: Float): Float {
+        var tc = t
+        if (tc < 0f) tc += 1f
+        if (tc > 1f) tc -= 1f
+        return when {
+            tc < 1f / 6f -> p + (q - p) * 6f * tc
+            tc < 1f / 2f -> q
+            tc < 2f / 3f -> p + (q - p) * (2f / 3f - tc) * 6f
+            else -> p
+        }
+    }
+
+    val q = if (newL < 0.5f) newL * (1f + s) else newL + s - newL * s
+    val p = 2f * newL - q
+
+    val finalR = if (s == 0f) newL else hue2rgb(p, q, h + 1f / 3f)
+    val finalG = if (s == 0f) newL else hue2rgb(p, q, h)
+    val finalB = if (s == 0f) newL else hue2rgb(p, q, h - 1f / 3f)
+
+    return Color(finalR.coerceIn(0f, 1f), finalG.coerceIn(0f, 1f), finalB.coerceIn(0f, 1f), base.alpha)
 }
 
 fun buildVeylColorScheme(
@@ -184,9 +226,50 @@ fun buildVeylColorScheme(
     isDark: Boolean = true
 ): VeylColorScheme {
     if (!isDark) {
-        return VeylLightColorScheme
+        // High-contrast, elegant audiophile light mode
+        val lightBg = if (isColorLight(background)) background else Color(0xFFFAFAFA)
+        val surfacePanel = Color(0xFFFFFFFF)
+        val surfaceElevated = Color(0xFFF4F4F5)
+        val surfacePill = Color(0xFFE4E4E7)
+
+        // Ensure primary accent has high contrast on light background
+        val lightPrimary = if (isColorLight(primary)) {
+            if (primary.red > 0.85f && primary.green > 0.85f && primary.blue > 0.85f) {
+                Color(0xFF18181B) // Jet Carbon for white
+            } else {
+                shiftColorLightness(primary, -0.32f)
+            }
+        } else {
+            primary
+        }
+
+        val lightSecondary = if (isColorLight(secondary)) {
+            shiftColorLightness(secondary, -0.25f)
+        } else {
+            secondary
+        }
+
+        return VeylColorScheme(
+            background = lightBg,
+            surfacePanel = surfacePanel,
+            surfaceElevated = surfaceElevated,
+            surfacePill = surfacePill,
+            borderHairline = Color(0x1F000000),
+            borderActive = lightPrimary.copy(alpha = 0.55f),
+            accentSignal = lightPrimary,
+            accentCyan = tertiary,
+            accentPeak = Color(0xFFDC2626),
+            accentFavorite = lightPrimary,
+            primaryContainer = lightPrimary.copy(alpha = 0.15f),
+            textPrimary = Color(0xFF09090B),
+            textSecondary = Color(0xFF52525B),
+            textMuted = Color(0xFF71717A),
+            textMono = lightSecondary,
+            glassButtonBg = Color(0x14000000)
+        )
     }
 
+    // Dark Mode
     val isBlackBg = background.red < 0.03f && background.green < 0.03f && background.blue < 0.03f
     val surfacePanel = if (isBlackBg) Color(0xFF111111) else shiftColorLightness(background, 0.05f)
     val surfaceElevated = if (isBlackBg) Color(0xFF1A1A1A) else shiftColorLightness(background, 0.09f)
@@ -227,28 +310,53 @@ fun buildM3ColorScheme(
     val onPrimary = if (isColorLight(primary)) Color.Black else Color.White
     val onSecondary = if (isColorLight(secondary)) Color.Black else Color.White
 
-    return darkColorScheme(
-        primary = primary,
-        onPrimary = onPrimary,
-        primaryContainer = veylColors.primaryContainer,
-        onPrimaryContainer = primary,
-        secondary = secondary,
-        onSecondary = onSecondary,
-        secondaryContainer = secondary.copy(alpha = 0.20f),
-        onSecondaryContainer = secondary,
-        tertiary = tertiary,
-        tertiaryContainer = tertiary.copy(alpha = 0.20f),
-        background = background,
-        onBackground = veylColors.textPrimary,
-        surface = background,
-        onSurface = veylColors.textPrimary,
-        surfaceVariant = veylColors.surfacePanel,
-        onSurfaceVariant = veylColors.textSecondary,
-        outline = veylColors.borderHairline,
-        outlineVariant = veylColors.borderActive,
-        error = VeylError,
-        onError = Color.White
-    )
+    return if (isDark) {
+        darkColorScheme(
+            primary = primary,
+            onPrimary = onPrimary,
+            primaryContainer = veylColors.primaryContainer,
+            onPrimaryContainer = primary,
+            secondary = secondary,
+            onSecondary = onSecondary,
+            secondaryContainer = secondary.copy(alpha = 0.20f),
+            onSecondaryContainer = secondary,
+            tertiary = tertiary,
+            tertiaryContainer = tertiary.copy(alpha = 0.20f),
+            background = background,
+            onBackground = veylColors.textPrimary,
+            surface = background,
+            onSurface = veylColors.textPrimary,
+            surfaceVariant = veylColors.surfacePanel,
+            onSurfaceVariant = veylColors.textSecondary,
+            outline = veylColors.borderHairline,
+            outlineVariant = veylColors.borderActive,
+            error = VeylError,
+            onError = Color.White
+        )
+    } else {
+        androidx.compose.material3.lightColorScheme(
+            primary = primary,
+            onPrimary = onPrimary,
+            primaryContainer = primary.copy(alpha = 0.15f),
+            onPrimaryContainer = primary,
+            secondary = secondary,
+            onSecondary = onSecondary,
+            secondaryContainer = secondary.copy(alpha = 0.12f),
+            onSecondaryContainer = secondary,
+            tertiary = tertiary,
+            tertiaryContainer = tertiary.copy(alpha = 0.12f),
+            background = veylColors.background,
+            onBackground = veylColors.textPrimary,
+            surface = veylColors.surfacePanel,
+            onSurface = veylColors.textPrimary,
+            surfaceVariant = veylColors.surfaceElevated,
+            onSurfaceVariant = veylColors.textSecondary,
+            outline = veylColors.borderHairline,
+            outlineVariant = veylColors.borderActive,
+            error = VeylError,
+            onError = Color.White
+        )
+    }
 }
 
 @Immutable
@@ -496,24 +604,16 @@ fun VeylTheme(
     content: @Composable () -> Unit
 ) {
     val view = LocalView.current
-    val veylColors = if (isDarkMode) {
-        colorScheme ?: VeylDarkColorScheme
-    } else {
-        VeylLightColorScheme
-    }
+    val veylColors = colorScheme ?: if (isDarkMode) VeylDarkColorScheme else VeylLightColorScheme
     
-    val m3Colors = if (isDarkMode) {
-        buildM3ColorScheme(
-            veylColors = veylColors,
-            primary = veylColors.accentSignal,
-            secondary = veylColors.textMono,
-            tertiary = veylColors.accentCyan,
-            background = veylColors.background,
-            isDark = true
-        )
-    } else {
-        VeylM3LightColorScheme
-    }
+    val m3Colors = buildM3ColorScheme(
+        veylColors = veylColors,
+        primary = veylColors.accentSignal,
+        secondary = veylColors.textMono,
+        tertiary = veylColors.accentCyan,
+        background = veylColors.background,
+        isDark = isDarkMode
+    )
 
     if (!view.isInEditMode) {
         SideEffect {

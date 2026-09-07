@@ -37,6 +37,15 @@ import com.audiophile.player.ui.theme.buildVeylColorScheme
 import com.audiophile.player.ui.theme.parseColorFromHex
 import com.audiophile.player.ui.theme.toHex
 
+data class SavedCustomTheme(
+    val id: String,
+    val name: String,
+    val primaryHex: String,
+    val secondaryHex: String,
+    val backgroundHex: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 enum class RepeatMode {
     OFF,
     ALL,
@@ -155,34 +164,91 @@ class AudioEngineController private constructor(private val context: Context) {
     // Dynamic Color Palette & Theme Engine
     // -------------------------------------------------------------------------
     private val _selectedThemeId = MutableStateFlow(
-        prefs.getString("theme_id", "resonate_obsidian") ?: "resonate_obsidian"
+        prefs.getString("theme_id", "monochrome_carbon") ?: "monochrome_carbon"
     )
     val selectedThemeId: StateFlow<String> = _selectedThemeId.asStateFlow()
 
     private val _customPrimary = MutableStateFlow(
-        parseColorFromHex(prefs.getString("custom_primary_hex", "#FFB7B4") ?: "#FFB7B4", Color(0xFFFFB7B4))
+        parseColorFromHex(prefs.getString("custom_primary_hex", "#FFFFFF") ?: "#FFFFFF", Color.White)
     )
     val customPrimary: StateFlow<Color> = _customPrimary.asStateFlow()
 
     private val _customSecondary = MutableStateFlow(
-        parseColorFromHex(prefs.getString("custom_secondary_hex", "#B2CAD3") ?: "#B2CAD3", Color(0xFFB2CAD3))
+        parseColorFromHex(prefs.getString("custom_secondary_hex", "#94A3B8") ?: "#94A3B8", Color(0xFF94A3B8))
     )
     val customSecondary: StateFlow<Color> = _customSecondary.asStateFlow()
 
     private val _customBackground = MutableStateFlow(
-        parseColorFromHex(prefs.getString("custom_bg_hex", "#1B0906") ?: "#1B0906", Color(0xFF1B0906))
+        parseColorFromHex(prefs.getString("custom_bg_hex", "#121212") ?: "#121212", Color(0xFF121212))
     )
     val customBackground: StateFlow<Color> = _customBackground.asStateFlow()
 
+    private fun loadSavedThemes(): List<SavedCustomTheme> {
+        val jsonStr = prefs.getString("saved_custom_themes_json", "[]") ?: "[]"
+        return try {
+            val jsonArray = org.json.JSONArray(jsonStr)
+            val list = mutableListOf<SavedCustomTheme>()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                list.add(
+                    SavedCustomTheme(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        primaryHex = obj.getString("primaryHex"),
+                        secondaryHex = obj.getString("secondaryHex"),
+                        backgroundHex = obj.getString("backgroundHex"),
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun persistSavedThemes(list: List<SavedCustomTheme>) {
+        try {
+            val jsonArray = org.json.JSONArray()
+            for (t in list) {
+                val obj = org.json.JSONObject().apply {
+                    put("id", t.id)
+                    put("name", t.name)
+                    put("primaryHex", t.primaryHex)
+                    put("secondaryHex", t.secondaryHex)
+                    put("backgroundHex", t.backgroundHex)
+                    put("createdAt", t.createdAt)
+                }
+                jsonArray.put(obj)
+            }
+            prefs.edit().putString("saved_custom_themes_json", jsonArray.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("AudioEngineController", "Failed to persist saved themes", e)
+        }
+    }
+
+    private val _savedCustomThemes = MutableStateFlow(loadSavedThemes())
+    val savedCustomThemes: StateFlow<List<SavedCustomTheme>> = _savedCustomThemes.asStateFlow()
+
     private fun loadInitialColorScheme(): VeylColorScheme {
-        val themeId = prefs.getString("theme_id", "resonate_obsidian") ?: "resonate_obsidian"
+        val themeId = prefs.getString("theme_id", "monochrome_carbon") ?: "monochrome_carbon"
         val isDark = prefs.getBoolean("is_dark_mode", true)
-        if (themeId == "custom") {
-            val p = parseColorFromHex(prefs.getString("custom_primary_hex", "#FFB7B4") ?: "#FFB7B4", Color(0xFFFFB7B4))
-            val s = parseColorFromHex(prefs.getString("custom_secondary_hex", "#B2CAD3") ?: "#B2CAD3", Color(0xFFB2CAD3))
-            val bg = parseColorFromHex(prefs.getString("custom_bg_hex", "#1B0906") ?: "#1B0906", Color(0xFF1B0906))
+
+        val savedMatch = _savedCustomThemes.value.find { it.id == themeId }
+        if (savedMatch != null) {
+            val p = parseColorFromHex(savedMatch.primaryHex, Color.White)
+            val s = parseColorFromHex(savedMatch.secondaryHex, Color.Gray)
+            val bg = parseColorFromHex(savedMatch.backgroundHex, Color.Black)
             return buildVeylColorScheme(p, s, Color(0xFF92EAFF), bg, isDark = isDark)
         }
+
+        if (themeId.startsWith("custom")) {
+            val p = parseColorFromHex(prefs.getString("custom_primary_hex", "#FFFFFF") ?: "#FFFFFF", Color.White)
+            val s = parseColorFromHex(prefs.getString("custom_secondary_hex", "#94A3B8") ?: "#94A3B8", Color.Gray)
+            val bg = parseColorFromHex(prefs.getString("custom_bg_hex", "#121212") ?: "#121212", Color(0xFF121212))
+            return buildVeylColorScheme(p, s, Color(0xFF92EAFF), bg, isDark = isDark)
+        }
+
         val preset = CuratedPresets.find { it.id == themeId } ?: CuratedPresets.first()
         return buildVeylColorScheme(preset.primary, preset.secondary, preset.tertiary, preset.background, isDark = isDark)
     }
@@ -211,13 +277,13 @@ class AudioEngineController private constructor(private val context: Context) {
         )
     }
 
-    fun applyCustomPalette(primary: Color, secondary: Color, background: Color) {
-        _selectedThemeId.value = "custom"
+    fun applyCustomPalette(primary: Color, secondary: Color, background: Color, themeId: String = "custom") {
+        _selectedThemeId.value = themeId
         _customPrimary.value = primary
         _customSecondary.value = secondary
         _customBackground.value = background
         prefs.edit()
-            .putString("theme_id", "custom")
+            .putString("theme_id", themeId)
             .putString("custom_primary_hex", primary.toHex())
             .putString("custom_secondary_hex", secondary.toHex())
             .putString("custom_bg_hex", background.toHex())
@@ -231,8 +297,57 @@ class AudioEngineController private constructor(private val context: Context) {
         )
     }
 
+    fun saveCustomTheme(name: String, primary: Color, secondary: Color, background: Color): SavedCustomTheme {
+        val id = "custom_" + System.currentTimeMillis()
+        val cleanName = if (name.trim().isEmpty()) "Custom Theme ${(_savedCustomThemes.value.size + 1)}" else name.trim()
+        val newTheme = SavedCustomTheme(
+            id = id,
+            name = cleanName,
+            primaryHex = primary.toHex(),
+            secondaryHex = secondary.toHex(),
+            backgroundHex = background.toHex()
+        )
+        val updated = _savedCustomThemes.value + newTheme
+        _savedCustomThemes.value = updated
+        persistSavedThemes(updated)
+        applyCustomPalette(primary, secondary, background, themeId = id)
+        return newTheme
+    }
+
+    fun deleteCustomTheme(themeId: String) {
+        val updated = _savedCustomThemes.value.filterNot { it.id == themeId }
+        _savedCustomThemes.value = updated
+        persistSavedThemes(updated)
+        if (_selectedThemeId.value == themeId) {
+            applyThemePreset("monochrome_carbon")
+        }
+    }
+
+    fun applySavedCustomTheme(theme: SavedCustomTheme) {
+        val p = parseColorFromHex(theme.primaryHex, Color.White)
+        val s = parseColorFromHex(theme.secondaryHex, Color.Gray)
+        val bg = parseColorFromHex(theme.backgroundHex, Color.Black)
+        _selectedThemeId.value = theme.id
+        _customPrimary.value = p
+        _customSecondary.value = s
+        _customBackground.value = bg
+        prefs.edit()
+            .putString("theme_id", theme.id)
+            .putString("custom_primary_hex", theme.primaryHex)
+            .putString("custom_secondary_hex", theme.secondaryHex)
+            .putString("custom_bg_hex", theme.backgroundHex)
+            .apply()
+        _currentVeylColorScheme.value = buildVeylColorScheme(
+            primary = p,
+            secondary = s,
+            tertiary = Color(0xFF92EAFF),
+            background = bg,
+            isDark = _isDarkMode.value
+        )
+    }
+
     fun resetThemeToDefault() {
-        applyThemePreset("resonate_obsidian")
+        applyThemePreset("monochrome_carbon")
     }
 
     private val _selectedRootPath = MutableStateFlow<String?>(null)
