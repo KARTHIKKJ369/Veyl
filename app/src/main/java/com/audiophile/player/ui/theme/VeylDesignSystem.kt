@@ -14,11 +14,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.audiophile.player.R
 
 /**
  * Veyl Material 3 Expressive Design System
@@ -471,11 +473,26 @@ private val VeylM3LightColorScheme = androidx.compose.material3.lightColorScheme
 )
 
 // -------------------------------------------------------------------------
-// 2. Custom Type Scale (Display + Dense Telemetry Monospace)
+// 2. Custom Type Scale (Outfit Display + JetBrains Mono Dense Telemetry)
 // -------------------------------------------------------------------------
+val VeylOutfitFont = FontFamily(
+    Font(R.font.outfit, FontWeight.Normal),
+    Font(R.font.outfit, FontWeight.Medium),
+    Font(R.font.outfit, FontWeight.SemiBold),
+    Font(R.font.outfit, FontWeight.Bold),
+    Font(R.font.outfit, FontWeight.ExtraBold)
+)
+
+val VeylMonoFont = FontFamily(
+    Font(R.font.jetbrains_mono, FontWeight.Normal),
+    Font(R.font.jetbrains_mono, FontWeight.Medium),
+    Font(R.font.jetbrains_mono, FontWeight.SemiBold),
+    Font(R.font.jetbrains_mono, FontWeight.Bold)
+)
+
 object VeylTypography {
     val HeadlineLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Bold,
         fontSize = 24.sp,
         letterSpacing = (-0.5).sp,
@@ -483,7 +500,7 @@ object VeylTypography {
     )
 
     val HeadlineMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Bold,
         fontSize = 19.sp,
         letterSpacing = (-0.3).sp,
@@ -491,7 +508,7 @@ object VeylTypography {
     )
 
     val DisplayLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Bold,
         fontSize = 24.sp,
         letterSpacing = (-0.5).sp,
@@ -499,7 +516,7 @@ object VeylTypography {
     )
 
     val DisplayMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Bold,
         fontSize = 19.sp,
         letterSpacing = (-0.3).sp,
@@ -507,7 +524,7 @@ object VeylTypography {
     )
 
     val SectionHeader = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Bold,
         fontSize = 16.sp,
         letterSpacing = (-0.2).sp,
@@ -515,7 +532,7 @@ object VeylTypography {
     )
 
     val TitleLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Bold,
         fontSize = 20.sp,
         letterSpacing = (-0.3).sp,
@@ -523,7 +540,7 @@ object VeylTypography {
     )
 
     val TitleMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         letterSpacing = (-0.1).sp,
@@ -531,28 +548,28 @@ object VeylTypography {
     )
 
     val BodyMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         color = VeylTextPrimary
     )
 
     val Body = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,
         color = VeylTextSecondary
     )
 
     val BodySmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Normal,
         fontSize = 11.sp,
         color = VeylTextMuted
     )
 
     val MonoSpec = TextStyle(
-        fontFamily = FontFamily.Monospace,
+        fontFamily = VeylMonoFont,
         fontWeight = FontWeight.SemiBold,
         fontSize = 11.sp,
         letterSpacing = 0.5.sp,
@@ -560,7 +577,7 @@ object VeylTypography {
     )
 
     val MonoBadge = TextStyle(
-        fontFamily = FontFamily.Monospace,
+        fontFamily = VeylMonoFont,
         fontWeight = FontWeight.Bold,
         fontSize = 10.sp,
         letterSpacing = 0.8.sp,

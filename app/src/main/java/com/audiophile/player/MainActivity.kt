@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 
 import android.os.Environment
 import android.provider.Settings
+import com.audiophile.player.ui.components.DynamicIslandOverlayManager
 
 class MainActivity : ComponentActivity() {
 
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
         }
 
         controller = AudioEngineController.getInstance(this)
+        DynamicIslandOverlayManager.initialize(this, controller)
         startPlaybackService()
         checkPermissions()
         handleIncomingIntent(intent)
@@ -92,10 +94,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        DynamicIslandOverlayManager.setAppForeground(true)
         if (!hasInitialScanRun) {
             hasInitialScanRun = true
             checkStorageAccessAndScan()
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        DynamicIslandOverlayManager.setAppForeground(false)
     }
 
     override fun onNewIntent(intent: Intent) {

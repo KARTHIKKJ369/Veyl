@@ -152,6 +152,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
         super.onCreate()
         try {
             engineController = AudioEngineController.getInstance(this)
+            com.audiophile.player.ui.components.DynamicIslandOverlayManager.initialize(applicationContext, engineController)
             audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             createNotificationChannel()
             initMediaSession()

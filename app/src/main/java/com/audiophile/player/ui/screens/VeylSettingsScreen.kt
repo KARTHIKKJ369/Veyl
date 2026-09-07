@@ -32,6 +32,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -42,6 +43,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
@@ -503,6 +508,103 @@ fun VeylSettingsScreen(
                                     uncheckedTrackColor = colors.surfacePill
                                 )
                             )
+                        }
+
+                        if (dynamicIslandEnabled) {
+                            val context = LocalContext.current
+                            var hasOverlayPermission by remember {
+                                mutableStateOf(android.provider.Settings.canDrawOverlays(context))
+                            }
+
+                            DisposableEffect(context) {
+                                val lifecycleObserver = LifecycleEventObserver { _, event ->
+                                    if (event == Lifecycle.Event.ON_RESUME) {
+                                        hasOverlayPermission = android.provider.Settings.canDrawOverlays(context)
+                                    }
+                                }
+                                val lifecycle = (context as? LifecycleOwner)?.lifecycle
+                                lifecycle?.addObserver(lifecycleObserver)
+                                onDispose {
+                                    lifecycle?.removeObserver(lifecycleObserver)
+                                }
+                            }
+
+                            if (!hasOverlayPermission) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                                        .background(colors.surfacePill.copy(alpha = 0.6f))
+                                        .border(
+                                            1.dp,
+                                            colors.accentPeak.copy(alpha = 0.5f),
+                                            RoundedCornerShape(VeylSpacing.RadiusSm)
+                                        )
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            val intent = android.content.Intent(
+                                                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                android.net.Uri.parse("package:${context.packageName}")
+                                            )
+                                            context.startActivity(intent)
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            text = "Camera Cutout Floating Overlay",
+                                            style = VeylTypography.TitleMedium,
+                                            color = colors.accentPeak,
+                                            fontSize = 11.sp
+                                        )
+                                        Text(
+                                            text = "Grant 'Display over other apps' to float pill at camera cutout when app is minimized",
+                                            style = VeylTypography.BodySmall,
+                                            color = colors.textSecondary,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = "GRANT",
+                                        style = VeylTypography.MonoBadge,
+                                        color = colors.background,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(colors.accentPeak)
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                                        .background(colors.surfacePill.copy(alpha = 0.4f))
+                                        .border(
+                                            1.dp,
+                                            colors.accentSignal.copy(alpha = 0.3f),
+                                            RoundedCornerShape(VeylSpacing.RadiusSm)
+                                        )
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(colors.accentSignal)
+                                    )
+                                    Text(
+                                        text = "Cutout Overlay Active on App Minimize",
+                                        style = VeylTypography.MonoBadge,
+                                        color = colors.accentSignal,
+                                        fontSize = 9.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
