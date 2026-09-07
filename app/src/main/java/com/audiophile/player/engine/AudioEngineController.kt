@@ -239,14 +239,14 @@ class AudioEngineController private constructor(private val context: Context) {
             val p = parseColorFromHex(savedMatch.primaryHex, Color.White)
             val s = parseColorFromHex(savedMatch.secondaryHex, Color.Gray)
             val bg = parseColorFromHex(savedMatch.backgroundHex, Color.Black)
-            return buildVeylColorScheme(p, s, Color(0xFF92EAFF), bg, isDark = isDark)
+            return buildVeylColorScheme(p, s, s, bg, isDark = isDark)
         }
 
         if (themeId.startsWith("custom")) {
             val p = parseColorFromHex(prefs.getString("custom_primary_hex", "#FFFFFF") ?: "#FFFFFF", Color.White)
             val s = parseColorFromHex(prefs.getString("custom_secondary_hex", "#94A3B8") ?: "#94A3B8", Color.Gray)
             val bg = parseColorFromHex(prefs.getString("custom_bg_hex", "#121212") ?: "#121212", Color(0xFF121212))
-            return buildVeylColorScheme(p, s, Color(0xFF92EAFF), bg, isDark = isDark)
+            return buildVeylColorScheme(p, s, s, bg, isDark = isDark)
         }
 
         val preset = CuratedPresets.find { it.id == themeId } ?: CuratedPresets.first()
@@ -291,7 +291,7 @@ class AudioEngineController private constructor(private val context: Context) {
         _currentVeylColorScheme.value = buildVeylColorScheme(
             primary = primary,
             secondary = secondary,
-            tertiary = Color(0xFF92EAFF),
+            tertiary = secondary,
             background = background,
             isDark = _isDarkMode.value
         )
@@ -340,10 +340,18 @@ class AudioEngineController private constructor(private val context: Context) {
         _currentVeylColorScheme.value = buildVeylColorScheme(
             primary = p,
             secondary = s,
-            tertiary = Color(0xFF92EAFF),
+            tertiary = s,
             background = bg,
             isDark = _isDarkMode.value
         )
+    }
+
+    private val _dynamicIslandEnabled = MutableStateFlow(prefs.getBoolean("dynamic_island_enabled", true))
+    val dynamicIslandEnabled: StateFlow<Boolean> = _dynamicIslandEnabled.asStateFlow()
+
+    fun setDynamicIslandEnabled(enabled: Boolean) {
+        _dynamicIslandEnabled.value = enabled
+        prefs.edit().putBoolean("dynamic_island_enabled", enabled).apply()
     }
 
     fun resetThemeToDefault() {

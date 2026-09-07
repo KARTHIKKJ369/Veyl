@@ -212,9 +212,9 @@ fun VeylNowPlayingScreen(
                 ) {
                     Text(
                         text = if (connectedDac != null) {
-                            "USB DAC • ${track?.sampleRate?.div(1000u) ?: 48u} kHz / ${track?.bitDepth ?: 24u}b"
+                            "USB DAC • ${track?.formatName ?: "Hi-Res"} ${track?.sampleRate?.div(1000u) ?: 48u} kHz / ${track?.bitDepth ?: 24u}b"
                         } else {
-                            "AAudio MMAP • ${track?.sampleRate?.div(1000u) ?: 48u} kHz"
+                            "Bit-Perfect Direct • ${track?.formatName ?: "Lossless"} ${track?.sampleRate?.div(1000u) ?: 48u} kHz / ${track?.bitDepth ?: 24u}b"
                         },
                         style = VeylTypography.MonoSpec,
                         color = colors.accentSignal,

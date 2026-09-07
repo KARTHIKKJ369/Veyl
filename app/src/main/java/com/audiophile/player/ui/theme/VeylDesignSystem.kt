@@ -221,10 +221,11 @@ fun shiftColorLightness(base: Color, deltaL: Float): Color {
 fun buildVeylColorScheme(
     primary: Color,
     secondary: Color,
-    tertiary: Color = Color(0xFF92EAFF),
+    tertiary: Color = secondary,
     background: Color,
     isDark: Boolean = true
 ): VeylColorScheme {
+    val resolvedTertiary = if (tertiary == Color(0xFF92EAFF)) secondary else tertiary
     if (!isDark) {
         // High-contrast, elegant audiophile light mode
         val lightBg = if (isColorLight(background)) background else Color(0xFFFAFAFA)
@@ -249,6 +250,12 @@ fun buildVeylColorScheme(
             secondary
         }
 
+        val lightTertiary = if (isColorLight(resolvedTertiary)) {
+            shiftColorLightness(resolvedTertiary, -0.25f)
+        } else {
+            resolvedTertiary
+        }
+
         return VeylColorScheme(
             background = lightBg,
             surfacePanel = surfacePanel,
@@ -257,7 +264,7 @@ fun buildVeylColorScheme(
             borderHairline = Color(0x1F000000),
             borderActive = lightPrimary.copy(alpha = 0.55f),
             accentSignal = lightPrimary,
-            accentCyan = tertiary,
+            accentCyan = lightTertiary,
             accentPeak = Color(0xFFDC2626),
             accentFavorite = lightPrimary,
             primaryContainer = lightPrimary.copy(alpha = 0.15f),
@@ -287,7 +294,7 @@ fun buildVeylColorScheme(
         borderHairline = primary.copy(alpha = 0.18f),
         borderActive = primary.copy(alpha = 0.55f),
         accentSignal = primary,
-        accentCyan = tertiary,
+        accentCyan = resolvedTertiary,
         accentPeak = Color(0xFFFE7453),
         accentFavorite = primary,
         primaryContainer = primary.copy(alpha = 0.22f),

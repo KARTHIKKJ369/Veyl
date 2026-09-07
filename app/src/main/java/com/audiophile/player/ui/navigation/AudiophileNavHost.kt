@@ -21,7 +21,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import com.audiophile.player.ui.components.VeylDynamicIsland
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -84,6 +87,7 @@ fun AudiophileNavHost(
         val currentDestination = navBackStackEntry?.destination
 
         val currentTrack by controller.currentTrack.collectAsState()
+        val dynamicIslandEnabled by controller.dynamicIslandEnabled.collectAsState()
         var isNowPlayingOpen by remember { mutableStateOf(false) }
 
         BackHandler(enabled = isNowPlayingOpen) {
@@ -359,6 +363,18 @@ fun AudiophileNavHost(
                         }
                     )
                 }
+            }
+
+            // Dynamic Island Capsule under camera cutout
+            if (currentTrack != null && dynamicIslandEnabled && !isNowPlayingOpen) {
+                VeylDynamicIsland(
+                    controller = controller,
+                    onOpenNowPlaying = { isNowPlayingOpen = true },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 6.dp)
+                )
             }
         }
 

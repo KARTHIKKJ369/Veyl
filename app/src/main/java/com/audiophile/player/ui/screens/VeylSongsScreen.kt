@@ -193,7 +193,7 @@ fun VeylSongsScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = "Resonate",
+                            text = "Veyl",
                             style = VeylTypography.TitleLarge,
                             color = colors.textPrimary,
                             fontWeight = FontWeight.Bold,
@@ -205,7 +205,7 @@ fun VeylSongsScreen(
                             color = colors.textMuted
                         )
                         Text(
-                            text = "Audio Library",
+                            text = "Library",
                             style = VeylTypography.Body,
                             color = colors.textSecondary,
                             fontSize = 15.sp
@@ -388,130 +388,21 @@ fun VeylSongsScreen(
                 }
             }
 
-            // 5. Storage & Direct Ring Buffer Pipeline Banner
-            item {
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = colors.surfacePanel),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(colors.surfaceElevated),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = VeylIcons.StorageLocal,
-                                        contentDescription = null,
-                                        tint = colors.accentCyan,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Column {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            text = "Internal NVMe Direct I/O",
-                                            style = VeylTypography.TitleMedium,
-                                            color = colors.textPrimary,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = colors.surfaceElevated
-                                        ) {
-                                            Text(
-                                                text = "SYNCED",
-                                                style = VeylTypography.MonoSpec,
-                                                color = colors.accentCyan,
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = "${filteredTracks.size} Master Recordings Loaded",
-                                        style = VeylTypography.BodySmall,
-                                        color = colors.textMuted,
-                                        fontSize = 11.sp
-                                    )
-                                }
-                            }
-
-                            IconButton(
-                                onClick = onPickFolder,
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = VeylIcons.Repeat,
-                                    contentDescription = "Rescan",
-                                    tint = colors.textMuted,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-
-                        // Status Line
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(colors.accentCyan)
-                                )
-                                Text(
-                                    text = "Lock-free ring buffer: 2048 samples active",
-                                    style = VeylTypography.MonoSpec,
-                                    color = colors.textMuted,
-                                    fontSize = 10.sp
-                                )
-                            }
-                            Text(
-                                text = "0 Underruns",
-                                style = VeylTypography.MonoSpec,
-                                color = colors.accentCyan,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-
             // 6. Subheader with View Layout Switcher (List vs Grid vs Compact)
-            if (selectedTab == "All" || selectedTab == "Favorites") {
+            if (selectedTab in listOf("All", "Favorites", "Artists", "Albums")) {
                 item {
+                    val sectionTitle = when (selectedTab) {
+                        "Artists" -> "Artists"
+                        "Albums" -> "Albums"
+                        "Favorites" -> "Favorites"
+                        else -> "Master Recordings"
+                    }
+                    val countBadge = when (selectedTab) {
+                        "Artists" -> "${artistGroups.size}"
+                        "Albums" -> "${albumGroups.size}"
+                        else -> "${filteredTracks.size}"
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -524,7 +415,7 @@ fun VeylSongsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                text = "Master Recordings",
+                                text = sectionTitle,
                                 style = VeylTypography.TitleMedium,
                                 color = colors.textPrimary,
                                 fontWeight = FontWeight.Bold
@@ -534,7 +425,7 @@ fun VeylSongsScreen(
                                 color = colors.surfacePanel
                             ) {
                                 Text(
-                                    text = "${filteredTracks.size}",
+                                    text = countBadge,
                                     style = VeylTypography.MonoSpec,
                                     color = colors.accentSignal,
                                     fontSize = 11.sp,
@@ -621,6 +512,94 @@ fun VeylSongsScreen(
                         item {
                             EmptyStateNotice(message = if (searchQuery.isNotEmpty()) "No matching artists found" else "No artists available")
                         }
+                    } else if (viewLayout == SongViewLayout.GRID) {
+                        // 2-Column Grid View for Artists
+                        items(artistGroups.chunked(2), key = { pair -> pair.first().first }) { rowItems ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                rowItems.forEach { (artistName, artistTracks, albumCount) ->
+                                    val firstUri = artistTracks.firstOrNull()?.uri ?: ""
+                                    Card(
+                                        shape = RoundedCornerShape(18.dp),
+                                        colors = CardDefaults.cardColors(containerColor = colors.surfacePanel),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                controller.playTrackList(artistTracks, startIndex = 0)
+                                            }
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(14.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(72.dp)
+                                                    .clip(CircleShape)
+                                                    .background(colors.surfaceElevated)
+                                            ) {
+                                                AsyncAlbumArt(
+                                                    uri = firstUri,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    shape = CircleShape
+                                                )
+                                            }
+
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text(
+                                                    text = artistName,
+                                                    style = VeylTypography.BodyMedium,
+                                                    color = colors.textPrimary,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "${artistTracks.size} tracks • $albumCount albums",
+                                                    style = VeylTypography.BodySmall,
+                                                    color = colors.textMuted,
+                                                    fontSize = 11.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = colors.accentSignal,
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clickable {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        controller.playTrackList(artistTracks, startIndex = 0)
+                                                    }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = VeylIcons.Play,
+                                                        contentDescription = "Play Artist",
+                                                        tint = colors.surfacePanel,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (rowItems.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
                     } else {
                         items(artistGroups, key = { it.first }) { (artistName, artistTracks, albumCount) ->
                             val isExpanded = expandedArtist == artistName
@@ -692,6 +671,91 @@ fun VeylSongsScreen(
                     if (albumGroups.isEmpty()) {
                         item {
                             EmptyStateNotice(message = if (searchQuery.isNotEmpty()) "No matching albums found" else "No albums available")
+                        }
+                    } else if (viewLayout == SongViewLayout.GRID) {
+                        // 2-Column Grid View for Albums
+                        items(albumGroups.chunked(2), key = { pair -> pair.first().first + pair.first().second }) { rowItems ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                rowItems.forEach { (albumTitle, artistName, albumTracks) ->
+                                    val firstUri = albumTracks.firstOrNull()?.uri ?: ""
+                                    Card(
+                                        shape = RoundedCornerShape(18.dp),
+                                        colors = CardDefaults.cardColors(containerColor = colors.surfacePanel),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                controller.playTrackList(albumTracks, startIndex = 0)
+                                            }
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(10.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .aspectRatio(1f)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(colors.surfaceElevated)
+                                            ) {
+                                                AsyncAlbumArt(
+                                                    uri = firstUri,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+
+                                                // Play FAB
+                                                Box(
+                                                    modifier = Modifier
+                                                        .padding(6.dp)
+                                                        .size(32.dp)
+                                                        .align(Alignment.BottomEnd)
+                                                        .clip(CircleShape)
+                                                        .background(colors.accentSignal)
+                                                        .clickable {
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                            controller.playTrackList(albumTracks, startIndex = 0)
+                                                        },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = VeylIcons.Play,
+                                                        contentDescription = "Play Album",
+                                                        tint = colors.surfacePanel,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            Text(
+                                                text = albumTitle,
+                                                style = VeylTypography.BodyMedium,
+                                                color = colors.textPrimary,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "$artistName • ${albumTracks.size} tracks",
+                                                style = VeylTypography.BodySmall,
+                                                color = colors.textMuted,
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                                if (rowItems.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
                         }
                     } else {
                         items(albumGroups, key = { it.first + it.second }) { (albumTitle, artistName, albumTracks) ->
@@ -878,7 +942,7 @@ fun VeylSongsScreen(
                                                             Text(
                                                                 text = "${track.formatName} ${track.bitDepth}b",
                                                                 style = VeylTypography.MonoSpec,
-                                                                color = colors.accentCyan,
+                                                                color = colors.accentSignal,
                                                                 fontSize = 9.sp,
                                                                 fontWeight = FontWeight.Bold,
                                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1072,7 +1136,7 @@ fun VeylSongsScreen(
                                                     Text(
                                                         text = "${track.formatName} ${track.bitDepth}b",
                                                         style = VeylTypography.MonoSpec,
-                                                        color = colors.accentCyan,
+                                                        color = colors.accentSignal,
                                                         fontSize = 9.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)

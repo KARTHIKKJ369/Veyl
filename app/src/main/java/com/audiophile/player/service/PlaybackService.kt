@@ -303,27 +303,35 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
                 PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
                 PlaybackStateCompat.ACTION_SEEK_TO or
-                PlaybackStateCompat.ACTION_STOP
+                PlaybackStateCompat.ACTION_STOP or
+                PlaybackStateCompat.ACTION_SET_PLAYBACK_SPEED
 
         val stateBuilder = PlaybackStateCompat.Builder()
             .setActions(actions)
             .setState(
                 playbackState,
                 (positionSec * 1000).toLong().coerceAtLeast(0L),
-                if (isPlaying) 1.0f else 0.0f
+                if (isPlaying) 1.0f else 0.0f,
+                android.os.SystemClock.elapsedRealtime()
             )
 
         mediaSession.setPlaybackState(stateBuilder.build())
 
+        val formatSpec = track?.let { "${it.formatName} ${it.sampleRate / 1000u}kHz" } ?: "Lossless Master"
         val metadataBuilder = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track?.title ?: "Veyl")
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track?.artist ?: "Veyl Audiophile")
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track?.album ?: "")
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track?.album ?: "Lossless Album")
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ARTIST, track?.artist ?: "Veyl Audiophile")
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, track?.title ?: "Veyl")
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, track?.artist ?: "Veyl Audiophile")
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, formatSpec)
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, (durationSec * 1000).toLong())
 
         if (artwork != null) {
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork)
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork)
+            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, artwork)
         }
 
         mediaSession.setMetadata(metadataBuilder.build())
@@ -376,6 +384,13 @@ class PlaybackService : MediaBrowserServiceCompat() {
             "${it.artist} • ${it.formatName} ${it.sampleRate / 1000u}kHz"
         } ?: "Bit-Perfect Audio Engine"
 
+        val oemExtras = Bundle().apply {
+            putString("android.media.session.tag", "VeylMediaSession")
+            putBoolean("oppo.notification.live", true)
+            putBoolean("coloros.notification.capsule", true)
+            putBoolean("miui.notification.custom", true)
+        }
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(track?.title ?: "Veyl Music Player")
             .setContentText(formatDesc)
@@ -390,6 +405,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setShowWhen(false)
             .setOngoing(isPlaying)
+            .setColorized(true)
+            .addExtras(oemExtras)
             .addAction(prevAction)
             .addAction(playAction)
             .addAction(nextAction)

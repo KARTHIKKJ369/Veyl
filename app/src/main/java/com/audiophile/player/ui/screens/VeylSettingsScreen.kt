@@ -98,6 +98,7 @@ fun VeylSettingsScreen(
     val selectedThemeId by controller.selectedThemeId.collectAsState()
     val isDarkMode by controller.isDarkMode.collectAsState()
     val savedCustomThemes by controller.savedCustomThemes.collectAsState()
+    val dynamicIslandEnabled by controller.dynamicIslandEnabled.collectAsState()
 
     var mmapExclusiveEnabled by remember { mutableStateOf(true) }
     var dsdGainCompensation by remember { mutableStateOf(true) }
@@ -424,7 +425,7 @@ fun VeylSettingsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                                 Text(
                                     text = themeTitle,
                                     style = VeylTypography.TitleMedium,
@@ -441,37 +442,67 @@ fun VeylSettingsScreen(
                                 )
                             }
 
-                            // Trigger Button for Color Wheel Sheet
+                            // Trigger Button for Color Wheel Sheet (Icon Only)
                             Box(
                                 modifier = Modifier
+                                    .size(36.dp)
                                     .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
                                     .background(colors.accentSignal)
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         showColorWheelSheet = true
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = VeylIcons.Palette,
-                                        contentDescription = null,
-                                        tint = if (isColorLight(colors.accentSignal)) Color.Black else Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = "Color Wheel",
-                                        style = VeylTypography.TitleMedium,
-                                        color = if (isColorLight(colors.accentSignal)) Color.Black else Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                Icon(
+                                    imageVector = VeylIcons.Palette,
+                                    contentDescription = "Color Palette Picker",
+                                    tint = if (isColorLight(colors.accentSignal)) Color.Black else Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
+                        }
+
+                        // Dynamic Island Capsule Setting
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                                .background(colors.surfaceElevated)
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = "Dynamic Island Capsule",
+                                    style = VeylTypography.TitleMedium,
+                                    color = colors.textPrimary,
+                                    fontSize = 12.sp
+                                )
+                                Text(
+                                    text = "Camera cutout floating playback pill with OEM Fluid Cloud & HyperOS live status",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    fontSize = 10.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Switch(
+                                checked = dynamicIslandEnabled,
+                                onCheckedChange = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    controller.setDynamicIslandEnabled(it)
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = colors.background,
+                                    checkedTrackColor = colors.accentSignal,
+                                    uncheckedThumbColor = colors.textSecondary,
+                                    uncheckedTrackColor = colors.surfacePill
+                                )
+                            )
                         }
                     }
                 }
@@ -575,7 +606,7 @@ fun VeylSettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                             Text(
                                 text = "AAudio MMAP Exclusive Mode",
                                 style = VeylTypography.TitleMedium,
@@ -795,7 +826,7 @@ fun VeylSettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                             Text(
                                 text = "DSD +6.0 dB Headroom Compensation",
                                 style = VeylTypography.TitleMedium,
@@ -851,7 +882,7 @@ fun VeylSettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                             Text(
                                 text = "True Bit-Perfect Gapless Playback",
                                 style = VeylTypography.TitleMedium,
@@ -893,7 +924,7 @@ fun VeylSettingsScreen(
                             Text(
                                 text = if (crossfadeSeconds == 0f) "OFF (Gapless)" else "%.1f s".format(crossfadeSeconds),
                                 style = VeylTypography.MonoBadge,
-                                color = if (crossfadeSeconds == 0f) colors.accentSignal else colors.accentCyan
+                                color = colors.accentSignal
                             )
                         }
 
@@ -941,7 +972,7 @@ fun VeylSettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                             Text(
                                 text = "Auto-Fetch Online Lyrics (LRCLIB)",
                                 style = VeylTypography.TitleMedium,
@@ -974,7 +1005,7 @@ fun VeylSettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                             Text(
                                 text = "Offline Lyrics Cache",
                                 style = VeylTypography.TitleMedium,

@@ -527,7 +527,7 @@ fun VeylColorWheelPickerSheet(
                 buildVeylColorScheme(
                     primary = primaryColor,
                     secondary = secondaryColor,
-                    tertiary = Color(0xFF92EAFF),
+                    tertiary = secondaryColor,
                     background = backgroundColor,
                     isDark = previewDark
                 )
