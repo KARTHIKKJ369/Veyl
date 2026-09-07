@@ -109,6 +109,13 @@ class AudioEngineController private constructor(private val context: Context) {
     private val _playbackHistory = MutableStateFlow<List<TrackInfo>>(emptyList())
     val playbackHistory: StateFlow<List<TrackInfo>> = _playbackHistory.asStateFlow()
 
+    // High-resolution position flows (30 FPS for buttery smooth lyrics & scrubber)
+    private val _currentPositionSec = MutableStateFlow(0.0)
+    val currentPositionSec: StateFlow<Double> = _currentPositionSec.asStateFlow()
+
+    private val _currentPositionMs = MutableStateFlow(0L)
+    val currentPositionMs: StateFlow<Long> = _currentPositionMs.asStateFlow()
+
     // Synced Lyrics Flow & Offset
     private val _currentLyrics = MutableStateFlow<TrackLyrics?>(null)
     val currentLyrics: StateFlow<TrackLyrics?> = _currentLyrics.asStateFlow()
@@ -201,16 +208,28 @@ class AudioEngineController private constructor(private val context: Context) {
     private fun startPolling() {
         pollJob?.cancel()
         pollJob = scope.launch {
+            var tickCount = 0
             while (isActive) {
                 try {
                     nativeEngine?.let { engine ->
                         val currentStatus = engine.getStatus()
-                        _status.value = currentStatus
+                        val pos = currentStatus.positionSeconds
+                        val dur = currentStatus.durationSeconds
+                        val isPlaying = currentStatus.state == PlaybackStateEnum.PLAYING
+
+                        _currentPositionSec.value = pos
+                        _currentPositionMs.value = (pos * 1000.0).toLong()
 
                         val currentUri = currentStatus.currentTrack?.uri
-                        if (currentUri != null && currentUri != lastTrackUri) {
+                        val lastStatus = _status.value
+                        val trackChanged = currentUri != null && currentUri != lastTrackUri
+
+                        if (trackChanged) {
                             lastTrackUri = currentUri
                             isTransitioning = false
+                            _currentLyrics.value = null
+                            _currentPositionSec.value = 0.0
+                            _currentPositionMs.value = 0L
 
                             // Record play count and history
                             recordTrackPlayed(currentUri)
@@ -226,24 +245,36 @@ class AudioEngineController private constructor(private val context: Context) {
                                     durationSeconds = curTrack?.durationSeconds ?: 0.0,
                                     allowOnlineFetch = _autoFetchLyrics.value
                                 )
-                                _currentLyrics.value = lyrics
+                                if (_status.value?.currentTrack?.uri == currentUri) {
+                                    _currentLyrics.value = lyrics
+                                }
                             }
                             // Preload artwork into memory
                             ArtworkCache.loadArtwork(currentUri, 512)
                         }
 
+                        // Update _status: on track change, playback state change, or throttled every ~3 ticks (~100ms)
+                        val shouldUpdateStatus = trackChanged ||
+                                lastStatus == null ||
+                                lastStatus.state != currentStatus.state ||
+                                lastStatus.sampleRate != currentStatus.sampleRate ||
+                                (tickCount % 3 == 0)
+
+                        if (shouldUpdateStatus) {
+                            _status.value = currentStatus
+                        }
+                        tickCount++
+
                         // Automatic and seamless track progression
-                        val pos = currentStatus.positionSeconds
-                        val dur = currentStatus.durationSeconds
                         val now = System.currentTimeMillis()
 
                         // Reset transition lock once new track is playing at start
-                        if (pos < 1.5 && currentStatus.state == PlaybackStateEnum.PLAYING) {
+                        if (pos < 1.5 && isPlaying) {
                             isTransitioning = false
                         }
 
                         val isEnded = currentStatus.state == PlaybackStateEnum.ENDED ||
-                                      (dur > 2.0 && pos >= dur - 0.45 && currentStatus.state == PlaybackStateEnum.PLAYING)
+                                (dur > 2.0 && pos >= dur - 0.45 && isPlaying)
 
                         if (isEnded && !isTransitioning && (now - lastTransitionTimestamp > 1500L)) {
                             isTransitioning = true
@@ -251,11 +282,16 @@ class AudioEngineController private constructor(private val context: Context) {
                             Log.i("AudioEngineController", "Track completed ($pos / $dur, state=${currentStatus.state}). Auto-advancing next track.")
                             handleTrackEnded()
                         }
+
+                        val delayTime = if (isPlaying) 33L else 150L
+                        delay(delayTime)
+                    } ?: run {
+                        delay(200)
                     }
                 } catch (e: Exception) {
                     Log.w("AudioEngineController", "Polling status error", e)
+                    delay(200)
                 }
-                delay(150) // Smooth ~7 FPS UI scrubber updates with zero frame jank
             }
         }
     }
@@ -427,7 +463,60 @@ class AudioEngineController private constructor(private val context: Context) {
         if (index in currentQueue.indices) {
             currentQueue.removeAt(index)
             _queue.value = currentQueue
+            if (!_isShuffleEnabled.value) {
+                _originalQueue.value = currentQueue
+            }
         }
+    }
+
+    fun moveInQueue(fromIndex: Int, toIndex: Int) {
+        val currentQueue = _queue.value.toMutableList()
+        if (fromIndex in currentQueue.indices && toIndex in currentQueue.indices && fromIndex != toIndex) {
+            val item = currentQueue.removeAt(fromIndex)
+            currentQueue.add(toIndex, item)
+            _queue.value = currentQueue
+            if (!_isShuffleEnabled.value) {
+                _originalQueue.value = currentQueue
+            }
+        }
+    }
+
+    fun playNext(track: TrackInfo) {
+        val currentQueue = _queue.value.toMutableList()
+        val current = _status.value?.currentTrack
+        val insertIndex = if (current != null) {
+            val idx = currentQueue.indexOfFirst { it.uri == current.uri }
+            if (idx != -1) idx + 1 else 0
+        } else {
+            0
+        }
+        currentQueue.add(insertIndex.coerceIn(0, currentQueue.size), track)
+        _queue.value = currentQueue
+        if (!_isShuffleEnabled.value) {
+            _originalQueue.value = currentQueue
+        }
+    }
+
+    fun addToQueue(track: TrackInfo) {
+        val currentQueue = _queue.value.toMutableList()
+        currentQueue.add(track)
+        _queue.value = currentQueue
+        if (!_isShuffleEnabled.value) {
+            _originalQueue.value = currentQueue
+        }
+    }
+
+    fun clearQueue() {
+        val current = _status.value?.currentTrack
+        if (current != null) {
+            _queue.value = listOf(current)
+            _originalQueue.value = listOf(current)
+        } else {
+            _queue.value = emptyList()
+            _originalQueue.value = emptyList()
+        }
+        unplayedShufflePool.clear()
+        playHistory.clear()
     }
 
     fun getInlineLyrics(positionSeconds: Double): Triple<LyricLine?, LyricLine?, LyricLine?> {
@@ -599,6 +688,9 @@ class AudioEngineController private constructor(private val context: Context) {
 
             isTransitioning = false
             lastTransitionTimestamp = System.currentTimeMillis()
+            _currentLyrics.value = null
+            _currentPositionSec.value = 0.0
+            _currentPositionMs.value = 0L
 
             nativeEngine?.playTrack(
                 uri = track.uri,
@@ -670,7 +762,13 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun seekTo(seconds: Double) {
-        nativeEngine?.seek(seconds)
+        val safeSeconds = seconds.coerceAtLeast(0.0)
+        _currentPositionSec.value = safeSeconds
+        _currentPositionMs.value = (safeSeconds * 1000.0).toLong()
+        _status.value?.let { current ->
+            _status.value = current.copy(positionSeconds = safeSeconds)
+        }
+        nativeEngine?.seek(safeSeconds)
     }
 
     fun setVolume(volume: Float) {

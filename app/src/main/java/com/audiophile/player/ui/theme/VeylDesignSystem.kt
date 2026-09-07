@@ -78,7 +78,43 @@ data class VeylColorScheme(
     val glassButtonBg: Color = VeylGlassButtonBg
 )
 
-val LocalVeylColors = compositionLocalOf { VeylColorScheme() }
+val VeylDarkColorScheme = VeylColorScheme(
+    background = VeylBackgroundDark,
+    surfacePanel = VeylSurfaceContainer,
+    surfaceElevated = VeylSurfaceContainerHigh,
+    surfacePill = VeylSurfaceContainerHighest,
+    borderHairline = VeylBorderHairline,
+    borderActive = VeylBorderActive,
+    accentSignal = VeylPrimary,
+    accentCyan = Color(0xFF00E5FF),
+    accentPeak = Color(0xFFFF453A),
+    accentFavorite = VeylFavorite,
+    textPrimary = VeylTextPrimary,
+    textSecondary = VeylTextSecondary,
+    textMuted = VeylTextMuted,
+    textMono = VeylPrimary,
+    glassButtonBg = VeylGlassButtonBg
+)
+
+val VeylLightColorScheme = VeylColorScheme(
+    background = Color(0xFFF7F8FC),
+    surfacePanel = Color(0xFFECEEF5),
+    surfaceElevated = Color(0xFFE1E4EE),
+    surfacePill = Color(0xFFD4D8E4),
+    borderHairline = Color(0x1F000000),
+    borderActive = Color(0x663F51B5),
+    accentSignal = Color(0xFF3F51B5),
+    accentCyan = Color(0xFF00838F),
+    accentPeak = Color(0xFFD32F2F),
+    accentFavorite = Color(0xFFE91E63),
+    textPrimary = Color(0xFF191A20),
+    textSecondary = Color(0xFF45464F),
+    textMuted = Color(0xFF757680),
+    textMono = Color(0xFF3F51B5),
+    glassButtonBg = Color(0x22D4D8E4)
+)
+
+val LocalVeylColors = compositionLocalOf { VeylDarkColorScheme }
 
 private val VeylM3DarkColorScheme = darkColorScheme(
     primary = VeylPrimary,
@@ -99,6 +135,27 @@ private val VeylM3DarkColorScheme = darkColorScheme(
     onSurfaceVariant = VeylTextSecondary,
     outline = VeylBorderHairline,
     outlineVariant = VeylBorderActive,
+    error = VeylError,
+    onError = Color.White
+)
+
+private val VeylM3LightColorScheme = androidx.compose.material3.lightColorScheme(
+    primary = Color(0xFF3F51B5),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFDEE1F9),
+    onPrimaryContainer = Color(0xFF151D36),
+    secondary = Color(0xFF5A5D72),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFDFE1F9),
+    onSecondaryContainer = Color(0xFF171A2C),
+    background = Color(0xFFF7F8FC),
+    onBackground = Color(0xFF191A20),
+    surface = Color(0xFFF7F8FC),
+    onSurface = Color(0xFF191A20),
+    surfaceVariant = Color(0xFFECEEF5),
+    onSurfaceVariant = Color(0xFF45464F),
+    outline = Color(0x1F000000),
+    outlineVariant = Color(0x663F51B5),
     error = VeylError,
     onError = Color.White
 )
@@ -224,26 +281,30 @@ object VeylSpacing {
 
 @Composable
 fun VeylTheme(
+    isDarkMode: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val view = LocalView.current
+    val veylColors = if (isDarkMode) VeylDarkColorScheme else VeylLightColorScheme
+    val m3Colors = if (isDarkMode) VeylM3DarkColorScheme else VeylM3LightColorScheme
+
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window
             if (window != null) {
-                window.statusBarColor = VeylBackgroundDark.toArgb()
-                window.navigationBarColor = VeylBackgroundDark.toArgb()
-                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
-                WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
+                window.statusBarColor = veylColors.background.toArgb()
+                window.navigationBarColor = veylColors.background.toArgb()
+                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !isDarkMode
+                WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !isDarkMode
             }
         }
     }
 
     CompositionLocalProvider(
-        LocalVeylColors provides VeylColorScheme()
+        LocalVeylColors provides veylColors
     ) {
         MaterialTheme(
-            colorScheme = VeylM3DarkColorScheme,
+            colorScheme = m3Colors,
             content = content
         )
     }

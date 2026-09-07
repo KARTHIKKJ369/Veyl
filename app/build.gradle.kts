@@ -84,4 +84,5 @@ dependencies {
     implementation("androidx.compose.ui:ui-text-google-fonts:1.7.8")
 
     debugImplementation(libs.androidx.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
 }

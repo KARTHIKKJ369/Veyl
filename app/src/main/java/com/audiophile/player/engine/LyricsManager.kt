@@ -3,6 +3,7 @@ package com.audiophile.player.engine
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.util.Log
+import android.util.LruCache
 import android.util.Xml
 import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.regex.Pattern
+import kotlin.math.abs
 
 @Immutable
 data class LyricWord(
@@ -32,19 +34,25 @@ data class LyricLine(
     val words: List<LyricWord> = emptyList(),
     val translation: String? = null
 ) {
+    /**
+     * Determines active word index using deterministic player clock position.
+     * Returns:
+     * - -1 if playback is before the first word
+     * - Index of the word currently being vocalized
+     * - words.size if all words have finished vocalizing
+     */
     fun findActiveWordIndex(posMs: Long): Int {
         if (words.isEmpty()) return -1
+        if (posMs < words.first().startMs) return -1
         for (i in words.indices) {
             val w = words[i]
-            if (posMs in w.startMs..w.endMs) {
+            val isLast = i == words.size - 1
+            if (posMs >= w.startMs && (posMs < w.endMs || (isLast && posMs <= w.endMs))) {
                 return i
-            }
-            if (posMs < w.startMs && i > 0 && posMs >= words[i - 1].endMs) {
-                return i - 1
             }
         }
         if (posMs > (words.lastOrNull()?.endMs ?: 0L)) {
-            return words.size
+            return words.size - 1
         }
         return -1
     }
@@ -59,27 +67,53 @@ data class TrackLyrics(
     val isSynced: Boolean = lines.any { it.timestampMs > 0 }
     val hasWordTiming: Boolean = lines.any { it.words.isNotEmpty() }
 
+    /**
+     * High-performance O(log N) binary search for the active lyric line index.
+     * Returns the index of the line that should be active at the given position,
+     * or -1 if the position is before the first line.
+     */
     fun findActiveIndex(positionSeconds: Double, offsetMs: Long = 0L): Int {
         if (lines.isEmpty()) return -1
         val posMs = ((positionSeconds * 1000).toLong() + offsetMs).coerceAtLeast(0L)
-        var activeIdx = -1
-        for (i in lines.indices) {
-            if (lines[i].timestampMs <= posMs) {
-                activeIdx = i
+
+        // Quick boundary checks
+        if (posMs < lines.first().timestampMs) return -1
+        if (posMs >= lines.last().timestampMs) return lines.size - 1
+
+        var low = 0
+        var high = lines.size - 1
+        var bestIdx = -1
+
+        while (low <= high) {
+            val mid = (low + high) ushr 1
+            val midTime = lines[mid].timestampMs
+            if (midTime <= posMs) {
+                bestIdx = mid
+                low = mid + 1
             } else {
-                break
+                high = mid - 1
             }
         }
-        return activeIdx
+        return bestIdx
+    }
+
+    fun getActiveLine(positionSeconds: Double, offsetMs: Long = 0L): LyricLine? {
+        val idx = findActiveIndex(positionSeconds, offsetMs)
+        return if (idx in lines.indices) lines[idx] else null
     }
 }
 
 object LyricsManager {
 
     private const val TAG = "LyricsManager"
-    private val lineTimeTagPattern = Pattern.compile("\\[(\\d{1,2}):(\\d{2})(?:\\.(\\d{1,3}))?\\]")
-    private val wordTimeTagPattern = Pattern.compile("<(\\d{1,2}):(\\d{2})(?:\\.(\\d{1,3}))?>")
+    private val lineTimeTagPattern = Pattern.compile("\\[(\\d{1,3}):(\\d{2})(?:\\.(\\d{1,3}))?\\]")
+    private val wordTimeTagPattern = Pattern.compile("<(\\d{1,3}):(\\d{2})(?:\\.(\\d{1,3}))?>")
+    private val offsetTagPattern = Pattern.compile("\\[offset:\\s*([+-]?\\d+)\\]", Pattern.CASE_INSENSITIVE)
+
     private var cacheDirectory: File? = null
+
+    // In-memory LRU cache to prevent disk I/O and re-parsing during rapid track switches
+    private val memoryLyricsCache = object : LruCache<String, TrackLyrics>(50) {}
 
     fun init(context: Context) {
         cacheDirectory = File(context.cacheDir, "lyrics_cache").apply { mkdirs() }
@@ -87,8 +121,9 @@ object LyricsManager {
 
     fun clearCache() {
         try {
+            memoryLyricsCache.evictAll()
             cacheDirectory?.listFiles()?.forEach { it.delete() }
-            Log.i(TAG, "Lyrics cache cleared")
+            Log.i(TAG, "Lyrics memory and disk cache cleared")
         } catch (e: Exception) {
             Log.w(TAG, "Error clearing lyrics cache", e)
         }
@@ -110,6 +145,12 @@ object LyricsManager {
         durationSeconds: Double = 0.0,
         allowOnlineFetch: Boolean = true
     ): TrackLyrics = withContext(Dispatchers.IO) {
+        // Check in-memory cache first
+        val memCached = memoryLyricsCache.get(trackUri)
+        if (memCached != null) {
+            return@withContext memCached
+        }
+
         val file = File(trackUri)
 
         // 1. Search for external sidecar files (.lrc, .ttml, .xml) in track directory
@@ -138,7 +179,9 @@ object LyricsManager {
                         }
                         if (lines.isNotEmpty()) {
                             Log.i(TAG, "Loaded ${lines.size} lyric lines from sidecar ${candidate.name}")
-                            return@withContext TrackLyrics(trackUri, lines, source = "file")
+                            val result = TrackLyrics(trackUri, lines, source = "file")
+                            memoryLyricsCache.put(trackUri, result)
+                            return@withContext result
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed reading sidecar lyrics from ${candidate.path}", e)
@@ -156,7 +199,9 @@ object LyricsManager {
                 val lines = parseLrc(text)
                 if (lines.isNotEmpty()) {
                     Log.i(TAG, "Loaded ${lines.size} lyric lines from disk cache for $title")
-                    return@withContext TrackLyrics(trackUri, lines, source = "cache")
+                    val result = TrackLyrics(trackUri, lines, source = "cache")
+                    memoryLyricsCache.put(trackUri, result)
+                    return@withContext result
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error reading cached lyrics", e)
@@ -169,7 +214,7 @@ object LyricsManager {
                 val retriever = MediaMetadataRetriever()
                 retriever.setDataSource(file.absolutePath)
                 val embeddedLyrics = try {
-                    retriever.extractMetadata(1000) // Some OEM keys
+                    retriever.extractMetadata(1000) // Some OEM metadata keys
                 } catch (e: Exception) {
                     null
                 }
@@ -179,7 +224,9 @@ object LyricsManager {
                     val lines = parseLrc(fixMojibake(embeddedLyrics))
                     if (lines.isNotEmpty()) {
                         Log.i(TAG, "Loaded ${lines.size} lyric lines from embedded tag")
-                        return@withContext TrackLyrics(trackUri, lines, source = "embedded")
+                        val result = TrackLyrics(trackUri, lines, source = "embedded")
+                        memoryLyricsCache.put(trackUri, result)
+                        return@withContext result
                     }
                 }
             } catch (e: Exception) {
@@ -209,7 +256,9 @@ object LyricsManager {
                         val lines = parseLrc(fixMojibake(lyricText))
                         if (lines.isNotEmpty()) {
                             Log.i(TAG, "Loaded ${lines.size} lyric lines from ID3 USLT frame")
-                            return@withContext TrackLyrics(trackUri, lines, source = "id3")
+                            val result = TrackLyrics(trackUri, lines, source = "id3")
+                            memoryLyricsCache.put(trackUri, result)
+                            return@withContext result
                         }
                     }
                 }
@@ -218,7 +267,7 @@ object LyricsManager {
             }
         }
 
-        // 5. Automatic Online Fetch from LRCLIB API (Booming Music style)
+        // 5. Automatic Online Fetch from LRCLIB API with confidence validation
         if (allowOnlineFetch && !title.isNullOrBlank()) {
             val fetched = fetchLyricsFromLrcLib(
                 title = title,
@@ -227,7 +276,7 @@ object LyricsManager {
                 durationSeconds = durationSeconds
             )
             if (fetched != null && fetched.lines.isNotEmpty()) {
-                // Save to cache for offline use
+                // Save to disk cache for offline use
                 cachedFile?.let {
                     try {
                         val rawContent = buildLrcText(fetched.lines)
@@ -236,23 +285,42 @@ object LyricsManager {
                         Log.w(TAG, "Failed caching lyrics to disk", e)
                     }
                 }
-                return@withContext fetched.copy(uri = trackUri, source = "lrclib")
+                val result = fetched.copy(uri = trackUri, source = "lrclib")
+                memoryLyricsCache.put(trackUri, result)
+                return@withContext result
             }
         }
 
-        TrackLyrics(trackUri, emptyList())
+        val emptyResult = TrackLyrics(trackUri, emptyList())
+        return@withContext emptyResult
     }
 
     private fun getCacheKey(title: String, artist: String): String {
-        val clean = "${title.trim().lowercase()}_${artist.trim().lowercase()}"
+        val clean = "${cleanTitle(title).lowercase()}_${cleanArtist(artist).lowercase()}"
             .replace(Regex("[^a-z0-9_]"), "_")
         return clean.take(80)
     }
 
+    fun cleanTitle(title: String): String {
+        return title
+            .replace(Regex("\\.(mp3|flac|wav|m4a|aac|ogg|opus|dsf|dff)$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*[\\[(].*?(feat|ft|remix|remaster|live|official|audio|mono|stereo|bonus|edit|explicit).*?[\\])]", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*-\\s*(remaster|remix|live|official|bonus|edit|explicit).*?$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*[\\[(]\\d{4}[\\])]"), "") // [2024]
+            .replace(Regex("^\\d{1,3}\\s*[-._]\\s*"), "") // "01 - " or "01. "
+            .trim()
+    }
+
+    fun cleanArtist(artist: String): String {
+        return artist
+            .replace(Regex("\\s*[\\[(].*?(feat|ft).*?[\\])]", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s+(feat\\.?|ft\\.?)\\s+.*$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex(",\\s*.*$"), "") // take primary artist before comma
+            .trim()
+    }
+
     /**
-     * Queries the open-source LRCLIB API (used by Booming Music).
-     * Endpoint: https://lrclib.net/api/get
-     * Fallback: https://lrclib.net/api/search
+     * Queries the open-source LRCLIB API with high-confidence candidate matching.
      */
     suspend fun fetchLyricsFromLrcLib(
         title: String,
@@ -261,14 +329,14 @@ object LyricsManager {
         durationSeconds: Double
     ): TrackLyrics? = withContext(Dispatchers.IO) {
         try {
-            // Clean up title (remove "(feat. ...)", "[Remastered]", etc.)
-            val cleanTitle = title.replace(Regex("\\s*[\\[(].*?[\\])]"), "").trim()
-            val cleanArtist = artist.replace(Regex("\\s*[\\[(].*?[\\])]"), "").trim()
+            val cTitle = cleanTitle(title)
+            val cArtist = cleanArtist(artist)
+            if (cTitle.isBlank()) return@withContext null
 
-            // 1. Direct GET request
+            // 1. Direct GET request with exact parameters
             val queryParams = buildString {
-                append("track_name=").append(URLEncoder.encode(cleanTitle, "UTF-8"))
-                append("&artist_name=").append(URLEncoder.encode(cleanArtist, "UTF-8"))
+                append("track_name=").append(URLEncoder.encode(cTitle, "UTF-8"))
+                append("&artist_name=").append(URLEncoder.encode(cArtist, "UTF-8"))
                 if (!album.isNullOrBlank()) {
                     append("&album_name=").append(URLEncoder.encode(album.trim(), "UTF-8"))
                 }
@@ -282,7 +350,7 @@ object LyricsManager {
                 requestMethod = "GET"
                 connectTimeout = 4000
                 readTimeout = 4000
-                setRequestProperty("User-Agent", "Audiophile-Player-Android/1.0")
+                setRequestProperty("User-Agent", "Veyl-Audiophile-Player/2.0")
                 setRequestProperty("Accept", "application/json")
             }
 
@@ -298,14 +366,14 @@ object LyricsManager {
                 directConn.disconnect()
             }
 
-            // 2. Search Fallback if direct lookup did not match
-            val searchQuery = "$cleanTitle $cleanArtist".trim()
+            // 2. Search Fallback with confidence scoring and duration validation
+            val searchQuery = "$cTitle $cArtist".trim()
             val searchUrl = URL("https://lrclib.net/api/search?q=${URLEncoder.encode(searchQuery, "UTF-8")}")
             val searchConn = (searchUrl.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 4000
                 readTimeout = 4000
-                setRequestProperty("User-Agent", "Audiophile-Player-Android/1.0")
+                setRequestProperty("User-Agent", "Veyl-Audiophile-Player/2.0")
                 setRequestProperty("Accept", "application/json")
             }
 
@@ -313,18 +381,50 @@ object LyricsManager {
                 val responseJson = searchConn.inputStream.bufferedReader().use { it.readText() }
                 searchConn.disconnect()
                 val array = JSONArray(responseJson)
+
                 if (array.length() > 0) {
-                    // Pick the best match with synced lyrics
+                    var bestScore = -1.0
+                    var bestLyrics: TrackLyrics? = null
+
                     for (i in 0 until array.length()) {
                         val item = array.getJSONObject(i)
                         val syncedLyrics = item.optString("syncedLyrics")
-                        if (!syncedLyrics.isNullOrBlank()) {
-                            val lines = parseLrc(syncedLyrics)
-                            if (lines.isNotEmpty()) {
-                                Log.i(TAG, "LRCLIB search fallback matched item #$i with ${lines.size} lines")
-                                return@withContext TrackLyrics(cleanTitle, lines, source = "lrclib_search")
+                        val plainLyrics = item.optString("plainLyrics")
+                        val itemDuration = item.optDouble("duration", 0.0)
+                        val itemTrack = item.optString("trackName", "")
+                        val itemArtist = item.optString("artistName", "")
+
+                        // Duration tolerance check: must be within ±5.5 seconds if duration is known
+                        if (durationSeconds > 0.0 && itemDuration > 0.0) {
+                            val diff = abs(itemDuration - durationSeconds)
+                            if (diff > 5.5) continue // Exclude wrong version / remix / extended cut
+                        }
+
+                        var score = 0.0
+                        if (!syncedLyrics.isNullOrBlank()) score += 50.0
+                        if (itemTrack.equals(cTitle, ignoreCase = true)) score += 30.0
+                        else if (itemTrack.contains(cTitle, ignoreCase = true)) score += 15.0
+
+                        if (itemArtist.equals(cArtist, ignoreCase = true)) score += 20.0
+                        else if (itemArtist.contains(cArtist, ignoreCase = true)) score += 10.0
+
+                        if (score > bestScore) {
+                            val candidateLyrics = if (!syncedLyrics.isNullOrBlank()) {
+                                parseLrc(syncedLyrics)
+                            } else if (!plainLyrics.isNullOrBlank()) {
+                                parseLrc(plainLyrics)
+                            } else emptyList()
+
+                            if (candidateLyrics.isNotEmpty()) {
+                                bestScore = score
+                                bestLyrics = TrackLyrics(cTitle, candidateLyrics, source = "lrclib_search")
                             }
                         }
+                    }
+
+                    if (bestLyrics != null) {
+                        Log.i(TAG, "LRCLIB search fallback selected best candidate with ${bestLyrics.lines.size} lines")
+                        return@withContext bestLyrics
                     }
                 }
             } else {
@@ -361,15 +461,27 @@ object LyricsManager {
         val rawLines = fixedContent.lineSequence().toList()
 
         var hasTimestamp = false
+        var fileOffsetMs = 0L
+
+        // First pass: extract [offset:xxx] if present in headers
+        for (line in rawLines) {
+            val trimmed = line.trim()
+            val offsetMatcher = offsetTagPattern.matcher(trimmed)
+            if (offsetMatcher.find()) {
+                fileOffsetMs = offsetMatcher.group(1)?.toLongOrNull() ?: 0L
+                break
+            }
+        }
 
         rawLines.forEach { line ->
             val trimmed = line.trim()
             if (trimmed.isEmpty()) return@forEach
 
-            // Check metadata headers like [ti:Title], [ar:Artist], etc.
+            // Skip metadata headers
             if (trimmed.startsWith("[ti:") || trimmed.startsWith("[ar:") ||
                 trimmed.startsWith("[al:") || trimmed.startsWith("[by:") ||
-                trimmed.startsWith("[offset:")
+                trimmed.startsWith("[offset:") || trimmed.startsWith("[re:") ||
+                trimmed.startsWith("[ve:")
             ) {
                 return@forEach
             }
@@ -398,21 +510,35 @@ object LyricsManager {
 
             if (timestamps.isNotEmpty()) {
                 val lineBody = trimmed.substring(lastMatchEnd).trim()
-                // Parse word-by-word timestamps inside the line if present: "<00:12.34> word <00:13.10>"
+                // Parse word-by-word timestamps inside the line if present: "<00:12.34>word<00:13.10>"
                 val words = parseEnhancedLrcWords(lineBody, timestamps.first())
+
+                // Clean text: strip word time tags while preserving natural syllable spacing
                 val cleanText = if (words.isNotEmpty()) {
-                    words.joinToString(" ") { it.text }
+                    lineBody.replace(Regex("<\\d{1,3}:\\d{2}(?:\\.\\d{1,3})?>"), "").trim()
                 } else {
                     fixMojibake(lineBody)
                 }
 
                 if (cleanText.isNotBlank()) {
+                    val firstTs = timestamps.first()
                     for (ts in timestamps) {
+                        val finalTs = (ts + fileOffsetMs).coerceAtLeast(0L)
+                        val adjustedWords = if (words.isNotEmpty()) {
+                            val timeDelta = (ts - firstTs) + fileOffsetMs
+                            words.map {
+                                it.copy(
+                                    startMs = (it.startMs + timeDelta).coerceAtLeast(0L),
+                                    endMs = (it.endMs + timeDelta).coerceAtLeast(0L)
+                                )
+                            }
+                        } else emptyList()
+
                         parsedLines.add(
                             LyricLine(
-                                timestampMs = ts,
+                                timestampMs = finalTs,
                                 text = cleanText,
-                                words = words
+                                words = adjustedWords
                             )
                         )
                     }
@@ -420,20 +546,25 @@ object LyricsManager {
             }
         }
 
-        // If no timestamps at all, synthesize linear pacing (3s intervals)
+        // If no timestamps at all, synthesize linear pacing (3.5s intervals)
         if (!hasTimestamp && parsedLines.isEmpty()) {
             rawLines.filter { it.isNotBlank() && !it.startsWith("[") }.forEachIndexed { idx, text ->
-                parsedLines.add(LyricLine(idx * 3000L, text = fixMojibake(text.trim())))
+                parsedLines.add(LyricLine(idx * 3500L, text = fixMojibake(text.trim())))
             }
         }
 
-        // Calculate end timestamps between consecutive lines for smooth karaoke transitions
+        // Calculate end timestamps between consecutive lines for smooth word and line transitions
         val sorted = parsedLines.sortedBy { it.timestampMs }
         val withEndTimes = ArrayList<LyricLine>(sorted.size)
         for (i in sorted.indices) {
             val cur = sorted[i]
             val nextTime = if (i + 1 < sorted.size) sorted[i + 1].timestampMs else cur.timestampMs + 4000L
-            withEndTimes.add(cur.copy(endTimestampMs = nextTime))
+            val lineEnd = if (cur.words.isNotEmpty()) {
+                cur.words.last().endMs.coerceAtLeast(cur.timestampMs + 400L).coerceAtMost(nextTime)
+            } else {
+                nextTime
+            }
+            withEndTimes.add(cur.copy(endTimestampMs = lineEnd))
         }
         return withEndTimes
     }
@@ -467,7 +598,8 @@ object LyricsManager {
             } else {
                 text.length
             }
-            val wordStr = text.substring(curTag.second, nextStartIdx).trim()
+            val rawWord = text.substring(curTag.second, nextStartIdx)
+            val wordStr = rawWord.trim()
             val startMs = curTag.first
             val endMs = if (i + 1 < tags.size) tags[i + 1].first else startMs + 600L
 
@@ -479,7 +611,7 @@ object LyricsManager {
     }
 
     /**
-     * TTML Parser supporting word-level `<span begin="..." end="...">` tags (Booming Music format)
+     * TTML Parser supporting word-level `<span begin="..." end="...">` tags.
      */
     fun parseTtml(ttmlContent: String): List<LyricLine> {
         val lines = mutableListOf<LyricLine>()
@@ -492,7 +624,7 @@ object LyricsManager {
             var currentLineStart = 0L
             var currentLineEnd = 0L
             var currentLineWords = mutableListOf<LyricWord>()
-            var currentLineText = StringBuilder()
+            val currentLineText = StringBuilder()
             var currentSpanBegin = 0L
             var currentSpanEnd = 0L
             var isInsideParagraph = false
@@ -505,7 +637,7 @@ object LyricsManager {
                             "p" -> {
                                 isInsideParagraph = true
                                 currentLineWords = mutableListOf()
-                                currentLineText = StringBuilder()
+                                currentLineText.setLength(0)
                                 val beginAttr = parser.getAttributeValue(null, "begin")
                                 val endAttr = parser.getAttributeValue(null, "end")
                                 currentLineStart = parseTtmlTime(beginAttr)
@@ -523,7 +655,10 @@ object LyricsManager {
                     XmlPullParser.TEXT -> {
                         val text = parser.text?.trim() ?: ""
                         if (text.isNotEmpty() && isInsideParagraph) {
-                            currentLineText.append(text).append(" ")
+                            if (currentLineText.isNotEmpty() && !currentLineText.endsWith(" ")) {
+                                currentLineText.append(" ")
+                            }
+                            currentLineText.append(text)
                             if (isInsideSpan) {
                                 currentLineWords.add(LyricWord(text, currentSpanBegin, currentSpanEnd))
                             }
@@ -562,7 +697,6 @@ object LyricsManager {
     private fun parseTtmlTime(timeStr: String?): Long {
         if (timeStr.isNullOrBlank()) return 0L
         val trimmed = timeStr.trim()
-        // Format "00:01:23.456" or "01:23.45" or "83.45s"
         return try {
             if (trimmed.endsWith("s", ignoreCase = true)) {
                 (trimmed.dropLast(1).toDouble() * 1000).toLong()

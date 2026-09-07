@@ -289,9 +289,6 @@ impl PlaybackEngine {
                         if let Some(ref mut dec) = *dec_guard {
                             match dec.decode_next() {
                                 Ok(samples) => {
-                                    let cur_time = dec.current_time_seconds();
-                                    let mut s = state.lock();
-                                    s.position_seconds = cur_time;
                                     decoded_chunk = Some(samples);
                                 }
                                 Err(DecodeError::EndOfStream) => {
@@ -652,8 +649,24 @@ impl AudioRenderCallback for PlaybackEngine {
         let levels = calculate_levels(buffer, channels);
         let spectrum = calculate_spectrum_16(buffer, channels);
 
+        let actual_frames = read_samples / channels.max(1);
+        let output_rate = *self.output_sample_rate.lock() as f64;
+        let delta_seconds = if output_rate > 0.0 {
+            actual_frames as f64 / output_rate
+        } else {
+            0.0
+        };
+
         {
             let mut s = self.state.lock();
+            if delta_seconds > 0.0 {
+                let new_pos = s.position_seconds + delta_seconds;
+                s.position_seconds = if s.duration_seconds > 0.0 {
+                    new_pos.min(s.duration_seconds)
+                } else {
+                    new_pos
+                };
+            }
             s.levels = levels;
             s.spectrum = spectrum;
         }

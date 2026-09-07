@@ -4,9 +4,13 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -17,6 +21,9 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.media.AudioAttributesCompat
+import androidx.media.AudioFocusRequestCompat
+import androidx.media.AudioManagerCompat
 import androidx.media.MediaBrowserServiceCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
@@ -38,14 +45,114 @@ class PlaybackService : MediaBrowserServiceCompat() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private lateinit var engineController: AudioEngineController
     private lateinit var mediaSession: MediaSessionCompat
+    private lateinit var audioManager: AudioManager
+
+    private var audioFocusRequest: AudioFocusRequestCompat? = null
+    private var hasAudioFocus = false
+    private var resumeOnFocusGain = false
+    private var isNoisyReceiverRegistered = false
 
     private var lastTrackUri: String? = null
     private var cachedArtwork: Bitmap? = null
+
+    private var lastPostedTrackUri: String? = null
+    private var lastPostedIsPlaying: Boolean? = null
+    private var lastPostedArtwork: Bitmap? = null
+    private var lastMediaSessionPosSec: Double = -1.0
+
+    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                hasAudioFocus = true
+                engineController.setVolume(1.0f)
+                if (resumeOnFocusGain) {
+                    resumeOnFocusGain = false
+                    engineController.play()
+                }
+            }
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                hasAudioFocus = false
+                resumeOnFocusGain = false
+                engineController.pause()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                hasAudioFocus = false
+                val isCurrentlyPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
+                if (isCurrentlyPlaying) {
+                    resumeOnFocusGain = true
+                    engineController.pause()
+                }
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                engineController.setVolume(0.2f)
+            }
+        }
+    }
+
+    private fun requestAudioFocus(): Boolean {
+        if (hasAudioFocus) return true
+        val audioAttributes = AudioAttributesCompat.Builder()
+            .setUsage(AudioAttributesCompat.USAGE_MEDIA)
+            .setContentType(AudioAttributesCompat.CONTENT_TYPE_MUSIC)
+            .build()
+
+        val request = AudioFocusRequestCompat.Builder(AudioManagerCompat.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(audioAttributes)
+            .setOnAudioFocusChangeListener(audioFocusListener)
+            .build()
+        audioFocusRequest = request
+
+        val result = AudioManagerCompat.requestAudioFocus(audioManager, request)
+        hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+        return hasAudioFocus
+    }
+
+    private fun abandonAudioFocus() {
+        if (hasAudioFocus) {
+            audioFocusRequest?.let {
+                AudioManagerCompat.abandonAudioFocusRequest(audioManager, it)
+            }
+            hasAudioFocus = false
+            resumeOnFocusGain = false
+        }
+    }
+
+    private val becomingNoisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                Log.i("PlaybackService", "Headphones disconnected (becoming noisy). Pausing playback.")
+                engineController.pause()
+            }
+        }
+    }
+
+    private fun registerNoisyReceiver() {
+        if (!isNoisyReceiverRegistered) {
+            try {
+                registerReceiver(becomingNoisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+                isNoisyReceiverRegistered = true
+            } catch (e: Exception) {
+                Log.w("PlaybackService", "Error registering noisy receiver", e)
+            }
+        }
+    }
+
+    private fun unregisterNoisyReceiver() {
+        if (isNoisyReceiverRegistered) {
+            try {
+                unregisterReceiver(becomingNoisyReceiver)
+            } catch (e: Exception) {
+                Log.w("PlaybackService", "Error unregistering noisy receiver", e)
+            }
+            isNoisyReceiverRegistered = false
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         try {
             engineController = AudioEngineController.getInstance(this)
+            audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             createNotificationChannel()
             initMediaSession()
             sessionToken = mediaSession.sessionToken
@@ -84,7 +191,9 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
-                    engineController.play()
+                    if (requestAudioFocus()) {
+                        engineController.play()
+                    }
                 }
 
                 override fun onPause() {
@@ -137,6 +246,14 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 val positionSec = status?.positionSeconds ?: 0.0
                 val durationSec = (status?.durationSeconds ?: 1.0).coerceAtLeast(1.0)
 
+                // Manage audio focus and noisy receiver based on playing state
+                if (isPlaying) {
+                    requestAudioFocus()
+                    registerNoisyReceiver()
+                } else {
+                    unregisterNoisyReceiver()
+                }
+
                 // Load artwork asynchronously if track changed
                 if (track?.uri != lastTrackUri) {
                     lastTrackUri = track?.uri
@@ -147,13 +264,27 @@ class PlaybackService : MediaBrowserServiceCompat() {
                     } else null
                 }
 
-                // Update Android system MediaSession state & metadata
-                updateMediaSession(track, isPlaying, positionSec, durationSec, cachedArtwork)
+                // Update MediaSession when state changes, track changes, or on user seek (pos jump > 2s)
+                val isStateChange = isPlaying != lastPostedIsPlaying
+                val isTrackChange = track?.uri != lastPostedTrackUri
+                val isMajorSeek = kotlin.math.abs(positionSec - lastMediaSessionPosSec) > 2.0
 
-                // Update Foreground Notification with MediaStyle
-                val notification = buildNotification(track, isPlaying, positionSec, durationSec, cachedArtwork)
-                val notificationManager = getSystemService(NotificationManager::class.java)
-                notificationManager?.notify(NOTIFICATION_ID, notification)
+                if (isStateChange || isTrackChange || isMajorSeek) {
+                    lastMediaSessionPosSec = positionSec
+                    updateMediaSession(track, isPlaying, positionSec, durationSec, cachedArtwork)
+                }
+
+                // Throttle Foreground Notification posting: ONLY post when track, playing state, or artwork changed!
+                val artworkChanged = cachedArtwork != lastPostedArtwork
+                if (isTrackChange || isStateChange || artworkChanged) {
+                    lastPostedTrackUri = track?.uri
+                    lastPostedIsPlaying = isPlaying
+                    lastPostedArtwork = cachedArtwork
+
+                    val notification = buildNotification(track, isPlaying, positionSec, durationSec, cachedArtwork)
+                    val notificationManager = getSystemService(NotificationManager::class.java)
+                    notificationManager?.notify(NOTIFICATION_ID, notification)
+                }
             }
         }
     }
@@ -295,6 +426,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     override fun onDestroy() {
+        unregisterNoisyReceiver()
+        abandonAudioFocus()
         try {
             mediaSession.isActive = false
             mediaSession.release()

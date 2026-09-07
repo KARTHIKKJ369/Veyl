@@ -57,6 +57,7 @@ fun StickyMiniPlayer(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVeylColors.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val track by controller.currentTrack.collectAsState()
     val currentTrack = track
     val playbackState by controller.playbackState.collectAsState()
@@ -179,7 +180,10 @@ fun StickyMiniPlayer(
                             contentAlignment = Alignment.Center
                         ) {
                             IconButton(
-                                onClick = { controller.togglePlayPause() },
+                                onClick = {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                    controller.togglePlayPause()
+                                },
                                 modifier = Modifier.size(40.dp)
                             ) {
                                 Icon(
@@ -210,11 +214,11 @@ private fun MiniPlayerProgressBar(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVeylColors.current
+    val positionSec by controller.currentPositionSec.collectAsState()
     val status by controller.status.collectAsState()
     val dur = status?.durationSeconds?.takeIf { !it.isNaN() && it > 0.0 }
         ?: fallbackDuration.takeIf { !it.isNaN() && it > 0.0 } ?: 1.0
-    val pos = status?.positionSeconds?.takeIf { !it.isNaN() && it >= 0.0 } ?: 0.0
-    val progress = (pos / dur).toFloat().coerceIn(0f, 1f)
+    val progress = (positionSec / dur).toFloat().coerceIn(0f, 1f)
 
     Box(
         modifier = modifier

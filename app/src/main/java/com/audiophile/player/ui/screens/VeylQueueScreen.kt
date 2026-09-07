@@ -72,12 +72,12 @@ fun VeylQueueScreen(
     val haptic = LocalHapticFeedback.current
 
     val status by controller.status.collectAsState()
+    val positionSec by controller.currentPositionSec.collectAsState()
     val queue by controller.queue.collectAsState()
     val isShuffle by controller.isShuffleEnabled.collectAsState()
 
     val currentTrack = status?.currentTrack
     val isPlaying = status?.state == PlaybackStateEnum.PLAYING
-    val positionSec = status?.positionSeconds ?: 0.0
     val durationSec = (status?.durationSeconds ?: 1.0).coerceAtLeast(1.0)
     val progressFraction = (positionSec / durationSec).toFloat().let {
         if (it.isNaN() || it < 0f) 0f else it.coerceIn(0f, 1f)
@@ -150,20 +150,44 @@ fun VeylQueueScreen(
 
                         Column {
                             Text(
-                                text = "PLAYBACK FLIGHT PATH",
+                                text = "PLAYBACK QUEUE",
                                 style = VeylTypography.MonoBadge,
                                 color = colors.accentSignal
                             )
                             Text(
-                                text = "Queue Sequence",
+                                text = "Now Playing & Queue",
                                 style = VeylTypography.DisplayMedium,
                                 color = colors.textPrimary
                             )
                         }
                     }
 
-                    // Action Icons (Shuffle Toggle)
-                    Row(horizontalArrangement = Arrangement.spacedBy(VeylSpacing.xs)) {
+                    // Action Icons (Clear Queue & Shuffle Toggle)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(VeylSpacing.xs),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (queue.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    controller.clearQueue()
+                                },
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.glassButtonBg)
+                                    .border(1.dp, colors.borderHairline, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = VeylIcons.Trash,
+                                    contentDescription = "Clear queue",
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
                         IconButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -231,11 +255,11 @@ fun VeylQueueScreen(
                 }
             }
 
-            // 3. Now Playing Active Transducer Card
+            // 3. Now Playing Card
             if (currentTrack != null) {
                 item {
                     Text(
-                        text = "CURRENTLY TRANSDUCING",
+                        text = "NOW PLAYING",
                         style = VeylTypography.MonoBadge,
                         color = colors.accentSignal,
                         modifier = Modifier.padding(top = 4.dp)
@@ -267,13 +291,13 @@ fun VeylQueueScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "UPCOMING SEQUENCE (${queue.size})",
+                        text = "UP NEXT (${queue.size})",
                         style = VeylTypography.MonoBadge,
                         color = colors.textSecondary
                     )
 
                     Text(
-                        text = "GAPLESS HARDWARE BUFFER",
+                        text = "AUTO-ADVANCE ENABLED",
                         style = VeylTypography.MonoBadge,
                         color = colors.textMono
                     )
@@ -317,7 +341,19 @@ fun VeylQueueScreen(
                         onRemove = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             controller.removeFromQueue(index)
-                        }
+                        },
+                        onMoveUp = if (index > 0) {
+                            {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                controller.moveInQueue(index, index - 1)
+                            }
+                        } else null,
+                        onMoveDown = if (index < queue.size - 1) {
+                            {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                controller.moveInQueue(index, index + 1)
+                            }
+                        } else null
                     )
                 }
             }
@@ -495,7 +531,9 @@ private fun QueueTrackRow(
     isCurrent: Boolean,
     isPlaying: Boolean,
     onPlay: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null
 ) {
     val colors = LocalVeylColors.current
 
@@ -526,20 +564,10 @@ private fun QueueTrackRow(
             .clickable(onClick = onPlay)
             .padding(horizontal = VeylSpacing.md, vertical = VeylSpacing.sm)
             .semantics {
-                contentDescription = "Sequence item $index: ${track.title}, Artist: ${track.artist ?: "Unknown"}, $durationFormatted"
+                contentDescription = "Queue item $index: ${track.title}, Artist: ${track.artist ?: "Unknown"}, $durationFormatted"
             },
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Drag Handle
-        Icon(
-            imageVector = VeylIcons.DragHandle,
-            contentDescription = "Drag to reorder",
-            tint = colors.textMuted,
-            modifier = Modifier.size(20.dp)
-        )
-
-        Spacer(modifier = Modifier.width(VeylSpacing.xs))
-
         // Monospace index (e.g. 01, 02)
         Text(
             text = "%02d".format(index),
@@ -616,17 +644,48 @@ private fun QueueTrackRow(
 
         Spacer(modifier = Modifier.width(VeylSpacing.xs))
 
-        // Remove from queue
-        IconButton(
-            onClick = onRemove,
-            modifier = Modifier.size(44.dp)
+        // Reorder & Remove Actions
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Icon(
-                imageVector = VeylIcons.Trash,
-                contentDescription = "Remove from queue",
-                tint = colors.textMuted,
-                modifier = Modifier.size(18.dp)
-            )
+            if (onMoveUp != null) {
+                IconButton(
+                    onClick = onMoveUp,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.ChevronUp,
+                        contentDescription = "Move up",
+                        tint = colors.textMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            if (onMoveDown != null) {
+                IconButton(
+                    onClick = onMoveDown,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.ChevronDown,
+                        contentDescription = "Move down",
+                        tint = colors.textMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = VeylIcons.Trash,
+                    contentDescription = "Remove from queue",
+                    tint = colors.textMuted,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }

@@ -97,12 +97,17 @@ fun SyncedLyricsSheet(
     val offsetMs by controller.lyricOffsetMs.collectAsState()
 
     val currentTrack = track
-    val lines = lyrics?.lines ?: emptyList()
-    val hasWordTiming = lyrics?.hasWordTiming == true
+    val curLyrics = lyrics
+    val lines = curLyrics?.lines ?: emptyList()
+    val hasWordTiming = curLyrics?.hasWordTiming == true
 
-    val positionSec = status?.positionSeconds ?: 0.0
-    val activeIndex = remember(lyrics, positionSec, offsetMs) {
-        lyrics?.findActiveIndex(positionSec, offsetMs) ?: -1
+    val positionMs by controller.currentPositionMs.collectAsState()
+    val activeIndex = remember(curLyrics, positionMs, offsetMs) {
+        if (curLyrics == null || curLyrics.lines.isEmpty()) -1
+        else {
+            val targetPos = (positionMs + offsetMs).coerceAtLeast(0L)
+            curLyrics.findActiveIndex(targetPos.toDouble() / 1000.0, 0L)
+        }
     }
 
     val listState = rememberLazyListState()
@@ -328,8 +333,8 @@ fun SyncedLyricsSheet(
                 Box(modifier = Modifier.weight(1f)) {
                     LazyColumn(
                         state = listState,
-                        contentPadding = PaddingValues(top = 80.dp, bottom = 140.dp, start = 20.dp, end = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                        contentPadding = PaddingValues(top = 90.dp, bottom = 140.dp, start = 20.dp, end = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(18.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
                         itemsIndexed(
@@ -337,12 +342,12 @@ fun SyncedLyricsSheet(
                             key = { idx, line -> "${line.timestampMs}_$idx" }
                         ) { index, line ->
                             val isCurrent = index == activeIndex
-                            val currentPosMs = ((positionSec * 1000).toLong() + offsetMs).coerceAtLeast(0L)
 
                             LyricLineRow(
                                 line = line,
                                 isCurrent = isCurrent,
-                                currentPosMs = currentPosMs,
+                                controller = controller,
+                                offsetMs = offsetMs,
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     val seekTargetSec = (line.timestampMs.toDouble() / 1000.0).coerceAtLeast(0.0)
@@ -351,6 +356,40 @@ fun SyncedLyricsSheet(
                             )
                         }
                     }
+
+                    // Subtle top gradient edge fade
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .align(Alignment.TopCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        colors.background.copy(alpha = 0.95f),
+                                        colors.background.copy(alpha = 0.6f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+
+                    // Subtle bottom gradient edge fade
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(110.dp)
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        colors.background.copy(alpha = 0.7f),
+                                        colors.background.copy(alpha = 0.98f)
+                                    )
+                                )
+                            )
+                    )
 
                     // Floating "Resume Sync" Pill when user has scrolled away
                     androidx.compose.animation.AnimatedVisibility(
@@ -504,19 +543,15 @@ fun SyncedLyricsSheet(
 private fun LyricLineRow(
     line: LyricLine,
     isCurrent: Boolean,
-    currentPosMs: Long,
+    controller: AudioEngineController,
+    offsetMs: Long,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVeylColors.current
 
-    val scale by animateFloatAsState(
-        targetValue = if (isCurrent) 1.05f else 0.97f,
-        animationSpec = tween(220),
-        label = "lyricScale"
-    )
     val alpha by animateFloatAsState(
-        targetValue = if (isCurrent) 1.0f else 0.32f,
+        targetValue = if (isCurrent) 1.0f else 0.36f,
         animationSpec = tween(220),
         label = "lyricAlpha"
     )
@@ -524,23 +559,22 @@ private fun LyricLineRow(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            }
+            .graphicsLayer { this.alpha = alpha }
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp, horizontal = 4.dp)
+            .padding(vertical = 6.dp, horizontal = 6.dp)
     ) {
         if (line.words.isNotEmpty() && isCurrent) {
-            // Word-by-word progressive karaoke illumination (Booming Music headline feature)
+            // Word-by-word progressive illumination: ONLY the active line collects high-res positionMs
+            val posMs by controller.currentPositionMs.collectAsState()
+            val calibratedPosMs = (posMs + offsetMs).coerceAtLeast(0L)
+            val activeWordIdx = line.findActiveWordIndex(calibratedPosMs)
+
             FlowRow(
                 horizontalArrangement = Arrangement.Start,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                val activeWordIdx = line.findActiveWordIndex(currentPosMs)
                 line.words.forEachIndexed { wordIdx, word ->
                     val isPastWord = wordIdx < activeWordIdx
                     val isCurrentWord = wordIdx == activeWordIdx
@@ -549,33 +583,33 @@ private fun LyricLineRow(
                         isPastWord -> colors.textPrimary
                         else -> colors.textMuted.copy(alpha = 0.5f)
                     }
-                    val wordWeight = if (isCurrentWord) FontWeight.Black else if (isPastWord) FontWeight.Bold else FontWeight.Medium
+                    val wordWeight = if (isCurrentWord) FontWeight.Bold else if (isPastWord) FontWeight.SemiBold else FontWeight.Normal
 
                     Text(
                         text = word.text + " ",
                         style = VeylTypography.HeadlineMedium,
                         color = wordColor,
                         fontWeight = wordWeight,
-                        fontSize = 23.sp,
+                        fontSize = 22.sp,
                         lineHeight = 32.sp
                     )
                 }
             }
         } else {
-            // Standard line highlight
+            // Standard line highlight (calm, grounded, no text scaling/jumping)
             Text(
                 text = line.text,
                 style = if (isCurrent) VeylTypography.HeadlineMedium else VeylTypography.TitleMedium,
                 color = if (isCurrent) colors.accentSignal else colors.textPrimary,
-                fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.Medium,
-                fontSize = if (isCurrent) 23.sp else 17.sp,
+                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                fontSize = if (isCurrent) 22.sp else 17.sp,
                 lineHeight = if (isCurrent) 32.sp else 24.sp
             )
         }
 
         // Translation display if present
         if (!line.translation.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = line.translation,
                 style = VeylTypography.BodySmall,

@@ -793,10 +793,37 @@ object VeylIcons {
         }.build()
     }
 
+    val ChevronUp: ImageVector by lazy {
+        ImageVector.Builder("VeylChevronUp", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(7.41f, 15.41f)
+                lineTo(12f, 10.83f)
+                lineToRelative(4.59f, 4.58f)
+                lineTo(18f, 14f)
+                lineToRelative(-6f, -6f)
+                lineToRelative(-6f, 6f)
+                close()
+            }
+        }.build()
+    }
+
+    val ChevronDown: ImageVector by lazy {
+        ImageVector.Builder("VeylChevronDown", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(7.41f, 8.59f)
+                lineTo(12f, 13.17f)
+                lineToRelative(4.59f, -4.58f)
+                lineTo(18f, 10f)
+                lineToRelative(-6f, 6f)
+                lineToRelative(-6f, -6f)
+                close()
+            }
+        }.build()
+    }
+
     // Convenience Aliases
     val ChevronLeft: ImageVector get() = ArrowBack
     val ChevronRight: ImageVector get() = SkipNext
-    val ChevronDown: ImageVector get() = Close
     val Equalizer: ImageVector get() = ParametricEq
     val FavoriteFilled: ImageVector get() = HeartFilled
     val FavoriteBorder: ImageVector get() = Heart

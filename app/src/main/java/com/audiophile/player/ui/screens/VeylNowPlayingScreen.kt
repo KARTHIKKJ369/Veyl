@@ -363,7 +363,7 @@ fun VeylNowPlayingScreen(
                         Icon(
                             imageVector = if (isPlaying) VeylIcons.Pause else VeylIcons.Play,
                             contentDescription = if (isPlaying) "Pause" else "Play",
-                            tint = Color.Black,
+                            tint = colors.background,
                             modifier = Modifier.size(34.dp)
                         )
                     }
@@ -498,14 +498,15 @@ private fun PlaybackProgressSection(
 ) {
     val colors = LocalVeylColors.current
     val status by controller.status.collectAsState()
+    val positionSec by controller.currentPositionSec.collectAsState()
 
     val safeDuration = if (status?.durationSeconds == null || status?.durationSeconds!!.isNaN() || status?.durationSeconds!! <= 0.0) {
         if (!trackDuration.isNaN() && trackDuration > 0.0) trackDuration else 1.0
     } else status!!.durationSeconds
 
-    val safePosition = if (status?.positionSeconds == null || status?.positionSeconds!!.isNaN() || status?.positionSeconds!! < 0.0) {
+    val safePosition = if (positionSec.isNaN() || positionSec < 0.0) {
         0.0
-    } else status!!.positionSeconds.coerceIn(0.0, safeDuration)
+    } else positionSec.coerceIn(0.0, safeDuration)
 
     // Decouple dragging fraction from audio seek to prevent 60-120Hz seek thrashing
     var isScrubbing by remember { mutableStateOf(false) }
@@ -525,7 +526,7 @@ private fun PlaybackProgressSection(
                 scrubFraction = frac
             },
             onValueChangeFinished = {
-                val targetSec = scrubFraction * safeDuration
+                val targetSec = (scrubFraction * safeDuration).coerceIn(0.0, safeDuration)
                 controller.seekTo(targetSec)
                 isScrubbing = false
             },
