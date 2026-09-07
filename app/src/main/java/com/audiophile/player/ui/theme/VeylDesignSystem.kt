@@ -26,38 +26,38 @@ import androidx.core.view.WindowCompat
  */
 
 // -------------------------------------------------------------------------
-// 1. Color Tokens (Material 3 Expressive Dark & Dynamic Indigo/Periwinkle Palette)
+// 1. Color Tokens (Stitch Resonate Audiophile Obsidian & Warm Coral Palette)
 // -------------------------------------------------------------------------
-val VeylBackgroundDark = Color(0xFF121318)
-val VeylSurfaceDark = Color(0xFF121318)
-val VeylSurfaceContainerLowest = Color(0xFF0D0E13)
-val VeylSurfaceContainerLow = Color(0xFF1A1B21)
-val VeylSurfaceContainer = Color(0xFF1E1F25)
-val VeylSurfaceContainerHigh = Color(0xFF292A2F)
-val VeylSurfaceContainerHighest = Color(0xFF34343A)
+val VeylBackgroundDark = Color(0xFF1B0906)
+val VeylSurfaceDark = Color(0xFF1B0906)
+val VeylSurfaceContainerLowest = Color(0xFF000000)
+val VeylSurfaceContainerLow = Color(0xFF230D09)
+val VeylSurfaceContainer = Color(0xFF2C120D)
+val VeylSurfaceContainerHigh = Color(0xFF351711)
+val VeylSurfaceContainerHighest = Color(0xFF3E1C15)
 
-val VeylPrimary = Color(0xFFB6C4FF)
-val VeylOnPrimary = Color(0xFF1D2D61)
-val VeylPrimaryContainer = Color(0xFF354479)
-val VeylOnPrimaryContainer = Color(0xFFDCE1FF)
+val VeylPrimary = Color(0xFFFFB7B4)
+val VeylOnPrimary = Color(0xFF6D2E2E)
+val VeylPrimaryContainer = Color(0xFFFDA4A1)
+val VeylOnPrimaryContainer = Color(0xFF612525)
 
-val VeylSecondary = Color(0xFFC2C5DD)
-val VeylSecondaryContainer = Color(0xFF424659)
-val VeylOnSecondaryContainer = Color(0xFFDEE1F9)
+val VeylSecondary = Color(0xFFB2CAD3)
+val VeylSecondaryContainer = Color(0xFF122930)
+val VeylOnSecondaryContainer = Color(0xFF90A8B0)
 
-val VeylTertiary = Color(0xFFE3BADA)
-val VeylTertiaryContainer = Color(0xFF5B3D57)
+val VeylTertiary = Color(0xFF92EAFF)
+val VeylTertiaryContainer = Color(0xFF5EDFFB)
 
-val VeylFavorite = Color(0xFFFFB4AB)
-val VeylError = Color(0xFFBA1A1A)
+val VeylFavorite = Color(0xFFFFB7B4)
+val VeylError = Color(0xFFFE7453)
 
-val VeylTextPrimary = Color(0xFFE3E1E9)
-val VeylTextSecondary = Color(0xFFC6C5D0)
-val VeylTextMuted = Color(0xFF90909A)
+val VeylTextPrimary = Color(0xFFFFDED8)
+val VeylTextSecondary = Color(0xFFD59E93)
+val VeylTextMuted = Color(0xFF9A6A60)
 
-val VeylBorderHairline = Color(0x1FFFFFFF)
-val VeylBorderActive = Color(0x66B6C4FF)
-val VeylGlassButtonBg = Color(0x33292A2F)
+val VeylBorderHairline = Color(0x33663D35)
+val VeylBorderActive = Color(0x66FFB7B4)
+val VeylGlassButtonBg = Color(0x33351711)
 
 @Immutable
 data class VeylColorScheme(
@@ -68,13 +68,14 @@ data class VeylColorScheme(
     val borderHairline: Color = VeylBorderHairline,
     val borderActive: Color = VeylBorderActive,
     val accentSignal: Color = VeylPrimary,
-    val accentCyan: Color = Color(0xFF00E5FF),
-    val accentPeak: Color = Color(0xFFFF453A),
+    val accentCyan: Color = VeylTertiary,
+    val accentPeak: Color = Color(0xFFFE7453),
     val accentFavorite: Color = VeylFavorite,
+    val primaryContainer: Color = VeylPrimaryContainer,
     val textPrimary: Color = VeylTextPrimary,
     val textSecondary: Color = VeylTextSecondary,
     val textMuted: Color = VeylTextMuted,
-    val textMono: Color = VeylPrimary,
+    val textMono: Color = VeylSecondary,
     val glassButtonBg: Color = VeylGlassButtonBg
 )
 
@@ -86,32 +87,34 @@ val VeylDarkColorScheme = VeylColorScheme(
     borderHairline = VeylBorderHairline,
     borderActive = VeylBorderActive,
     accentSignal = VeylPrimary,
-    accentCyan = Color(0xFF00E5FF),
-    accentPeak = Color(0xFFFF453A),
+    accentCyan = VeylTertiary,
+    accentPeak = Color(0xFFFE7453),
     accentFavorite = VeylFavorite,
+    primaryContainer = VeylPrimaryContainer,
     textPrimary = VeylTextPrimary,
     textSecondary = VeylTextSecondary,
     textMuted = VeylTextMuted,
-    textMono = VeylPrimary,
+    textMono = VeylSecondary,
     glassButtonBg = VeylGlassButtonBg
 )
 
 val VeylLightColorScheme = VeylColorScheme(
-    background = Color(0xFFF7F8FC),
-    surfacePanel = Color(0xFFECEEF5),
-    surfaceElevated = Color(0xFFE1E4EE),
-    surfacePill = Color(0xFFD4D8E4),
-    borderHairline = Color(0x1F000000),
-    borderActive = Color(0x663F51B5),
-    accentSignal = Color(0xFF3F51B5),
-    accentCyan = Color(0xFF00838F),
-    accentPeak = Color(0xFFD32F2F),
-    accentFavorite = Color(0xFFE91E63),
-    textPrimary = Color(0xFF191A20),
-    textSecondary = Color(0xFF45464F),
-    textMuted = Color(0xFF757680),
-    textMono = Color(0xFF3F51B5),
-    glassButtonBg = Color(0x22D4D8E4)
+    background = Color(0xFFFFF8F6),
+    surfacePanel = Color(0xFFF7E6E2),
+    surfaceElevated = Color(0xFFEEDCD7),
+    surfacePill = Color(0xFFE5D2CD),
+    borderHairline = Color(0x1F663D35),
+    borderActive = Color(0x666D2E2E),
+    accentSignal = Color(0xFF6D2E2E),
+    accentCyan = Color(0xFF005664),
+    accentPeak = Color(0xFF881F05),
+    accentFavorite = Color(0xFF904A49),
+    primaryContainer = Color(0xFFFDA4A1),
+    textPrimary = Color(0xFF2C120D),
+    textSecondary = Color(0xFF6A4E49),
+    textMuted = Color(0xFF9A6A60),
+    textMono = Color(0xFF2D434B),
+    glassButtonBg = Color(0x22EEDCD7)
 )
 
 val LocalVeylColors = compositionLocalOf { VeylDarkColorScheme }
@@ -204,11 +207,26 @@ object VeylTypography {
         color = VeylTextPrimary
     )
 
+    val TitleLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Bold,
+        fontSize = 20.sp,
+        letterSpacing = (-0.3).sp,
+        color = VeylTextPrimary
+    )
+
     val TitleMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         letterSpacing = (-0.1).sp,
+        color = VeylTextPrimary
+    )
+
+    val BodyMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
         color = VeylTextPrimary
     )
 

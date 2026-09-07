@@ -1,12 +1,15 @@
 package com.audiophile.player.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,8 +24,14 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.unit.IntOffset
+import com.audiophile.player.ui.components.VeylTrackOptionsSheet
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -99,11 +108,17 @@ fun VeylNowPlayingScreen(
 
     var isLyricsMode by remember { mutableStateOf(false) }
     var showOptionsSheet by remember { mutableStateOf(false) }
-    var dragAccumulator by remember { mutableFloatStateOf(0f) }
+    val coroutineScope = rememberCoroutineScope()
+    val dragOffsetY = remember { Animatable(0f) }
+
+    BackHandler {
+        onNavigateBack()
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
+            .offset { IntOffset(0, dragOffsetY.value.roundToInt().coerceAtLeast(0)) }
             .background(
                 Brush.verticalGradient(
                     listOf(
@@ -113,6 +128,35 @@ fun VeylNowPlayingScreen(
                     )
                 )
             )
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragEnd = {
+                        if (dragOffsetY.value > 150f) {
+                            coroutineScope.launch {
+                                dragOffsetY.animateTo(2000f, tween(180))
+                                onNavigateBack()
+                            }
+                        } else {
+                            coroutineScope.launch {
+                                dragOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                            }
+                        }
+                    },
+                    onDragCancel = {
+                        coroutineScope.launch {
+                            dragOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                        }
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        if (dragAmount > 0 || dragOffsetY.value > 0) {
+                            change.consume()
+                            coroutineScope.launch {
+                                dragOffsetY.snapTo((dragOffsetY.value + dragAmount).coerceAtLeast(0f))
+                            }
+                        }
+                    }
+                )
+            }
     ) {
         Column(
             modifier = Modifier
@@ -123,33 +167,11 @@ fun VeylNowPlayingScreen(
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Drag Handle Bar (Swipe down to dismiss)
+            // Top Drag Handle Indicator
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp)
-                    .pointerInput(Unit) {
-                        detectVerticalDragGestures(
-                            onDragEnd = {
-                                if (dragAccumulator > 100f) {
-                                    onNavigateBack()
-                                }
-                                dragAccumulator = 0f
-                            },
-                            onDragCancel = {
-                                dragAccumulator = 0f
-                            },
-                            onVerticalDrag = { change, dragAmount ->
-                                if (dragAmount > 0) {
-                                    change.consume()
-                                    dragAccumulator += dragAmount
-                                    if (dragAccumulator > 140f) {
-                                        onNavigateBack()
-                                    }
-                                }
-                            }
-                        )
-                    },
+                    .height(28.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
@@ -485,6 +507,16 @@ fun VeylNowPlayingScreen(
             SyncedLyricsSheet(
                 controller = controller,
                 onDismiss = { isLyricsMode = false }
+            )
+        }
+
+        // 3-Dots Track Options Sheet
+        if (showOptionsSheet && track != null) {
+            VeylTrackOptionsSheet(
+                track = track,
+                controller = controller,
+                onDismiss = { showOptionsSheet = false },
+                onOpenEqualizer = onNavigateToDsp
             )
         }
     }

@@ -70,11 +70,14 @@ class AudioEngineController private constructor(private val context: Context) {
     val libraryTracks: StateFlow<List<TrackInfo>> = _libraryTracks.asStateFlow()
     val tracks: StateFlow<List<TrackInfo>> = _libraryTracks.asStateFlow()
 
-    private val _isEqEnabled = MutableStateFlow(false)
+    private val _isEqEnabled = MutableStateFlow(prefs.getBoolean("eq_enabled", false))
     val isEqEnabled: StateFlow<Boolean> = _isEqEnabled.asStateFlow()
 
+    private val _currentEqPreset = MutableStateFlow(prefs.getString("eq_preset", "Flat") ?: "Flat")
+    val currentEqPreset: StateFlow<String> = _currentEqPreset.asStateFlow()
+
     data class EqState(val enabled: Boolean = false, val bands: List<EqBandInfo> = emptyList())
-    private val _eqState = MutableStateFlow(EqState())
+    private val _eqState = MutableStateFlow(EqState(enabled = prefs.getBoolean("eq_enabled", false)))
     val eqState: StateFlow<EqState> = _eqState.asStateFlow()
 
     // Queue & Shuffle Management
@@ -179,10 +182,22 @@ class AudioEngineController private constructor(private val context: Context) {
             nativeEngine = AudiophileEngineHandle(48000f, 2u)
             nativeEngine?.setDsdMode(_dsdMode.value)
             currentOutputSampleRate = 48000u
-            refreshEq()
+            restoreEqState()
         } catch (e: Throwable) {
             Log.e("AudioEngineController", "Failed to initialize native AudiophileEngineHandle", e)
         }
+    }
+
+    private fun restoreEqState() {
+        val enabled = _isEqEnabled.value
+        nativeEngine?.setEqEnabled(enabled)
+        val defaultBands = nativeEngine?.getEqBands() ?: emptyList()
+        for (i in defaultBands.indices) {
+            val savedGain = prefs.getFloat("eq_band_$i", defaultBands[i].gainDb)
+            val b = defaultBands[i]
+            nativeEngine?.setEqBand(i.toUInt(), savedGain, b.frequency, b.q)
+        }
+        refreshEq()
     }
 
     private fun observeUsbDacChanges() {
@@ -699,6 +714,9 @@ class AudioEngineController private constructor(private val context: Context) {
                 album = track.album
             )
 
+            // Re-apply user's persistent equalizer state on track transition
+            nativeEngine?.setEqEnabled(_isEqEnabled.value)
+
             // Ensure queue always contains all tracks if queue was empty or single
             val currentQ = _queue.value
             if (currentQ.isEmpty() || currentQ.size <= 1) {
@@ -720,6 +738,12 @@ class AudioEngineController private constructor(private val context: Context) {
             val success = nativeEngine?.reconfigureOutput(sampleRate, 2u, deviceId, exclusive) ?: false
             if (success) {
                 currentOutputSampleRate = sampleRate
+                nativeEngine?.setEqEnabled(_isEqEnabled.value)
+                val bands = _eqBands.value
+                for (i in bands.indices) {
+                    val b = bands[i]
+                    nativeEngine?.setEqBand(i.toUInt(), b.gainDb, b.frequency, b.q)
+                }
                 refreshEq()
             }
             success
@@ -781,11 +805,15 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun setEqEnabled(enabled: Boolean) {
         _isEqEnabled.value = enabled
+        prefs.edit().putBoolean("eq_enabled", enabled).apply()
         nativeEngine?.setEqEnabled(enabled)
         refreshEq()
     }
 
     fun setEqBandGain(index: Int, gainDb: Float) {
+        prefs.edit().putFloat("eq_band_$index", gainDb).apply()
+        _currentEqPreset.value = "Custom"
+        prefs.edit().putString("eq_preset", "Custom").apply()
         val bands = _eqBands.value
         if (index in bands.indices) {
             val b = bands[index]
@@ -794,6 +822,20 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun setEqBand(index: Int, gainDb: Float) = setEqBandGain(index, gainDb)
+
+    fun setEqPreset(name: String, gains: List<Float>) {
+        _currentEqPreset.value = name
+        prefs.edit().putString("eq_preset", name).apply()
+        val bands = _eqBands.value
+        for (i in gains.indices) {
+            prefs.edit().putFloat("eq_band_$i", gains[i]).apply()
+            if (i in bands.indices) {
+                val b = bands[i]
+                nativeEngine?.setEqBand(i.toUInt(), gains[i], b.frequency, b.q)
+            }
+        }
+        refreshEq()
+    }
 
     fun setEqPreamp(gainDb: Float) {
         nativeEngine?.setEqPreamp(gainDb)

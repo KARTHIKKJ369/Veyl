@@ -1,5 +1,9 @@
 package com.audiophile.player.ui.navigation
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -7,6 +11,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -76,7 +83,11 @@ fun AudiophileNavHost(
         val currentDestination = navBackStackEntry?.destination
 
         val currentTrack by controller.currentTrack.collectAsState()
-        val isNowPlayingRoute = currentDestination?.route == VeylScreen.NowPlaying.route
+        var isNowPlayingOpen by remember { mutableStateOf(false) }
+
+        BackHandler(enabled = isNowPlayingOpen) {
+            isNowPlayingOpen = false
+        }
 
         val bottomNavItems = listOf(
             VeylScreen.Home,
@@ -86,11 +97,11 @@ fun AudiophileNavHost(
             VeylScreen.Settings
         )
 
-        Scaffold(
-            containerColor = colors.background,
-            contentColor = colors.textPrimary,
-            bottomBar = {
-                if (!isNowPlayingRoute) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
+                containerColor = colors.background,
+                contentColor = colors.textPrimary,
+                bottomBar = {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -100,7 +111,7 @@ fun AudiophileNavHost(
                         if (currentTrack != null) {
                             StickyMiniPlayer(
                                 controller = controller,
-                                onClick = { navController.navigate(VeylScreen.NowPlaying.route) }
+                                onClick = { isNowPlayingOpen = true }
                             )
                         } else {
                             // Hairline border above nav bar when no song is active
@@ -153,8 +164,7 @@ fun AudiophileNavHost(
                         }
                     }
                 }
-            }
-        ) { innerPadding ->
+            ) { innerPadding ->
             NavHost(
                 navController = navController,
                 startDestination = VeylScreen.Home.route,
@@ -184,7 +194,7 @@ fun AudiophileNavHost(
                             navController.navigate(VeylScreen.Queue.route)
                         },
                         onNavigateToNowPlaying = {
-                            navController.navigate(VeylScreen.NowPlaying.route)
+                            isNowPlayingOpen = true
                         },
                         onPickFolder = onSelectRootFolder
                     )
@@ -325,36 +335,12 @@ fun AudiophileNavHost(
                     )
                 }
 
-                // Screen 10: Expressive Now Playing Screen (with swipe-down dismissal)
-                composable(
-                    route = VeylScreen.NowPlaying.route,
-                    enterTransition = {
-                        slideInVertically(
-                            initialOffsetY = { it },
-                            animationSpec = tween(280)
-                        ) + fadeIn(animationSpec = tween(280))
-                    },
-                    exitTransition = {
-                        slideOutVertically(
-                            targetOffsetY = { it },
-                            animationSpec = tween(240)
-                        ) + fadeOut(animationSpec = tween(240))
+                // Screen 10: Now Playing Screen Route (redirects to overlay)
+                composable(route = VeylScreen.NowPlaying.route) {
+                    androidx.compose.runtime.LaunchedEffect(Unit) {
+                        isNowPlayingOpen = true
+                        navController.popBackStack()
                     }
-                ) {
-                    VeylNowPlayingScreen(
-                        controller = controller,
-                        onNavigateBack = {
-                            if (!navController.popBackStack()) {
-                                navController.navigate(VeylScreen.Home.route)
-                            }
-                        },
-                        onNavigateToQueue = {
-                            navController.navigate(VeylScreen.Queue.route)
-                        },
-                        onNavigateToDsp = {
-                            navController.navigate(VeylScreen.Equalizer.route)
-                        }
-                    )
                 }
 
                 // Screen 11: Queue Screen
@@ -374,5 +360,32 @@ fun AudiophileNavHost(
                 }
             }
         }
+
+        // Fluid Fullscreen Now Playing Overlay with Zero Scaffold Re-layout
+        AnimatedVisibility(
+            visible = isNowPlayingOpen,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = tween(240, easing = FastOutSlowInEasing)
+            ),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = tween(200, easing = FastOutLinearInEasing)
+            )
+        ) {
+            VeylNowPlayingScreen(
+                controller = controller,
+                onNavigateBack = { isNowPlayingOpen = false },
+                onNavigateToQueue = {
+                    isNowPlayingOpen = false
+                    navController.navigate(VeylScreen.Queue.route)
+                },
+                onNavigateToDsp = {
+                    isNowPlayingOpen = false
+                    navController.navigate(VeylScreen.Equalizer.route)
+                }
+            )
+        }
+    }
     }
 }

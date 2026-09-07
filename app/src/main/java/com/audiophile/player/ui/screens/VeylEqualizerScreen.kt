@@ -72,7 +72,7 @@ fun VeylEqualizerScreen(
     val haptic = LocalHapticFeedback.current
     val eqState by controller.eqState.collectAsState()
 
-    var currentProfileName by remember { mutableStateOf("Bass Boost") }
+    val currentProfileName by controller.currentEqPreset.collectAsState()
 
     val presetProfiles = listOf(
         "Flat" to listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f),
@@ -217,10 +217,7 @@ fun VeylEqualizerScreen(
                             selected = isSelected,
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                currentProfileName = profileName
-                                gains.forEachIndexed { index, gain ->
-                                    controller.setEqBand(index, gain)
-                                }
+                                controller.setEqPreset(profileName, gains)
                             },
                             label = {
                                 Text(
@@ -306,8 +303,7 @@ fun VeylEqualizerScreen(
                     Slider(
                         value = gainValue,
                         onValueChange = { newGain ->
-                            currentProfileName = "Custom"
-                            controller.setEqBand(index, newGain)
+                            controller.setEqBandGain(index, newGain)
                         },
                         valueRange = -12f..12f,
                         enabled = eqState.enabled,
@@ -342,10 +338,7 @@ fun VeylEqualizerScreen(
             Button(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    currentProfileName = "Flat"
-                    for (i in 0 until 10) {
-                        controller.setEqBand(i, 0f)
-                    }
+                    controller.setEqPreset("Flat", listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f))
                 },
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = colors.surfaceElevated),
