@@ -1,7 +1,9 @@
 package com.audiophile.player.engine
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
@@ -1025,7 +1027,21 @@ class AudioEngineController private constructor(private val context: Context) {
         playTrack(shuffled.first())
     }
 
+    fun ensurePlaybackServiceStarted() {
+        try {
+            val serviceIntent = Intent(context, com.audiophile.player.service.PlaybackService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            Log.w("AudioEngineController", "Failed to start PlaybackService", e)
+        }
+    }
+
     fun playTrack(track: TrackInfo) {
+        ensurePlaybackServiceStarted()
         scope.launch {
             // Only switch hardware sample-rate and exclusive mode for external USB DACs!
             // Internal phone speakers, 3.5mm jack, and Bluetooth must remain on standard shared 48kHz output.
@@ -1128,6 +1144,7 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun play() {
+        ensurePlaybackServiceStarted()
         val curStatus = _status.value
         val curTrack = curStatus?.currentTrack
         if (curTrack == null) {

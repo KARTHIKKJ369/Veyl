@@ -13,8 +13,8 @@ import android.graphics.Bitmap
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -34,7 +34,7 @@ import com.audiophile.player.engine.AudioEngineController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.audiophile_core.PlaybackStateEnum
@@ -54,10 +54,9 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
     private var lastTrackUri: String? = null
     private var cachedArtwork: Bitmap? = null
+    private var artworkJob: Job? = null
 
-    private var lastPostedTrackUri: String? = null
     private var lastPostedIsPlaying: Boolean? = null
-    private var lastPostedArtwork: Bitmap? = null
     private var lastMediaSessionPosSec: Double = -1.0
 
     private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
@@ -156,13 +155,19 @@ class PlaybackService : MediaBrowserServiceCompat() {
             createNotificationChannel()
             initMediaSession()
             sessionToken = mediaSession.sessionToken
-            updateMediaSession(null, false, 0.0, 1.0, null)
+
+            // Sync with current controller state
+            val curTrack = engineController.currentTrack.value
+            val isPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
+            val curPos = engineController.currentPositionSec.value
+
+            updateMediaSession(curTrack, isPlaying, curPos, curTrack?.durationSeconds ?: 1.0, null)
 
             val initialNotification = buildNotification(
-                track = null,
-                isPlaying = false,
-                positionSec = 0.0,
-                durationSec = 1.0,
+                track = curTrack,
+                isPlaying = isPlaying,
+                positionSec = curPos,
+                durationSec = curTrack?.durationSeconds ?: 1.0,
                 artwork = null
             )
 
@@ -193,12 +198,24 @@ class PlaybackService : MediaBrowserServiceCompat() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
+        val mediaButtonIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+            setClass(this@PlaybackService, MediaButtonReceiver::class.java)
+        }
+        val mediaButtonPendingIntent = PendingIntent.getBroadcast(
+            this,
+            0,
+            mediaButtonIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
         mediaSession = MediaSessionCompat(this, "VeylMediaSession").apply {
             setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
                 MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
             )
+            setPlaybackToLocal(AudioManager.STREAM_MUSIC)
             setSessionActivity(openAppIntent)
+            setMediaButtonReceiver(mediaButtonPendingIntent)
 
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
@@ -242,6 +259,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
             val notificationManager = getSystemService(NotificationManager::class.java)
             try {
                 notificationManager?.deleteNotificationChannel("veyl_playback_channel")
+                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v2")
             } catch (_: Exception) {}
 
             val channel = NotificationChannel(
@@ -261,17 +279,19 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
     private fun observePlaybackState() {
         serviceScope.launch {
-            engineController.status.collectLatest { status ->
-                val track = status?.currentTrack
-                val isPlaying = status?.state == PlaybackStateEnum.PLAYING
-                val positionSec = status?.positionSeconds ?: 0.0
-                val durationSec = (status?.durationSeconds ?: 1.0).coerceAtLeast(1.0)
-
+            combine(
+                engineController.currentTrack,
+                engineController.playbackState,
+                engineController.currentPositionSec
+            ) { track, state, posSec ->
+                Triple(track, state, posSec)
+            }.collect { (track, state, posSec) ->
+                val isPlaying = state == PlaybackStateEnum.PLAYING
+                val isTrackChange = track?.uri != lastTrackUri
                 val isStateChange = isPlaying != lastPostedIsPlaying
-                val isTrackChange = track?.uri != lastPostedTrackUri
-                val isMajorSeek = kotlin.math.abs(positionSec - lastMediaSessionPosSec) > 2.0
+                val isMajorSeek = kotlin.math.abs(posSec - lastMediaSessionPosSec) > 3.0
 
-                // Manage audio focus and noisy receiver only when state changes
+                // Manage audio focus and noisy receiver
                 if (isStateChange) {
                     if (isPlaying) {
                         requestAudioFocus()
@@ -281,34 +301,75 @@ class PlaybackService : MediaBrowserServiceCompat() {
                     }
                 }
 
-                // Load artwork asynchronously if track changed
-                if (track?.uri != lastTrackUri) {
+                // Asynchronously load artwork on track change
+                if (isTrackChange) {
                     lastTrackUri = track?.uri
-                    cachedArtwork = if (track?.uri != null) {
-                        withContext(Dispatchers.IO) {
-                            ArtworkCache.loadArtwork(track.uri, 384)
+                    cachedArtwork = null
+                    artworkJob?.cancel()
+                    if (track?.uri != null) {
+                        artworkJob = serviceScope.launch(Dispatchers.IO) {
+                            val art = ArtworkCache.loadArtwork(track.uri, 512)
+                            withContext(Dispatchers.Main) {
+                                cachedArtwork = art
+                                if (lastTrackUri == track.uri) {
+                                    val nowPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
+                                    val nowPos = engineController.currentPositionSec.value
+                                    updateMediaSession(track, nowPlaying, nowPos, track.durationSeconds, art)
+                                    postNotification(track, nowPlaying, nowPos, track.durationSeconds, art)
+                                }
+                            }
                         }
-                    } else null
+                    }
                 }
 
-                // Update MediaSession when state changes, track changes, or on user seek (pos jump > 2s)
-                if (isStateChange || isTrackChange || isMajorSeek) {
-                    lastMediaSessionPosSec = positionSec
-                    updateMediaSession(track, isPlaying, positionSec, durationSec, cachedArtwork)
-                }
-
-                // Throttle Foreground Notification posting: ONLY post when track, playing state, or artwork changed!
-                val artworkChanged = cachedArtwork != lastPostedArtwork
-                if (isTrackChange || isStateChange || artworkChanged) {
-                    lastPostedTrackUri = track?.uri
+                if (isTrackChange || isStateChange || isMajorSeek) {
+                    lastMediaSessionPosSec = posSec
                     lastPostedIsPlaying = isPlaying
-                    lastPostedArtwork = cachedArtwork
-
-                    val notification = buildNotification(track, isPlaying, positionSec, durationSec, cachedArtwork)
-                    val notificationManager = getSystemService(NotificationManager::class.java)
-                    notificationManager?.notify(NOTIFICATION_ID, notification)
+                    updateMediaSession(track, isPlaying, posSec, track?.durationSeconds ?: 1.0, cachedArtwork)
+                    postNotification(track, isPlaying, posSec, track?.durationSeconds ?: 1.0, cachedArtwork)
                 }
             }
+        }
+    }
+
+    private fun postNotification(
+        track: TrackInfo?,
+        isPlaying: Boolean,
+        positionSec: Double,
+        durationSec: Double,
+        artwork: Bitmap?
+    ) {
+        val notification = buildNotification(track, isPlaying, positionSec, durationSec, artwork)
+        if (isPlaying) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ServiceCompat.startForeground(
+                        this,
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } catch (e: Exception) {
+                Log.e("PlaybackService", "Error calling startForeground", e)
+                val notificationManager = getSystemService(NotificationManager::class.java)
+                notificationManager?.notify(NOTIFICATION_ID, notification)
+            }
+        } else {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_DETACH)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(false)
+                }
+            } catch (e: Exception) {
+                Log.w("PlaybackService", "Error calling stopForeground", e)
+            }
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager?.notify(NOTIFICATION_ID, notification)
         }
     }
 
@@ -319,6 +380,19 @@ class PlaybackService : MediaBrowserServiceCompat() {
         durationSec: Double,
         artwork: Bitmap?
     ) {
+        if (track == null && !isPlaying) {
+            val stateBuilder = PlaybackStateCompat.Builder()
+                .setActions(
+                    PlaybackStateCompat.ACTION_PLAY or
+                    PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                    PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+                )
+                .setState(PlaybackStateCompat.STATE_NONE, 0L, 0f)
+            mediaSession.setPlaybackState(stateBuilder.build())
+            return
+        }
+
         val playbackState = if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
         val actions = PlaybackStateCompat.ACTION_PLAY or
                 PlaybackStateCompat.ACTION_PAUSE or
@@ -340,24 +414,29 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
         mediaSession.setPlaybackState(stateBuilder.build())
 
-        val formatSpec = track?.let { "${it.formatName} ${it.sampleRate / 1000u}kHz" } ?: "Lossless Master"
-        val metadataBuilder = MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track?.title ?: "Veyl")
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track?.artist ?: "Veyl Audiophile")
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track?.album ?: "Lossless Album")
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ARTIST, track?.artist ?: "Veyl Audiophile")
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, track?.title ?: "Veyl")
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, track?.artist ?: "Veyl Audiophile")
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, formatSpec)
-            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, (durationSec * 1000).toLong())
+        val title = track?.title?.takeIf { it.isNotBlank() } ?: "Veyl"
+        val artist = track?.artist?.takeIf { it.isNotBlank() } ?: "Lossless Audio"
+        val album = track?.album?.takeIf { it.isNotBlank() } ?: "Master Recording"
+        val formatSpec = track?.let { "${it.formatName} ${it.sampleRate / 1000u}kHz" } ?: "Hi-Res Master"
 
-        if (artwork != null) {
+        val metadataBuilder = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ARTIST, artist)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, artist)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, formatSpec)
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, (durationSec * 1000).toLong().coerceAtLeast(1000L))
+
+        if (artwork != null && !artwork.isRecycled) {
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork)
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork)
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, artwork)
         }
 
         mediaSession.setMetadata(metadataBuilder.build())
+        mediaSession.isActive = true
     }
 
     private fun buildNotification(
@@ -403,16 +482,18 @@ class PlaybackService : MediaBrowserServiceCompat() {
             nextIntent
         )
 
+        val title = track?.title?.takeIf { it.isNotBlank() } ?: "Veyl"
         val formatDesc = track?.let {
             "${it.artist} • ${it.formatName} ${it.sampleRate / 1000u}kHz"
         } ?: "Bit-Perfect Audio Engine"
 
         val oemExtras = Bundle().apply {
             putString("android.media.session.tag", "VeylMediaSession")
+            putBoolean("android.support.action.showsUserInterface", true)
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(track?.title ?: "Veyl Music Player")
+            .setContentTitle(title)
             .setContentText(formatDesc)
             .setSubText(track?.album ?: "Veyl")
             .setSmallIcon(R.drawable.ic_veyl_notification)
@@ -459,7 +540,22 @@ class PlaybackService : MediaBrowserServiceCompat() {
         parentId: String,
         result: Result<MutableList<MediaBrowserCompat.MediaItem>>
     ) {
-        result.sendResult(mutableListOf())
+        val curTrack = engineController.currentTrack.value
+        if (curTrack != null) {
+            val description = MediaDescriptionCompat.Builder()
+                .setMediaId(curTrack.uri)
+                .setTitle(curTrack.title)
+                .setSubtitle(curTrack.artist ?: "Veyl Audiophile")
+                .setDescription(curTrack.album ?: "Master Recording")
+                .build()
+            val item = MediaBrowserCompat.MediaItem(
+                description,
+                MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
+            )
+            result.sendResult(mutableListOf(item))
+        } else {
+            result.sendResult(mutableListOf())
+        }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -500,7 +596,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     companion object {
-        const val CHANNEL_ID = "veyl_playback_channel_v3"
+        const val CHANNEL_ID = "veyl_playback_channel_v4"
         const val NOTIFICATION_ID = 1001
     }
 }
