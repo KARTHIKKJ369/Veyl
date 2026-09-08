@@ -341,7 +341,12 @@ fun AudiophileNavHost(
                 ) {
                     VeylSettingsScreen(
                         controller = controller,
-                        onSelectRootFolder = onSelectRootFolder
+                        onSelectRootFolder = onSelectRootFolder,
+                        onBack = {
+                            if (!navController.popBackStack()) {
+                                navController.navigate(VeylScreen.Home.route)
+                            }
+                        }
                     )
                 }
 

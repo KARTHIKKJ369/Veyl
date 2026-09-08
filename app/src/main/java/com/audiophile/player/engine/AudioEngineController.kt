@@ -421,20 +421,21 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private fun observeUsbDacChanges() {
         scope.launch {
-            var isInitial = true
+            var previousDac: UsbDacInfo? = null
             connectedDac.collect { dac ->
-                if (isInitial) {
-                    isInitial = false
-                    if (dac == null) return@collect
+                if (previousDac == null && dac == null) {
+                    return@collect
                 }
-                if (dac != null) {
+                if (dac != null && dac.id != previousDac?.id) {
+                    previousDac = dac
                     Log.i("AudioEngineController", "USB DAC attached: ${dac.name} (Device ID: ${dac.id})")
                     if (_bitPerfectEnabled.value) {
                         val targetRate = currentOutputSampleRate.toInt()
                         val optimalRate = usbDacManager.getOptimalSampleRate(targetRate)
                         reconfigureHardwareOutput(optimalRate.toUInt(), dac.id, exclusive = true)
                     }
-                } else {
+                } else if (dac == null && previousDac != null) {
+                    previousDac = null
                     Log.i("AudioEngineController", "USB DAC detached, returning to standard output")
                     reconfigureHardwareOutput(48000u, null, exclusive = false)
                 }
@@ -580,9 +581,24 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun toggleTheme() {
         val newDark = !_isDarkMode.value
-        _isDarkMode.value = newDark
-        prefs.edit().putBoolean("is_dark_mode", newDark).apply()
+        setDarkMode(newDark)
+    }
+
+    fun setDarkMode(isDark: Boolean) {
+        _isDarkMode.value = isDark
+        prefs.edit().putBoolean("is_dark_mode", isDark).apply()
         _currentVeylColorScheme.value = loadInitialColorScheme()
+    }
+
+    fun resetSettingsToDefault() {
+        setDarkMode(true)
+        applyThemePreset("monochrome_carbon")
+        setBufferFrameSize(128)
+        setDsdMode(DsdModeEnum.DO_P)
+        setBitPerfectEnabled(true)
+        setGaplessEnabled(true)
+        setCrossfadeSeconds(0f)
+        setAutoFetchLyrics(true)
     }
 
     fun setRepeatMode(mode: RepeatMode) {
@@ -1120,7 +1136,7 @@ class AudioEngineController private constructor(private val context: Context) {
                 playTrack(trackToPlay)
                 return
             }
-        } else if (curStatus.state == PlaybackStateEnum.ENDED) {
+        } else if (curStatus.state == PlaybackStateEnum.ENDED || curStatus.state == PlaybackStateEnum.STOPPED) {
             playTrack(curTrack)
             return
         }

@@ -415,6 +415,12 @@ impl PlaybackEngine {
                                     s.current_stream_info = Some(info);
                                 }
                             } else {
+                                // Drop locks BEFORE waiting for audio output to drain so render_audio is not blocked!
+                                drop(s);
+                                drop(q);
+                                drop(active_dec_guard);
+                                drop(next_dec_guard);
+
                                 // Wait for audio output callback to consume all remaining audio in ring buffer
                                 loop {
                                     let occupied = {
@@ -427,6 +433,7 @@ impl PlaybackEngine {
                                     thread::sleep(Duration::from_millis(15));
                                 }
                                 if !flush_req.load(Ordering::SeqCst) {
+                                    let mut s = state.lock();
                                     s.playback_state = PlaybackState::Ended;
                                 }
                             }
@@ -502,6 +509,10 @@ impl PlaybackEngine {
     pub fn play(&self) {
         let mut s = self.state.lock();
         if s.current_track.is_some() {
+            if s.playback_state == PlaybackState::Ended || s.playback_state == PlaybackState::Stopped {
+                s.position_seconds = 0.0;
+                self.seek_requested_frame.store(0, Ordering::SeqCst);
+            }
             s.playback_state = PlaybackState::Playing;
         }
     }

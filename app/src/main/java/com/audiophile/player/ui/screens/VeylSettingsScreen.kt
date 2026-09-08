@@ -1,8 +1,6 @@
 package com.audiophile.player.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,18 +22,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,53 +39,45 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.LifecycleOwner
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.Color
 import com.audiophile.player.engine.AudioEngineController
-import com.audiophile.player.engine.SavedCustomTheme
 import com.audiophile.player.ui.components.VeylColorWheelPickerSheet
 import com.audiophile.player.ui.theme.CuratedPresets
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylSpacing
 import com.audiophile.player.ui.theme.VeylTypography
-import com.audiophile.player.ui.theme.isColorLight
-import com.audiophile.player.ui.theme.parseColorFromHex
 import uniffi.audiophile_core.DsdModeEnum
 
+enum class ThemeModeOption {
+    LIGHT,
+    DARK,
+    SYSTEM
+}
+
 /**
- * SCREEN 5: SETTINGS & HARDWARE ENGINE (Enhanced with Mobile App UI/UX Design Standards)
- *
- * UX & UI Architecture:
- * - 60/30/10 Rule: 60% Void Black canvas, 30% Panel Charcoal hardware cards, 10% Phosphor Chartreuse signals.
- * - 8-Point Grid System: Strict 8dp spacing hierarchy (8, 12, 16, 24, 32, 48dp).
- * - Trojan Horse Pattern: Complex DSP and AAudio driver configurations wrapped in intuitive, tactile segment cards.
- * - Peak-End Emotional Feedback: Immediate haptic confirmation on hardware switch flips and DAC connections.
- *
- * Accessibility:
- * - Clear TalkBack explanations of technical consequences for every setting.
- * - High-contrast text and interactive state indicators (>11:1 chartreuse, >7:1 primary text).
- * - Minimum 48x48dp touch bounds across all segmented chips, switches, and folder triggers.
+ * SCREEN 5: SETTINGS & HARDWARE ENGINE
+ * Precision-crafted audiophile master control matching high-end hardware ergonomics.
  */
 @Composable
 fun VeylSettingsScreen(
     controller: AudioEngineController,
     onSelectRootFolder: () -> Unit,
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
+
     val rootPath by controller.selectedRootPath.collectAsState()
     val isScanning by controller.isScanning.collectAsState()
     val libraryTracks by controller.libraryTracks.collectAsState()
@@ -98,14 +86,15 @@ fun VeylSettingsScreen(
     val bitPerfectEnabled by controller.bitPerfectEnabled.collectAsState()
     val bufferFrameSize by controller.bufferFrameSize.collectAsState()
     val gaplessEnabled by controller.gaplessEnabled.collectAsState()
-    val crossfadeSeconds by controller.crossfadeSeconds.collectAsState()
     val autoFetchLyrics by controller.autoFetchLyrics.collectAsState()
     val selectedThemeId by controller.selectedThemeId.collectAsState()
     val isDarkMode by controller.isDarkMode.collectAsState()
-    val savedCustomThemes by controller.savedCustomThemes.collectAsState()
 
-    var mmapExclusiveEnabled by remember { mutableStateOf(true) }
-    var dsdGainCompensation by remember { mutableStateOf(true) }
+    var themeMode by remember(isDarkMode) {
+        mutableStateOf(if (isDarkMode) ThemeModeOption.DARK else ThemeModeOption.LIGHT)
+    }
+
+    var mmapExclusiveEnabled by remember { mutableStateOf(bitPerfectEnabled) }
     var cachedLyricsCount by remember { mutableIntStateOf(com.audiophile.player.engine.LyricsManager.getCachedLyricsCount()) }
     var showColorWheelSheet by remember { mutableStateOf(false) }
 
@@ -118,983 +107,1051 @@ fun VeylSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(horizontal = VeylSpacing.md),
-            verticalArrangement = Arrangement.spacedBy(VeylSpacing.md)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Header Bar: Title & Telemetry Badge
+            // 1. Top Header: Chevron Left, "Engine Settings", "Fine-tune your sound.", "Reset", and Refresh Button
             item {
-                Spacer(modifier = Modifier.height(VeylSpacing.sm))
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "HARDWARE & ENGINE MASTER",
-                            style = VeylTypography.MonoBadge,
-                            color = colors.accentSignal
-                        )
-                        Text(
-                            text = "Engine Settings",
-                            style = VeylTypography.DisplayMedium,
-                            color = colors.textPrimary
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onBack()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.ChevronLeft,
+                                contentDescription = "Back",
+                                tint = colors.textPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Column {
+                            Text(
+                                text = "Engine Settings",
+                                style = VeylTypography.HeadlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.textPrimary,
+                                fontSize = 21.sp
+                            )
+                            Text(
+                                text = "Fine-tune your sound.",
+                                style = VeylTypography.BodySmall,
+                                color = colors.textSecondary,
+                                fontSize = 13.sp
+                            )
+                        }
                     }
 
-                    // Rescan button
-                    IconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSelectRootFolder()
-                        },
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(colors.glassButtonBg)
-                            .border(1.dp, colors.borderHairline, CircleShape)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (isScanning) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = colors.accentSignal,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = VeylIcons.Refresh,
-                                contentDescription = "Rescan library",
-                                tint = colors.textPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
+                        Text(
+                            text = "Reset",
+                            style = VeylTypography.BodySmall,
+                            color = colors.textSecondary,
+                            fontSize = 13.sp,
+                            modifier = Modifier
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    controller.resetSettingsToDefault()
+                                    themeMode = ThemeModeOption.DARK
+                                    mmapExclusiveEnabled = true
+                                }
+                                .padding(horizontal = 4.dp, vertical = 6.dp)
+                        )
+
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectRootFolder()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            if (isScanning) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = colors.accentSignal,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = VeylIcons.Refresh,
+                                    contentDescription = "Rescan",
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // 2. Appearance & Studio Themes Section
+            // 2. Luxury Hero Banner: "Pure Audio / Deeper Feeling" with Concentric Aperture Art & "LISTEN / TUNE / EXPERIENCE"
             item {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .background(colors.surfacePanel)
-                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .padding(VeylSpacing.md)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(VeylSpacing.sm)) {
-                        // Section Header with Dark Mode switch
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    text = "STUDIO AESTHETICS",
-                                    style = VeylTypography.MonoBadge,
-                                    color = colors.accentSignal
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    Color(0xFF191B22),
+                                    Color(0xFF13151A),
+                                    Color(0xFF0F1014)
                                 )
-                                Text(
-                                    text = "Appearance & Themes",
-                                    style = VeylTypography.TitleMedium,
-                                    color = colors.textPrimary
+                            )
+                        )
+                        .border(1.dp, colors.borderHairline.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 20.dp, vertical = 18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "Pure Audio",
+                                style = VeylTypography.HeadlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 21.sp,
+                                letterSpacing = (-0.3).sp
+                            )
+                            Text(
+                                text = "Deeper Feeling",
+                                style = VeylTypography.HeadlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 21.sp,
+                                letterSpacing = (-0.3).sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Precision. Performance. Peace.",
+                                style = VeylTypography.BodySmall,
+                                color = Color(0xFF9E9E9E),
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        // Concentric Vinyl / Aperture Lens Art + Typographic Spec
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Canvas(modifier = Modifier.size(80.dp)) {
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val maxR = size.width / 2f
+
+                                // Outer subtle glow ring
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        listOf(Color(0xFF2C3240), Color(0xFF13161C)),
+                                        center = center,
+                                        radius = maxR
+                                    ),
+                                    radius = maxR,
+                                    center = center
+                                )
+
+                                // Inscribed concentric groove rings
+                                val ringFractions = listOf(0.92f, 0.82f, 0.72f, 0.62f, 0.52f, 0.42f, 0.32f, 0.20f)
+                                ringFractions.forEachIndexed { idx, frac ->
+                                    drawCircle(
+                                        color = if (idx % 2 == 0) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f),
+                                        radius = maxR * frac,
+                                        center = center,
+                                        style = Stroke(width = if (idx == 0 || idx == 3) 1.5f else 1f)
+                                    )
+                                }
+
+                                // Center spindle core
+                                drawCircle(
+                                    color = Color(0xFF38BDF8).copy(alpha = 0.8f),
+                                    radius = maxR * 0.12f,
+                                    center = center
+                                )
+                                drawCircle(
+                                    color = Color.White,
+                                    radius = maxR * 0.05f,
+                                    center = center
                                 )
                             }
 
-                            // Dark / Light toggle
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            // Typographic vertical motto
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                                horizontalAlignment = Alignment.End
                             ) {
                                 Text(
-                                    text = if (isDarkMode) "Dark" else "Light",
-                                    style = VeylTypography.MonoSpec,
-                                    color = colors.textSecondary,
-                                    fontSize = 11.sp
+                                    text = "LISTEN",
+                                    style = VeylTypography.MonoBadge,
+                                    color = Color.White.copy(alpha = 0.75f),
+                                    fontSize = 8.5.sp,
+                                    letterSpacing = 1.6.sp
                                 )
-                                Switch(
-                                    checked = isDarkMode,
-                                    onCheckedChange = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        controller.toggleTheme()
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = colors.background,
-                                        checkedTrackColor = colors.accentSignal,
-                                        uncheckedThumbColor = colors.textMuted,
-                                        uncheckedTrackColor = colors.surfaceElevated
-                                    )
+                                Text(
+                                    text = "TUNE",
+                                    style = VeylTypography.MonoBadge,
+                                    color = Color.White.copy(alpha = 0.75f),
+                                    fontSize = 8.5.sp,
+                                    letterSpacing = 1.6.sp
+                                )
+                                Text(
+                                    text = "EXPERIENCE",
+                                    style = VeylTypography.MonoBadge,
+                                    color = Color.White.copy(alpha = 0.75f),
+                                    fontSize = 8.5.sp,
+                                    letterSpacing = 1.6.sp
                                 )
                             }
                         }
+                    }
+                }
+            }
 
-                        Text(
-                            text = "Curated Audiophile Presets",
-                            style = VeylTypography.BodySmall,
-                            color = colors.textSecondary,
-                            fontSize = 11.sp
-                        )
+            // 3. Section: "Appearance" ("Make it yours.") + Segmented Pill + Curated Presets
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Appearance",
+                                style = VeylTypography.HeadlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.textPrimary,
+                                fontSize = 18.sp
+                            )
+                            Text(
+                                text = "Make it yours.",
+                                style = VeylTypography.BodySmall,
+                                color = colors.textSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
 
-                        // Horizontal Theme Presets Carousel
+                        // Segmented 3-way Theme Pill: [ Light | Dark | System ]
                         Row(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(colors.surfacePanel)
+                                .border(1.dp, colors.borderHairline, RoundedCornerShape(20.dp))
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            CuratedPresets.forEach { preset ->
-                                val isSelected = selectedThemeId == preset.id
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                        .background(if (isSelected) colors.surfaceElevated else colors.surfacePill.copy(alpha = 0.5f))
-                                        .border(
-                                            width = if (isSelected) 1.5.dp else 1.dp,
-                                            color = if (isSelected) colors.accentSignal else colors.borderHairline,
-                                            shape = RoundedCornerShape(VeylSpacing.RadiusSm)
-                                        )
-                                        .clickable {
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            controller.applyThemePreset(preset.id)
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                            // Light Option
+                            val isLightSelected = themeMode == ThemeModeOption.LIGHT
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isLightSelected) colors.surfaceElevated else Color.Transparent)
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        themeMode = ThemeModeOption.LIGHT
+                                        controller.setDarkMode(false)
+                                    }
+                                    .padding(horizontal = 9.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = VeylIcons.Sun,
+                                    contentDescription = "Light Mode",
+                                    tint = if (isLightSelected) colors.textPrimary else colors.textMuted,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Light",
+                                    style = VeylTypography.BodySmall,
+                                    fontWeight = if (isLightSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isLightSelected) colors.textPrimary else colors.textMuted,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+
+                            // Dark Option
+                            val isDarkSelected = themeMode == ThemeModeOption.DARK
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isDarkSelected) colors.surfaceElevated else Color.Transparent)
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        themeMode = ThemeModeOption.DARK
+                                        controller.setDarkMode(true)
+                                    }
+                                    .padding(horizontal = 9.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = VeylIcons.Moon,
+                                    contentDescription = "Dark Mode",
+                                    tint = if (isDarkSelected) colors.textPrimary else colors.textMuted,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Dark",
+                                    style = VeylTypography.BodySmall,
+                                    fontWeight = if (isDarkSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isDarkSelected) colors.textPrimary else colors.textMuted,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+
+                            // System Option
+                            val isSystemSelected = themeMode == ThemeModeOption.SYSTEM
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isSystemSelected) colors.surfaceElevated else Color.Transparent)
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        themeMode = ThemeModeOption.SYSTEM
+                                        controller.setDarkMode(true)
+                                    }
+                                    .padding(horizontal = 9.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = VeylIcons.MonitorSystem,
+                                    contentDescription = "System Mode",
+                                    tint = if (isSystemSelected) colors.textPrimary else colors.textMuted,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "System",
+                                    style = VeylTypography.BodySmall,
+                                    fontWeight = if (isSystemSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSystemSelected) colors.textPrimary else colors.textMuted,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                        }
+                    }
+
+                    // Horizontal Row of Theme Preset Cards: Monochrome Carbon, Braun Dieter Rams, Macintosh Lab, etc.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CuratedPresets.forEach { preset ->
+                            val isSelected = selectedThemeId == preset.id
+                            val displayName = when (preset.id) {
+                                "monochrome_carbon" -> "Monochrome\nCarbon"
+                                "mcintosh_blue" -> "Macintosh Lab"
+                                "braun_rams" -> "Braun Dieter Rams"
+                                else -> preset.name
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .width(136.dp)
+                                    .height(96.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isSelected) colors.surfaceElevated else colors.surfacePanel)
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) Color.White else colors.borderHairline,
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        controller.applyThemePreset(preset.id)
+                                    }
+                                    .padding(12.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Column(
-                                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                                        horizontalAlignment = Alignment.Start
+                                    // Three Swatches & Checkmark
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // 3 color dots
                                         Row(
                                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(14.dp)
+                                                    .size(13.dp)
                                                     .clip(CircleShape)
                                                     .background(preset.primary)
                                             )
                                             Box(
                                                 modifier = Modifier
-                                                    .size(10.dp)
+                                                    .size(11.dp)
                                                     .clip(CircleShape)
                                                     .background(preset.secondary)
                                             )
                                             Box(
                                                 modifier = Modifier
-                                                    .size(8.dp)
+                                                    .size(9.dp)
                                                     .clip(CircleShape)
                                                     .background(preset.background)
-                                                    .border(0.5.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                                                    .border(0.5.dp, Color.White.copy(alpha = 0.35f), CircleShape)
                                             )
-                                            if (isSelected) {
-                                                Spacer(modifier = Modifier.width(2.dp))
-                                                Icon(
-                                                    imageVector = VeylIcons.Check,
-                                                    contentDescription = null,
-                                                    tint = colors.accentSignal,
-                                                    modifier = Modifier.size(12.dp)
-                                                )
-                                            }
                                         }
 
-                                        Text(
-                                            text = preset.name,
-                                            style = VeylTypography.TitleMedium,
-                                            color = if (isSelected) colors.accentSignal else colors.textPrimary,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                        )
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = VeylIcons.Check,
+                                                contentDescription = "Selected",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
                                     }
+
+                                    Text(
+                                        text = displayName,
+                                        style = VeylTypography.BodySmall,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) Color.White else colors.textSecondary,
+                                        fontSize = 12.sp,
+                                        lineHeight = 15.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }
 
-                        // Saved Custom Themes Carousel
-                        if (savedCustomThemes.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Your Saved Custom Palettes",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textSecondary,
-                                fontSize = 11.sp
-                            )
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                savedCustomThemes.forEach { savedTheme ->
-                                    val isSelected = selectedThemeId == savedTheme.id
-                                    val p = parseColorFromHex(savedTheme.primaryHex, colors.accentSignal)
-                                    val s = parseColorFromHex(savedTheme.secondaryHex, colors.textSecondary)
-                                    val bg = parseColorFromHex(savedTheme.backgroundHex, colors.background)
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                            .background(if (isSelected) colors.surfaceElevated else colors.surfacePill.copy(alpha = 0.5f))
-                                            .border(
-                                                width = if (isSelected) 1.5.dp else 1.dp,
-                                                color = if (isSelected) colors.accentSignal else colors.borderHairline,
-                                                shape = RoundedCornerShape(VeylSpacing.RadiusSm)
-                                            )
-                                            .clickable {
-                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                controller.applySavedCustomTheme(savedTheme)
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 8.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            // Swatch Preview
-                                            Row(horizontalArrangement = Arrangement.spacedBy((-4).dp)) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(14.dp)
-                                                        .clip(CircleShape)
-                                                        .background(bg)
-                                                        .border(1.dp, colors.borderHairline, CircleShape)
-                                                )
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(14.dp)
-                                                        .clip(CircleShape)
-                                                        .background(s)
-                                                        .border(1.dp, colors.borderHairline, CircleShape)
-                                                )
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(14.dp)
-                                                        .clip(CircleShape)
-                                                        .background(p)
-                                                        .border(1.dp, colors.borderHairline, CircleShape)
-                                                )
-                                            }
-
-                                            Text(
-                                                text = savedTheme.name,
-                                                style = VeylTypography.TitleMedium,
-                                                color = if (isSelected) colors.accentSignal else colors.textPrimary,
-                                                fontSize = 12.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                            )
-
-                                            // Delete Button
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(22.dp)
-                                                    .clip(CircleShape)
-                                                    .background(colors.glassButtonBg)
-                                                    .clickable {
-                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                        controller.deleteCustomTheme(savedTheme.id)
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = VeylIcons.Trash,
-                                                    contentDescription = "Delete theme",
-                                                    tint = colors.textMuted,
-                                                    modifier = Modifier.size(11.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Active Theme Details & Custom Palette Trigger
-                        val activePreset = CuratedPresets.find { it.id == selectedThemeId }
-                        val savedTheme = savedCustomThemes.find { it.id == selectedThemeId }
-                        val (themeTitle, themeDescription) = when {
-                            savedTheme != null -> savedTheme.name to "User-saved custom studio palette"
-                            activePreset != null -> activePreset.name to activePreset.description
-                            selectedThemeId.startsWith("custom") -> "Custom Palette" to "Custom hand-crafted palette active via Color Wheel"
-                            else -> "Monochrome Carbon" to "Pure OLED black, tactile carbon panels, surgical white precision"
-                        }
-
-                        Row(
+                        // Custom Palette Button Trigger
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                .background(colors.surfaceElevated)
-                                .padding(10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .width(80.dp)
+                                .height(96.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(colors.surfacePanel)
+                                .border(1.dp, colors.borderHairline, RoundedCornerShape(16.dp))
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showColorWheelSheet = true
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                Text(
-                                    text = themeTitle,
-                                    style = VeylTypography.TitleMedium,
-                                    color = colors.textPrimary,
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    text = themeDescription,
-                                    style = VeylTypography.BodySmall,
-                                    color = colors.textSecondary,
-                                    fontSize = 10.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            // Trigger Button for Color Wheel Sheet (Icon Only)
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                    .background(colors.accentSignal)
-                                    .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        showColorWheelSheet = true
-                                    },
-                                contentAlignment = Alignment.Center
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Icon(
                                     imageVector = VeylIcons.Palette,
-                                    contentDescription = "Color Palette Picker",
-                                    tint = if (isColorLight(colors.accentSignal)) Color.Black else Color.White,
-                                    modifier = Modifier.size(18.dp)
+                                    contentDescription = "Color Wheel",
+                                    tint = colors.accentSignal,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "Custom",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    fontSize = 11.sp
                                 )
                             }
                         }
-
-
                     }
                 }
             }
 
-            // 3. Attached USB DAC Telemetry Card (Vanity & Trust Signal)
+            // 4. Section: "Audio Hardware" (Rescan pill + USB DAC Hardware Interface card)
             item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .background(if (connectedDac != null) colors.surfaceElevated else colors.surfacePanel)
-                        .border(
-                            1.dp,
-                            if (connectedDac != null) colors.borderActive else colors.borderHairline,
-                            RoundedCornerShape(VeylSpacing.RadiusMd)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Audio Hardware",
+                            style = VeylTypography.HeadlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary,
+                            fontSize = 18.sp
                         )
-                        .padding(VeylSpacing.md)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(VeylSpacing.xs)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+
+                        // Rescan button pill
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = colors.surfacePanel,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
+                            modifier = Modifier.clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectRootFolder()
+                            }
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "Rescan",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    fontSize = 11.5.sp
+                                )
+                                Icon(
+                                    imageVector = VeylIcons.Refresh,
+                                    contentDescription = "Rescan hardware",
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // USB DAC Hardware Interface Card
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.surfacePanel)
+                            .border(1.dp, colors.borderHairline, RoundedCornerShape(16.dp))
+                            .padding(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Squircle Icon Container
+                            Box(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(colors.surfaceElevated),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = VeylIcons.UsbDac,
                                     contentDescription = null,
                                     tint = if (connectedDac != null) colors.accentSignal else colors.textMuted,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "USB DAC HARDWARE INTERFACE",
-                                    style = VeylTypography.MonoBadge,
-                                    color = colors.textPrimary
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
 
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(if (connectedDac != null) colors.accentSignal.copy(alpha = 0.2f) else colors.surfacePill)
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            // Center Info
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
-                                Text(
-                                    text = if (connectedDac != null) "HARDWARE ATTACHED" else "INTERNAL HAL",
-                                    style = VeylTypography.MonoBadge,
-                                    color = if (connectedDac != null) colors.accentSignal else colors.textMuted,
-                                    fontSize = 9.sp
-                                )
-                            }
-                        }
-
-                        Text(
-                            text = connectedDac?.name ?: "Built-in High-Definition Audio HAL / AudioFlinger",
-                            style = VeylTypography.TitleMedium,
-                            color = if (connectedDac != null) colors.accentSignal else colors.textSecondary
-                        )
-
-                        Text(
-                            text = if (connectedDac != null) {
-                                "Supported PCM: ${connectedDac?.supportedSampleRates?.joinToString(", ") { "${it / 1000}kHz" }} • Direct USB Async I/O"
-                            } else {
-                                "Direct hardware access ready when external USB OTG DAC is connected."
-                            },
-                            style = VeylTypography.MonoSpec,
-                            color = colors.textMuted,
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-            }
-
-            // 3. Section: Audio Driver & Output Mode
-            item {
-                Text(
-                    text = "OUTPUT DRIVER & BIT-PERFECT PIPELINE",
-                    style = VeylTypography.MonoBadge,
-                    color = colors.textSecondary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .background(colors.surfacePanel)
-                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .padding(VeylSpacing.md),
-                    verticalArrangement = Arrangement.spacedBy(VeylSpacing.md)
-                ) {
-                    // AAudio MMAP Exclusive Mode Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text(
-                                text = "AAudio MMAP Exclusive Mode",
-                                style = VeylTypography.TitleMedium,
-                                color = colors.textPrimary
-                            )
-                            Text(
-                                text = "Bypasses Android AudioFlinger mixer for 100% bit-perfect output directly to audio hardware buffers",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textSecondary
-                            )
-                        }
-
-                        Switch(
-                            checked = mmapExclusiveEnabled,
-                            onCheckedChange = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                mmapExclusiveEnabled = it
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = colors.background,
-                                checkedTrackColor = colors.accentSignal,
-                                uncheckedThumbColor = colors.textSecondary,
-                                uncheckedTrackColor = colors.surfacePill
-                            ),
-                            modifier = Modifier.semantics {
-                                contentDescription = "AAudio MMAP Exclusive Mode: Bypasses system mixer for bit-perfect output"
-                            }
-                        )
-                    }
-
-                    // Buffer Size Selector
-                    Column(verticalArrangement = Arrangement.spacedBy(VeylSpacing.xs)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Hardware Buffer Frame Size",
-                                style = VeylTypography.TitleMedium,
-                                color = colors.textPrimary
-                            )
-                            Text(
-                                text = when (bufferFrameSize) {
-                                    64 -> "64 frames (1.4 ms)"
-                                    128 -> "128 frames (2.9 ms)"
-                                    else -> "256 frames (5.8 ms)"
-                                },
-                                style = VeylTypography.MonoBadge,
-                                color = colors.accentSignal
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(VeylSpacing.xs)
-                        ) {
-                            listOf(64 to "Ultra-Low (64)", 128 to "Balanced (128)", 256 to "Safe (256)").forEach { (size, label) ->
-                                val isSelected = bufferFrameSize == size
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                        .background(if (isSelected) colors.surfaceElevated else colors.glassButtonBg)
-                                        .border(
-                                            1.dp,
-                                            if (isSelected) colors.borderActive else colors.borderHairline,
-                                            RoundedCornerShape(VeylSpacing.RadiusSm)
-                                        )
-                                        .clickable {
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            controller.setBufferFrameSize(size)
-                                        }
-                                        .padding(vertical = 10.dp),
-                                    contentAlignment = Alignment.Center
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = label,
-                                        style = if (isSelected) VeylTypography.MonoBadge else VeylTypography.BodySmall,
-                                        color = if (isSelected) colors.accentSignal else colors.textSecondary,
-                                        fontSize = 10.sp
+                                        text = "USB DAC Hardware Interface",
+                                        style = VeylTypography.TitleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.textPrimary,
+                                        fontSize = 14.sp
                                     )
+
+                                    // Badge
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF1E2838))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = if (connectedDac != null) "HARDWARE ATTACHED" else "INTERNAL HAL",
+                                            style = VeylTypography.MonoBadge,
+                                            color = Color(0xFF4C8DFF),
+                                            fontSize = 9.sp
+                                        )
+                                    }
                                 }
+
+                                Text(
+                                    text = connectedDac?.name ?: "Built-in High-Definition Audio HAL / AudioFlinger",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    fontSize = 12.sp
+                                )
+
+                                Text(
+                                    text = if (connectedDac != null) {
+                                        "Supported PCM: ${connectedDac?.supportedSampleRates?.joinToString(", ") { "${it / 1000}kHz" }} • Direct USB Async I/O"
+                                    } else {
+                                        "Direct hardware access ready when external USB OTG DAC is connected."
+                                    },
+                                    style = VeylTypography.BodySmall,
+                                    color = Color(0xFF4C8DFF),
+                                    fontSize = 11.sp
+                                )
                             }
+
+                            Icon(
+                                imageVector = VeylIcons.ChevronRight,
+                                contentDescription = "Open Hardware Options",
+                                tint = colors.textMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
                 }
             }
 
-            // 4. Section: Native DSD (Direct Stream Digital) Engine
+            // 5. Section: "Output Driver & Bit-Perfect Pipeline"
             item {
-                Text(
-                    text = "NATIVE DSD PROCESSING ENGINE",
-                    style = VeylTypography.MonoBadge,
-                    color = colors.textSecondary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .background(colors.surfacePanel)
-                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .padding(VeylSpacing.md),
-                    verticalArrangement = Arrangement.spacedBy(VeylSpacing.md)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "DSD Playback Pipeline",
-                        style = VeylTypography.TitleMedium,
-                        color = colors.textPrimary
+                        text = "Output Driver & Bit-Perfect Pipeline",
+                        style = VeylTypography.HeadlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary,
+                        fontSize = 18.sp
                     )
 
-                    // DSD Mode Segmented Controls (Decimation vs DoP)
-                    Column(verticalArrangement = Arrangement.spacedBy(VeylSpacing.xs)) {
-                        // Sinc-FIR Decimation Mode
-                        val isDecimation = dsdMode == DsdModeEnum.PCM_DECIMATION
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                .background(if (isDecimation) colors.surfaceElevated else colors.glassButtonBg)
-                                .border(
-                                    1.dp,
-                                    if (isDecimation) colors.borderActive else colors.borderHairline,
-                                    RoundedCornerShape(VeylSpacing.RadiusSm)
-                                )
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    controller.setDsdMode(DsdModeEnum.PCM_DECIMATION)
-                                }
-                                .padding(VeylSpacing.sm)
-                        ) {
+                    // Unified Pipeline Card
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.surfacePanel)
+                            .border(1.dp, colors.borderHairline, RoundedCornerShape(16.dp))
+                    ) {
+                        Column {
+                            // Row 1: AAudio MMAP Exclusive Mode + Switch
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Sinc-FIR Decimation (32-bit Float PCM)",
-                                        style = VeylTypography.TitleMedium,
-                                        color = if (isDecimation) colors.accentSignal else colors.textPrimary,
-                                        fontSize = 13.sp
-                                    )
-                                    Text(
-                                        text = "Converts 1-bit DSD bitstreams to 176.4/352.8 kHz PCM via 128-tap linear phase FIR filter",
-                                        style = VeylTypography.BodySmall,
-                                        color = colors.textSecondary
-                                    )
-                                }
-
-                                if (isDecimation) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(colors.surfaceElevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Icon(
-                                        imageVector = VeylIcons.Check,
-                                        contentDescription = "Selected",
+                                        imageVector = VeylIcons.Waveform,
+                                        contentDescription = null,
                                         tint = colors.accentSignal,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
-                            }
-                        }
 
-                        // DoP v1.1 Mode
-                        val isDop = dsdMode == DsdModeEnum.DO_P
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                .background(if (isDop) colors.surfaceElevated else colors.glassButtonBg)
-                                .border(
-                                    1.dp,
-                                    if (isDop) colors.borderActive else colors.borderHairline,
-                                    RoundedCornerShape(VeylSpacing.RadiusSm)
-                                )
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    controller.setDsdMode(DsdModeEnum.DO_P)
-                                }
-                                .padding(VeylSpacing.sm)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "DoP v1.1 (DSD over PCM Marker Packets)",
+                                        text = "AAudio MMAP Exclusive Mode",
                                         style = VeylTypography.TitleMedium,
-                                        color = if (isDop) colors.accentSignal else colors.textPrimary,
-                                        fontSize = 13.sp
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.textPrimary,
+                                        fontSize = 14.sp
                                     )
                                     Text(
-                                        text = "Packs raw DSD bits with 0x05/0xFA markers into 24-bit PCM for bit-exact DAC decoding",
+                                        text = "Bypasses Android AudioFlinger mixer for 100% bit-perfect output directly to audio hardware buffers.",
                                         style = VeylTypography.BodySmall,
-                                        color = colors.textSecondary
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp
                                     )
                                 }
 
-                                if (isDop) {
+                                Switch(
+                                    checked = mmapExclusiveEnabled,
+                                    onCheckedChange = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        mmapExclusiveEnabled = it
+                                        controller.setBitPerfectEnabled(it)
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFF2E333D),
+                                        uncheckedThumbColor = colors.textMuted,
+                                        uncheckedTrackColor = colors.surfaceElevated
+                                    )
+                                )
+                            }
+
+                            HorizontalDivider(
+                                color = colors.borderHairline.copy(alpha = 0.5f),
+                                thickness = 0.8.dp,
+                                modifier = Modifier.padding(horizontal = 14.dp)
+                            )
+
+                            // Row 2: Hardware Buffer Frame Size
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        val nextSize = when (bufferFrameSize) {
+                                            64 -> 128
+                                            128 -> 256
+                                            256 -> 512
+                                            else -> 64
+                                        }
+                                        controller.setBufferFrameSize(nextSize)
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(colors.surfaceElevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Icon(
-                                        imageVector = VeylIcons.Check,
-                                        contentDescription = "Selected",
-                                        tint = colors.accentSignal,
-                                        modifier = Modifier.size(18.dp)
+                                        imageVector = VeylIcons.LayersBuffer,
+                                        contentDescription = null,
+                                        tint = colors.textSecondary,
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
+
+                                Text(
+                                    text = "Hardware Buffer Frame Size",
+                                    style = VeylTypography.Body,
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.textPrimary,
+                                    fontSize = 13.5.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                val ms = String.format(java.util.Locale.US, "%.1f", bufferFrameSize * 1000.0 / 44100.0)
+                                Text(
+                                    text = "$bufferFrameSize frames ($ms ms) >",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    fontSize = 12.5.sp
+                                )
                             }
-                        }
-                    }
 
-                    // DSD +6dB Gain Compensation Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text(
-                                text = "DSD +6.0 dB Headroom Compensation",
-                                style = VeylTypography.TitleMedium,
-                                color = colors.textPrimary
+                            HorizontalDivider(
+                                color = colors.borderHairline.copy(alpha = 0.5f),
+                                thickness = 0.8.dp,
+                                modifier = Modifier.padding(horizontal = 14.dp)
                             )
-                            Text(
-                                text = "Compensates for standard SACD 0 dBFS reference level offset during decimation",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textSecondary
-                            )
-                        }
 
-                        Switch(
-                            checked = dsdGainCompensation,
-                            onCheckedChange = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                dsdGainCompensation = it
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = colors.background,
-                                checkedTrackColor = colors.accentSignal,
-                                uncheckedThumbColor = colors.textSecondary,
-                                uncheckedTrackColor = colors.surfacePill
-                            )
-                        )
-                    }
-                }
-            }
-
-            // 5. Section: Gapless Playback & Timing
-            item {
-                Text(
-                    text = "PLAYBACK TIMING & TRANSITIONS",
-                    style = VeylTypography.MonoBadge,
-                    color = colors.textSecondary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .background(colors.surfacePanel)
-                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .padding(VeylSpacing.md),
-                    verticalArrangement = Arrangement.spacedBy(VeylSpacing.md)
-                ) {
-                    // Gapless Playback
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text(
-                                text = "True Bit-Perfect Gapless Playback",
-                                style = VeylTypography.TitleMedium,
-                                color = colors.textPrimary
-                            )
-                            Text(
-                                text = "Pre-loads subsequent track into memory buffer for 0-sample seamless transition",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textSecondary
-                            )
-                        }
-
-                        Switch(
-                            checked = gaplessEnabled,
-                            onCheckedChange = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                controller.setGaplessEnabled(it)
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = colors.background,
-                                checkedTrackColor = colors.accentSignal,
-                                uncheckedThumbColor = colors.textSecondary,
-                                uncheckedTrackColor = colors.surfacePill
-                            )
-                        )
-                    }
-
-                    // Crossfade duration
-                    Column(verticalArrangement = Arrangement.spacedBy(VeylSpacing.xs)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Crossfade Transition",
-                                style = VeylTypography.TitleMedium,
-                                color = colors.textPrimary
-                            )
-                            Text(
-                                text = if (crossfadeSeconds == 0f) "OFF (Gapless)" else "%.1f s".format(crossfadeSeconds),
-                                style = VeylTypography.MonoBadge,
-                                color = colors.accentSignal
-                            )
-                        }
-
-                        Slider(
-                            value = crossfadeSeconds,
-                            onValueChange = {
-                                controller.setCrossfadeSeconds(it)
-                            },
-                            valueRange = 0f..5f,
-                            colors = SliderDefaults.colors(
-                                thumbColor = colors.accentSignal,
-                                activeTrackColor = colors.accentSignal,
-                                inactiveTrackColor = colors.surfacePill
-                            ),
-                            modifier = Modifier.semantics {
-                                contentDescription = "Crossfade duration: ${"%.1f".format(crossfadeSeconds)} seconds"
-                            }
-                        )
-                    }
-                }
-            }
-
-            // 6. Section: Synced Lyrics & Online Fetch
-            item {
-                Text(
-                    text = "SYNCED LYRICS & METADATA CACHE",
-                    style = VeylTypography.MonoBadge,
-                    color = colors.textSecondary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .background(colors.surfacePanel)
-                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .padding(VeylSpacing.md),
-                    verticalArrangement = Arrangement.spacedBy(VeylSpacing.md)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text(
-                                text = "Auto-Fetch Online Lyrics (LRCLIB)",
-                                style = VeylTypography.TitleMedium,
-                                color = colors.textPrimary
-                            )
-                            Text(
-                                text = "Automatically queries LRCLIB for synchronized and word-by-word lyrics when missing from local files",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textSecondary
-                            )
-                        }
-
-                        Switch(
-                            checked = autoFetchLyrics,
-                            onCheckedChange = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                controller.setAutoFetchLyrics(it)
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = colors.background,
-                                checkedTrackColor = colors.accentSignal,
-                                uncheckedThumbColor = colors.textSecondary,
-                                uncheckedTrackColor = colors.surfacePill
-                            )
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text(
-                                text = "Offline Lyrics Cache",
-                                style = VeylTypography.TitleMedium,
-                                color = colors.textPrimary
-                            )
-                            Text(
-                                text = "$cachedLyricsCount tracks cached offline in app storage",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textSecondary
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                .background(colors.glassButtonBg)
-                                .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusSm))
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    com.audiophile.player.engine.LyricsManager.clearCache()
-                                    cachedLyricsCount = 0
+                            // Row 3: Sample Rate
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(colors.surfaceElevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = VeylIcons.PulseSine,
+                                        contentDescription = null,
+                                        tint = colors.textSecondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = "Clear Cache",
-                                style = VeylTypography.MonoBadge,
-                                color = colors.accentSignal,
-                                fontSize = 11.sp
+
+                                Text(
+                                    text = "Sample Rate",
+                                    style = VeylTypography.Body,
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.textPrimary,
+                                    fontSize = 13.5.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                Text(
+                                    text = "Automatic (Best Match) >",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    fontSize = 12.5.sp
+                                )
+                            }
+
+                            HorizontalDivider(
+                                color = colors.borderHairline.copy(alpha = 0.5f),
+                                thickness = 0.8.dp,
+                                modifier = Modifier.padding(horizontal = 14.dp)
                             )
+
+                            // Row 4: DSD Output Mode
+                            val isDop = dsdMode == DsdModeEnum.DO_P
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        controller.setDsdMode(if (isDop) DsdModeEnum.PCM_DECIMATION else DsdModeEnum.DO_P)
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(colors.surfaceElevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = VeylIcons.Dsd,
+                                        contentDescription = null,
+                                        tint = colors.textSecondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                Text(
+                                    text = "DSD Output Mode",
+                                    style = VeylTypography.Body,
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.textPrimary,
+                                    fontSize = 13.5.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                Text(
+                                    text = if (isDop) "DoP v1.1 (Bit-Perfect) >" else "Sinc-FIR Decimation >",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    fontSize = 12.5.sp
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // 6. Section: Music Repository Directory Roots
+            // 6. Section: Local Storage & SD Card Roots
             item {
-                Text(
-                    text = "LOCAL STORAGE & REPOSITORY ROOTS",
-                    style = VeylTypography.MonoBadge,
-                    color = colors.textSecondary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Local Storage & Repository Roots",
+                        style = VeylTypography.HeadlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary,
+                        fontSize = 18.sp
+                    )
 
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .background(colors.surfacePanel)
-                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .padding(VeylSpacing.md)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(VeylSpacing.sm)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.surfacePanel)
+                            .border(1.dp, colors.borderHairline, RoundedCornerShape(16.dp))
+                            .padding(14.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
                                     text = "Active Music Directory",
                                     style = VeylTypography.TitleMedium,
-                                    color = colors.textPrimary
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.textPrimary,
+                                    fontSize = 14.sp
                                 )
                                 Text(
                                     text = rootPath ?: "Default Storage (/storage/emulated/0/Music)",
                                     style = VeylTypography.MonoSpec,
                                     color = colors.accentSignal,
+                                    fontSize = 11.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = "${libraryTracks.size} lossless tracks indexed in local database",
                                     style = VeylTypography.BodySmall,
-                                    color = colors.textSecondary
+                                    color = colors.textSecondary,
+                                    fontSize = 11.sp
                                 )
                             }
-                        }
 
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                .background(colors.glassButtonBg)
-                                .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusSm))
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onSelectRootFolder()
-                                }
-                                .padding(vertical = 12.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = colors.surfaceElevated,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSelectRootFolder()
+                                    }
                             ) {
-                                Icon(
-                                    imageVector = VeylIcons.Folder,
-                                    contentDescription = null,
-                                    tint = colors.accentSignal,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Change Audio Directory / SD Card Root",
-                                    style = VeylTypography.TitleMedium,
-                                    color = colors.textPrimary,
-                                    fontSize = 13.sp
-                                )
+                                Row(
+                                    modifier = Modifier.padding(vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = VeylIcons.Folder,
+                                        contentDescription = null,
+                                        tint = colors.accentSignal,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Change Audio Directory / SD Card Root",
+                                        style = VeylTypography.BodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.textPrimary,
+                                        fontSize = 12.5.sp
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // 7. Engine Telemetry Diagnostic Card
+            // 7. Section: Synced Lyrics & Metadata Cache
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Synced Lyrics & Metadata Cache",
+                        style = VeylTypography.HeadlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary,
+                        fontSize = 18.sp
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.surfacePanel)
+                            .border(1.dp, colors.borderHairline, RoundedCornerShape(16.dp))
+                            .padding(14.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                    Text(
+                                        text = "Auto-Fetch Online Lyrics (LRCLIB)",
+                                        style = VeylTypography.TitleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.textPrimary,
+                                        fontSize = 13.5.sp
+                                    )
+                                    Text(
+                                        text = "Automatically queries LRCLIB for synchronized and word-by-word lyrics",
+                                        style = VeylTypography.BodySmall,
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+
+                                Switch(
+                                    checked = autoFetchLyrics,
+                                    onCheckedChange = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        controller.setAutoFetchLyrics(it)
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFF2E333D),
+                                        uncheckedThumbColor = colors.textMuted,
+                                        uncheckedTrackColor = colors.surfaceElevated
+                                    )
+                                )
+                            }
+
+                            HorizontalDivider(
+                                color = colors.borderHairline.copy(alpha = 0.5f),
+                                thickness = 0.8.dp
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                    Text(
+                                        text = "Offline Lyrics Cache",
+                                        style = VeylTypography.TitleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.textPrimary,
+                                        fontSize = 13.5.sp
+                                    )
+                                    Text(
+                                        text = "$cachedLyricsCount tracks cached offline in app storage",
+                                        style = VeylTypography.BodySmall,
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = colors.surfaceElevated,
+                                    modifier = Modifier.clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        com.audiophile.player.engine.LyricsManager.clearCache()
+                                        cachedLyricsCount = 0
+                                    }
+                                ) {
+                                    Text(
+                                        text = "Clear Cache",
+                                        style = VeylTypography.MonoSpec,
+                                        color = colors.accentSignal,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 8. Engine Telemetry Diagnostic Card
             item {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
+                        .clip(RoundedCornerShape(16.dp))
                         .background(colors.surfaceElevated)
-                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .padding(VeylSpacing.md)
+                        .border(1.dp, colors.borderHairline, RoundedCornerShape(16.dp))
+                        .padding(14.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
@@ -1119,7 +1176,7 @@ fun VeylSettingsScreen(
             }
 
             item {
-                Spacer(modifier = Modifier.height(96.dp))
+                Spacer(modifier = Modifier.height(100.dp))
             }
         }
 
@@ -1131,4 +1188,3 @@ fun VeylSettingsScreen(
         }
     }
 }
-

@@ -21,19 +21,21 @@ Download the compiled application directly onto your Android device:
 - **Gapless & Crossfade**: Background track pre-buffering across track boundaries.
 - **Lofty Tag Scanner**: Comprehensive tag and embedded album art parsing.
 
-### 2. Android HAL & Output Layer
+### 2. Android HAL & System Music Player Integration
+- **Full Android Music Player Category**: Declared as system audio player (`APP_MUSIC`, `MUSIC_PLAYER`, `MEDIA_PLAY_FROM_SEARCH`) with complete MIME-type associations for instant default-player discovery across Android & HyperOS.
 - **AAudio MMAP Exclusive Mode**: Bypasses Android AudioFlinger mixer for bit-perfect direct DAC output on supported hardware.
 - **Graceful Shared Mode Fallback**: Automatically falls back to shared stream when exclusive mode is unsupported by OEM.
-- **Background Playback & Control Panel**: Full foreground playback service supporting Android 11+ / HyperOS system media controls in notification center and lock screen.
+- **Background Playback & MediaSession Control Panel**: Full foreground playback service with `setSessionActivity` linking directly back to Now Playing from notification center and lock screen.
 - **Desktop Fallback (`cpal`)**: Run and test audio core headless on macOS and Linux.
 
 ### 3. Jetpack Compose Audiophile UI
+- **Redesigned Engine Settings**: Luxury audiophile control cockpit featuring acoustic vinyl aperture hero art, segmented 3-way theme controls (`Light`, `Dark`, `System`), curated aesthetic palettes (`Monochrome Carbon`, `Braun Dieter Rams`, `Macintosh Lab`), direct USB DAC hardware monitor, and unified bit-perfect driver settings.
+- **Library Sort & Filter Bottom Sheet**: Dedicated arrangement modal allowing sorting by Title, Artist, Album, Duration, and Hi-Res Sample Rate in Ascending/Descending orders.
 - **In-Place Synchronized Lyrics**: Flip between album art and synchronized lyrics with ambient album art backdrop, smooth line tracking, word-level illumination, and tap-to-seek.
 - **Randomized Library & Quick Shuffle**: Dynamic randomized "All Songs" view with dedicated shuffle playback in both home and library sections.
 - **Dark-First Tactical Theme**: OLED Black (`#07090C`), Elevated Slate (`#171C26`), Signal Amber (`#FFB300`), Cyber Cyan (`#00E5FF`), and Spectral Green (`#00E676`).
 - **Now Playing Cockpit**: Format badges (`FLAC 192kHz/24bit`, sample rate, bit depth), 16-band live spectrum visualizer, millisecond precision scrubber.
 - **DSP Cockpit**: Live interactive frequency response curve, 10 parametric band controls, preamp fader, ReplayGain & Dither toggles.
-- **Library & Search**: Instant filter by Hi-Res, Artists, Albums, and storage folders.
 - **Playback Queue**: Gapless boundary indicators and reorderable track list.
 
 ---

@@ -57,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.audiophile.player.engine.AsyncAlbumArt
 import com.audiophile.player.engine.AudioEngineController
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import com.audiophile.player.ui.components.VeylTrackOptionsSheet
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
@@ -68,6 +70,15 @@ enum class SongViewLayout {
     LIST,
     GRID,
     COMPACT
+}
+
+enum class SongSortOption(val label: String) {
+    DEFAULT("Default Library Order"),
+    TITLE("Song Title (A-Z)"),
+    ARTIST("Artist Name"),
+    ALBUM("Album"),
+    DURATION("Duration"),
+    SAMPLE_RATE("Hi-Res Sample Rate")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -91,15 +102,18 @@ fun VeylSongsScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf("All") }
     var viewLayout by remember { mutableStateOf(SongViewLayout.GRID) }
+    var sortOption by remember { mutableStateOf(SongSortOption.DEFAULT) }
+    var sortAscending by remember { mutableStateOf(true) }
+    var showSortFilterSheet by remember { mutableStateOf(false) }
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
     var expandedArtist by remember { mutableStateOf<String?>(null) }
     var expandedAlbum by remember { mutableStateOf<String?>(null) }
 
     val tabs = listOf("All", "Artists", "Albums", "Playlists", "Favorites")
 
-    // Filter tracks by category and search query
-    val filteredTracks = remember(tracks, searchQuery, selectedTab, favoriteUris) {
-        tracks.filter { track ->
+    // Filter and sort tracks by category, search query, and sort options
+    val filteredTracks = remember(tracks, searchQuery, selectedTab, favoriteUris, sortOption, sortAscending) {
+        val base = tracks.filter { track ->
             val artistName = track.artist ?: ""
             val albumName = track.album ?: ""
             val matchesQuery = searchQuery.isBlank() ||
@@ -114,6 +128,17 @@ fun VeylSongsScreen(
 
             matchesQuery && matchesTab
         }
+
+        val sorted = when (sortOption) {
+            SongSortOption.DEFAULT -> base
+            SongSortOption.TITLE -> base.sortedBy { it.title.lowercase() }
+            SongSortOption.ARTIST -> base.sortedBy { (it.artist ?: "").lowercase() }
+            SongSortOption.ALBUM -> base.sortedBy { (it.album ?: "").lowercase() }
+            SongSortOption.DURATION -> base.sortedBy { it.durationSeconds }
+            SongSortOption.SAMPLE_RATE -> base.sortedBy { it.sampleRate ?: 0u }
+        }
+
+        if (!sortAscending && sortOption != SongSortOption.DEFAULT) sorted.reversed() else sorted
     }
 
     val artistGroups = remember(tracks, searchQuery) {
@@ -227,27 +252,6 @@ fun VeylSongsScreen(
                                 contentDescription = "Mount Storage",
                                 tint = colors.textPrimary,
                                 modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // Stylized Aesthetic Profile Avatar
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    androidx.compose.ui.graphics.Brush.linearGradient(
-                                        listOf(Color(0xFF5B3E7A), Color(0xFFCE608D), Color(0xFF65A0D4))
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "V",
-                                style = VeylTypography.MonoSpec,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
                             )
                         }
                     }
@@ -445,20 +449,21 @@ fun VeylSongsScreen(
                                 )
                             }
 
-                            // Sliders / Shuffle Action
+                            // Sliders / Sort & Filter Action
                             IconButton(
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    controller.playShuffled(filteredTracks)
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showSortFilterSheet = true
                                 },
                                 modifier = Modifier
                                     .size(32.dp)
                                     .clip(RoundedCornerShape(8.dp))
+                                    .background(if (showSortFilterSheet || sortOption != SongSortOption.DEFAULT) colors.surfaceElevated else Color.Transparent)
                             ) {
                                 Icon(
                                     imageVector = VeylIcons.Sliders,
-                                    contentDescription = "Shuffle / Filter",
-                                    tint = colors.textMuted,
+                                    contentDescription = "Sort and Filter",
+                                    tint = if (sortOption != SongSortOption.DEFAULT) colors.accentSignal else colors.textMuted,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -1225,6 +1230,161 @@ fun VeylSongsScreen(
             controller = controller,
             onDismiss = { selectedTrackForOptions = null }
         )
+    }
+
+    // Modal Sort & Filter Sheet
+    if (showSortFilterSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSortFilterSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = colors.surfacePanel,
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 12.dp)
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(colors.borderHairline)
+                )
+            }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "SORT & FILTER",
+                            style = VeylTypography.MonoBadge,
+                            color = colors.accentSignal
+                        )
+                        Text(
+                            text = "Library Arrangement",
+                            style = VeylTypography.TitleMedium,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
+
+                    if (sortOption != SongSortOption.DEFAULT || !sortAscending) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = colors.surfaceElevated,
+                            modifier = Modifier.clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                sortOption = SongSortOption.DEFAULT
+                                sortAscending = true
+                            }
+                        ) {
+                            Text(
+                                text = "Reset",
+                                style = VeylTypography.MonoSpec,
+                                color = colors.accentSignal,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Sort Direction Selector
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colors.surfaceElevated)
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (sortAscending) colors.surfacePanel else Color.Transparent)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                sortAscending = true
+                            }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Ascending (A-Z)",
+                            style = VeylTypography.BodySmall,
+                            fontWeight = if (sortAscending) FontWeight.Bold else FontWeight.Medium,
+                            color = if (sortAscending) Color.White else colors.textMuted
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (!sortAscending) colors.surfacePanel else Color.Transparent)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                sortAscending = false
+                            }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Descending (Z-A)",
+                            style = VeylTypography.BodySmall,
+                            fontWeight = if (!sortAscending) FontWeight.Bold else FontWeight.Medium,
+                            color = if (!sortAscending) Color.White else colors.textMuted
+                        )
+                    }
+                }
+
+                // Sort Options List
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SongSortOption.values().forEach { option ->
+                        val isSelected = sortOption == option
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) colors.surfaceElevated else Color.Transparent)
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    sortOption = option
+                                    showSortFilterSheet = false
+                                }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = option.label,
+                                style = VeylTypography.Body,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) colors.accentSignal else colors.textPrimary,
+                                fontSize = 14.sp
+                            )
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = VeylIcons.Check,
+                                    contentDescription = "Selected",
+                                    tint = colors.accentSignal,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

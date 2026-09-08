@@ -994,8 +994,202 @@ object VeylIcons {
         }.build()
     }
 
-    val ChevronLeft: ImageVector get() = ArrowBack
-    val ChevronRight: ImageVector get() = SkipNext
+    val ChevronLeft: ImageVector by lazy {
+        ImageVector.Builder("VeylChevronLeft", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(15.41f, 7.41f)
+                lineTo(14f, 6f)
+                lineToRelative(-6f, 6f)
+                lineToRelative(6f, 6f)
+                lineToRelative(1.41f, -1.41f)
+                lineTo(10.83f, 12f)
+                close()
+            }
+        }.build()
+    }
+
+    val ChevronRight: ImageVector by lazy {
+        ImageVector.Builder("VeylChevronRight", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(10f, 6f)
+                lineTo(8.59f, 7.41f)
+                lineTo(13.17f, 12f)
+                lineToRelative(-4.58f, 4.59f)
+                lineTo(10f, 18f)
+                lineToRelative(6f, -6f)
+                close()
+            }
+        }.build()
+    }
+
+    val Sun: ImageVector by lazy {
+        ImageVector.Builder("VeylSun", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(12f, 7f)
+                curveToRelative(-2.76f, 0f, -5f, 2.24f, -5f, 5f)
+                reflectiveCurveToRelative(2.24f, 5f, 5f, 5f)
+                reflectiveCurveToRelative(5f, -2.24f, 5f, -5f)
+                reflectiveCurveToRelative(-2.24f, -5f, -5f, -5f)
+                close()
+                moveTo(2f, 13f)
+                horizontalLineToRelative(2f)
+                curveToRelative(0.55f, 0f, 1f, -0.45f, 1f, -1f)
+                reflectiveCurveToRelative(-0.45f, -1f, -1f, -1f)
+                horizontalLineTo(2f)
+                curveToRelative(-0.55f, 0f, -1f, 0.45f, -1f, 1f)
+                reflectiveCurveToRelative(0.45f, 1f, 1f, 1f)
+                close()
+                moveTo(20f, 13f)
+                horizontalLineToRelative(2f)
+                curveToRelative(0.55f, 0f, 1f, -0.45f, 1f, -1f)
+                reflectiveCurveToRelative(-0.45f, -1f, -1f, -1f)
+                horizontalLineToRelative(-2f)
+                curveToRelative(-0.55f, 0f, -1f, 0.45f, -1f, 1f)
+                reflectiveCurveToRelative(0.45f, 1f, 1f, 1f)
+                close()
+                moveTo(11f, 2f)
+                verticalLineToRelative(2f)
+                curveToRelative(0f, 0.55f, 0.45f, 1f, 1f, 1f)
+                reflectiveCurveToRelative(1f, -0.45f, 1f, -1f)
+                verticalLineTo(2f)
+                curveToRelative(0f, -0.55f, -0.45f, -1f, -1f, -1f)
+                reflectiveCurveToRelative(-1f, 0.45f, -1f, 1f)
+                close()
+                moveTo(11f, 20f)
+                verticalLineToRelative(2f)
+                curveToRelative(0f, 0.55f, 0.45f, 1f, 1f, 1f)
+                reflectiveCurveToRelative(1f, -0.45f, 1f, -1f)
+                verticalLineToRelative(-2f)
+                curveToRelative(0f, -0.55f, -0.45f, -1f, -1f, -1f)
+                reflectiveCurveToRelative(-1f, 0.45f, -1f, 1f)
+                close()
+                moveTo(5.99f, 4.58f)
+                curveToRelative(-0.39f, -0.39f, -1.03f, -0.39f, -1.41f, 0f)
+                reflectiveCurveToRelative(-0.39f, 1.03f, 0f, 1.41f)
+                lineToRelative(1.06f, 1.06f)
+                curveToRelative(0.39f, 0.39f, 1.03f, 0.39f, 1.41f, 0f)
+                reflectiveCurveToRelative(0.39f, -1.03f, 0f, -1.41f)
+                lineTo(5.99f, 4.58f)
+                close()
+                moveTo(18.36f, 16.95f)
+                curveToRelative(-0.39f, -0.39f, -1.03f, -0.39f, -1.41f, 0f)
+                reflectiveCurveToRelative(-0.39f, 1.03f, 0f, 1.41f)
+                lineToRelative(1.06f, 1.06f)
+                curveToRelative(0.39f, 0.39f, 1.03f, 0.39f, 1.41f, 0f)
+                reflectiveCurveToRelative(0.39f, -1.03f, 0f, -1.41f)
+                lineToRelative(-1.06f, -1.06f)
+                close()
+                moveTo(7.05f, 18.36f)
+                lineToRelative(-1.06f, 1.06f)
+                curveToRelative(-0.39f, 0.39f, -0.39f, 1.03f, 0f, 1.41f)
+                reflectiveCurveToRelative(1.03f, 0.39f, 1.41f, 0f)
+                lineToRelative(1.06f, -1.06f)
+                curveToRelative(0.39f, -0.39f, 0.39f, -1.03f, 0f, -1.41f)
+                reflectiveCurveToRelative(-1.02f, -0.39f, -1.41f, 0f)
+                close()
+                moveTo(16.95f, 5.99f)
+                lineToRelative(1.06f, -1.06f)
+                curveToRelative(0.39f, -0.39f, 1.03f, -0.39f, 1.41f, 0f)
+                reflectiveCurveToRelative(0.39f, 1.03f, 0f, 1.41f)
+                lineToRelative(-1.06f, 1.06f)
+                curveToRelative(-0.39f, 0.39f, -0.39f, 1.03f, 0f, 1.41f)
+                reflectiveCurveToRelative(1.03f, 0.39f, 1.41f, 0f)
+                close()
+            }
+        }.build()
+    }
+
+    val Moon: ImageVector by lazy {
+        ImageVector.Builder("VeylMoon", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(9.5f, 2f)
+                curveToRelative(-0.41f, 0f, -0.75f, 0.34f, -0.75f, 0.75f)
+                curveToRelative(0f, 0.12f, 0.03f, 0.24f, 0.09f, 0.34f)
+                curveTo(10.53f, 5.82f, 12f, 8.74f, 12f, 12f)
+                curveToRelative(0f, 3.26f, -1.47f, 6.18f, -3.16f, 8.91f)
+                curveToRelative(-0.06f, 0.1f, -0.09f, 0.22f, -0.09f, 0.34f)
+                curveToRelative(0f, 0.41f, 0.34f, 0.75f, 0.75f, 0.75f)
+                curveToRelative(5.52f, 0f, 10f, -4.48f, 10f, -10f)
+                reflectiveCurveTo(15.02f, 2f, 9.5f, 2f)
+                close()
+            }
+        }.build()
+    }
+
+    val MonitorSystem: ImageVector by lazy {
+        ImageVector.Builder("VeylMonitorSystem", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(20f, 3f)
+                horizontalLineTo(4f)
+                curveToRelative(-1.1f, 0f, -2f, 0.9f, -2f, 2f)
+                verticalLineToRelative(11f)
+                curveToRelative(0f, 1.1f, 0.9f, 2f, 2f, 2f)
+                horizontalLineToRelative(6f)
+                verticalLineToRelative(2f)
+                horizontalLineTo(8f)
+                verticalLineToRelative(2f)
+                horizontalLineToRelative(8f)
+                verticalLineToRelative(-2f)
+                horizontalLineToRelative(-2f)
+                verticalLineToRelative(-2f)
+                horizontalLineToRelative(6f)
+                curveToRelative(1.1f, 0f, 2f, -0.9f, 2f, -2f)
+                verticalLineTo(5f)
+                curveToRelative(0f, -1.1f, -0.9f, -2f, -2f, -2f)
+                close()
+                moveTo(20f, 14f)
+                horizontalLineTo(4f)
+                verticalLineTo(5f)
+                horizontalLineToRelative(16f)
+                verticalLineToRelative(9f)
+                close()
+            }
+        }.build()
+    }
+
+    val LayersBuffer: ImageVector by lazy {
+        ImageVector.Builder("VeylLayersBuffer", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(11.99f, 18.54f)
+                lineToRelative(-7.37f, -5.73f)
+                lineTo(3f, 14.07f)
+                lineToRelative(9f, 7f)
+                lineToRelative(9f, -7f)
+                lineToRelative(-1.63f, -1.27f)
+                close()
+                moveTo(12f, 16f)
+                lineToRelative(7.36f, -5.73f)
+                lineTo(21f, 9f)
+                lineToRelative(-9f, -7f)
+                lineToRelative(-9f, 7f)
+                lineToRelative(1.63f, 1.27f)
+                close()
+            }
+        }.build()
+    }
+
+    val PulseSine: ImageVector by lazy {
+        ImageVector.Builder("VeylPulseSine", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(3f, 13f)
+                horizontalLineToRelative(3.23f)
+                lineToRelative(2.45f, -4.9f)
+                lineToRelative(3.54f, 10.63f)
+                lineToRelative(2.9f, -7.26f)
+                lineToRelative(1.45f, 2.9f)
+                horizontalLineTo(21f)
+                verticalLineToRelative(-2f)
+                horizontalLineToRelative(-5.77f)
+                lineToRelative(-1.55f, -3.1f)
+                lineToRelative(-3.46f, 8.65f)
+                lineToRelative(-3.54f, -10.63f)
+                lineTo(4.77f, 11f)
+                horizontalLineTo(3f)
+                close()
+            }
+        }.build()
+    }
+
     val Equalizer: ImageVector get() = ParametricEq
     val FavoriteFilled: ImageVector get() = HeartFilled
     val FavoriteBorder: ImageVector get() = Heart

@@ -184,17 +184,31 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     private fun initMediaSession() {
+        val openAppIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
         mediaSession = MediaSessionCompat(this, "VeylMediaSession").apply {
             setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
                 MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
             )
+            setSessionActivity(openAppIntent)
 
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
-                    if (requestAudioFocus()) {
-                        engineController.play()
-                    }
+                    requestAudioFocus()
+                    engineController.play()
+                }
+
+                override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                    requestAudioFocus()
+                    engineController.play()
                 }
 
                 override fun onPause() {
