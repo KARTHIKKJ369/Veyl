@@ -152,11 +152,11 @@ class PlaybackService : MediaBrowserServiceCompat() {
         super.onCreate()
         try {
             engineController = AudioEngineController.getInstance(this)
-            com.audiophile.player.ui.components.DynamicIslandOverlayManager.initialize(applicationContext, engineController)
             audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             createNotificationChannel()
             initMediaSession()
             sessionToken = mediaSession.sessionToken
+            updateMediaSession(null, false, 0.0, 1.0, null)
 
             val initialNotification = buildNotification(
                 track = null,
@@ -233,7 +233,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Veyl Audio Playback",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Active music playback controls and media notifications"
                 setShowBadge(false)
@@ -253,12 +253,18 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 val positionSec = status?.positionSeconds ?: 0.0
                 val durationSec = (status?.durationSeconds ?: 1.0).coerceAtLeast(1.0)
 
-                // Manage audio focus and noisy receiver based on playing state
-                if (isPlaying) {
-                    requestAudioFocus()
-                    registerNoisyReceiver()
-                } else {
-                    unregisterNoisyReceiver()
+                val isStateChange = isPlaying != lastPostedIsPlaying
+                val isTrackChange = track?.uri != lastPostedTrackUri
+                val isMajorSeek = kotlin.math.abs(positionSec - lastMediaSessionPosSec) > 2.0
+
+                // Manage audio focus and noisy receiver only when state changes
+                if (isStateChange) {
+                    if (isPlaying) {
+                        requestAudioFocus()
+                        registerNoisyReceiver()
+                    } else {
+                        unregisterNoisyReceiver()
+                    }
                 }
 
                 // Load artwork asynchronously if track changed
@@ -272,10 +278,6 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 }
 
                 // Update MediaSession when state changes, track changes, or on user seek (pos jump > 2s)
-                val isStateChange = isPlaying != lastPostedIsPlaying
-                val isTrackChange = track?.uri != lastPostedTrackUri
-                val isMajorSeek = kotlin.math.abs(positionSec - lastMediaSessionPosSec) > 2.0
-
                 if (isStateChange || isTrackChange || isMajorSeek) {
                     lastMediaSessionPosSec = positionSec
                     updateMediaSession(track, isPlaying, positionSec, durationSec, cachedArtwork)
@@ -391,19 +393,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
             "${it.artist} • ${it.formatName} ${it.sampleRate / 1000u}kHz"
         } ?: "Bit-Perfect Audio Engine"
 
-        val trackTitle = (track?.title ?: "Veyl").replace("\"", "\\\"")
-        val artistName = (track?.artist ?: "Lossless Audio").replace("\"", "\\\"")
-        val hyperIslandJson = """{"param_v2":{"business":"media","updatable":true,"orderId":"veyl_playback","param_island":{"islandProperty":1,"bigIslandArea":{"imageTextInfoLeft":{"type":1,"text":"$trackTitle","subText":"$artistName"}}}}}"""
-
         val oemExtras = Bundle().apply {
             putString("android.media.session.tag", "VeylMediaSession")
-            putBoolean("miui.focus.notification", true)
-            putBoolean("miui.notification.custom", true)
-            putBoolean("miui.notification.focus", true)
-            putString("miui.focus.param", hyperIslandJson)
-            putBoolean("oppo.notification.live", true)
-            putBoolean("coloros.notification.capsule", true)
-            putString("vivo.notification.capsule", "true")
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -459,23 +450,26 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        Log.i("PlaybackService", "App swiped away from recent tasks, stopping playback and background service.")
-        try {
-            engineController.pause()
-            com.audiophile.player.ui.components.DynamicIslandOverlayManager.hide()
-            abandonAudioFocus()
-            unregisterNoisyReceiver()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(true)
+        val isPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
+        if (!isPlaying) {
+            Log.i("PlaybackService", "App swiped away and not playing, stopping background service.")
+            try {
+                abandonAudioFocus()
+                unregisterNoisyReceiver()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                notificationManager?.cancel(NOTIFICATION_ID)
+                stopSelf()
+            } catch (e: Exception) {
+                Log.e("PlaybackService", "Error in onTaskRemoved", e)
             }
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            notificationManager?.cancel(NOTIFICATION_ID)
-            stopSelf()
-        } catch (e: Exception) {
-            Log.e("PlaybackService", "Error in onTaskRemoved", e)
+        } else {
+            Log.i("PlaybackService", "App swiped away while playing; keeping audio service active in foreground.")
         }
     }
 
@@ -492,7 +486,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     companion object {
-        const val CHANNEL_ID = "veyl_playback_channel_v2"
+        const val CHANNEL_ID = "veyl_playback_channel_v3"
         const val NOTIFICATION_ID = 1001
     }
 }

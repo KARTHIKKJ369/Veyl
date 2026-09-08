@@ -21,7 +21,6 @@ import androidx.compose.runtime.getValue
 
 import android.os.Environment
 import android.provider.Settings
-import com.audiophile.player.ui.components.DynamicIslandOverlayManager
 
 class MainActivity : ComponentActivity() {
 
@@ -71,7 +70,6 @@ class MainActivity : ComponentActivity() {
         }
 
         controller = AudioEngineController.getInstance(this)
-        DynamicIslandOverlayManager.initialize(this, controller)
         startPlaybackService()
         checkPermissions()
         handleIncomingIntent(intent)
@@ -94,24 +92,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        DynamicIslandOverlayManager.setAppForeground(true)
         if (!hasInitialScanRun) {
             hasInitialScanRun = true
             checkStorageAccessAndScan()
         }
     }
 
-    override fun onStop() {
-        super.onStop()
-        DynamicIslandOverlayManager.setAppForeground(false)
-    }
-
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIncomingIntent(intent)
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("NAVIGATE_TO_NOW_PLAYING", false) == true) {
+            controller.requestOpenNowPlaying()
+        }
         val uri = intent?.data ?: return
         if (intent.action == Intent.ACTION_VIEW) {
             val path = if (uri.scheme == "file") {

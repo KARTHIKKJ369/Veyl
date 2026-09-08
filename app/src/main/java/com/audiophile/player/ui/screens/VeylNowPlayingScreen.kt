@@ -1,6 +1,7 @@
 package com.audiophile.player.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -8,6 +9,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -70,7 +74,7 @@ import androidx.compose.ui.unit.sp
 import com.audiophile.player.engine.AsyncAlbumArt
 import com.audiophile.player.engine.AudioEngineController
 import com.audiophile.player.engine.RepeatMode
-import com.audiophile.player.ui.components.SyncedLyricsSheet
+import com.audiophile.player.ui.components.VeylNowPlayingLyricsCard
 import com.audiophile.player.ui.components.VeylSlider
 import com.audiophile.player.ui.components.VeylTrackOptionsSheet
 import com.audiophile.player.ui.theme.LocalVeylColors
@@ -103,10 +107,15 @@ fun VeylNowPlayingScreen(
     val currentLyrics by controller.currentLyrics.collectAsState()
     val connectedDac by controller.connectedDac.collectAsState()
     val favoriteUris by controller.favoriteUris.collectAsState()
-
     val isFav = track?.let { favoriteUris.contains(it.uri) } ?: false
-
+    val isDsd = track?.formatName?.contains("DSD", ignoreCase = true) == true
+    val isHiRes = (track?.sampleRate ?: 0u) >= 96000u || (track?.bitDepth ?: 0u) >= 24u
     var isLyricsMode by remember { mutableStateOf(false) }
+
+    // Intercept back button when in lyrics mode to smoothly return to album cover
+    BackHandler(enabled = isLyricsMode) {
+        isLyricsMode = false
+    }
     var showOptionsSheet by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val dragOffsetY = remember { Animatable(0f) }
@@ -181,11 +190,11 @@ fun VeylNowPlayingScreen(
                 ) {}
             }
 
-            // 1. Top Bar: Dismiss Chevron, Audio Hardware Pill, EQ shortcut
+            // 1. Clean Top Bar: Dismiss Chevron and EQ shortcut (Minimalist & Clean)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -201,26 +210,6 @@ fun VeylNowPlayingScreen(
                         contentDescription = "Collapse",
                         tint = colors.textPrimary,
                         modifier = Modifier.size(28.dp)
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = colors.surfaceElevated.copy(alpha = 0.85f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
-                    modifier = Modifier.padding(horizontal = 8.dp)
-                ) {
-                    Text(
-                        text = if (connectedDac != null) {
-                            "USB DAC • ${track?.formatName ?: "Hi-Res"} ${track?.sampleRate?.div(1000u) ?: 48u} kHz / ${track?.bitDepth ?: 24u}b"
-                        } else {
-                            "Bit-Perfect Direct • ${track?.formatName ?: "Lossless"} ${track?.sampleRate?.div(1000u) ?: 48u} kHz / ${track?.bitDepth ?: 24u}b"
-                        },
-                        style = VeylTypography.MonoSpec,
-                        color = colors.accentSignal,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
                 }
 
@@ -242,25 +231,44 @@ fun VeylNowPlayingScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // 2. Center: Large Rounded Square Album Art (Tap to open Synced Lyrics)
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        isLyricsMode = true
+            // 2. Center: Switch between Album Cover and Synced Lyrics Card in-place
+            AnimatedContent(
+                targetState = isLyricsMode,
+                transitionSpec = {
+                    (fadeIn(animationSpec = tween(220, delayMillis = 40)) + scaleIn(initialScale = 0.94f, animationSpec = tween(220)))
+                        .togetherWith(fadeOut(animationSpec = tween(180)) + scaleOut(targetScale = 0.94f, animationSpec = tween(180)))
+                },
+                label = "AlbumArtLyricsSwitch"
+            ) { inLyricsMode ->
+                if (inLyricsMode) {
+                    VeylNowPlayingLyricsCard(
+                        controller = controller,
+                        onSwitchToCover = { isLyricsMode = false },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                    )
+                } else {
+                    Card(
+                        shape = RoundedCornerShape(24.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                isLyricsMode = true
+                            }
+                    ) {
+                        AsyncAlbumArt(
+                            uri = track?.uri ?: "",
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            targetSizePx = 512
+                        )
                     }
-            ) {
-                AsyncAlbumArt(
-                    uri = track?.uri ?: "",
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    targetSizePx = 512
-                )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -482,32 +490,27 @@ fun VeylNowPlayingScreen(
                         )
                     }
 
-                    // Synced Lyrics Toggle
-                    IconButton(onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        isLyricsMode = !isLyricsMode
-                    }) {
-                        Icon(
-                            imageVector = VeylIcons.Lyrics,
-                            contentDescription = "Lyrics",
-                            tint = if (isLyricsMode) colors.accentSignal else colors.textMuted,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    // Synced Lyrics Toggle Button
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isLyricsMode) colors.accentSignal.copy(alpha = 0.22f) else Color.Transparent,
+                        border = if (isLyricsMode) androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.55f)) else null,
+                        modifier = Modifier.clip(RoundedCornerShape(12.dp))
+                    ) {
+                        IconButton(onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            isLyricsMode = !isLyricsMode
+                        }) {
+                            Icon(
+                                imageVector = VeylIcons.Lyrics,
+                                contentDescription = "Lyrics",
+                                tint = if (isLyricsMode) colors.accentSignal else colors.textMuted,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
-        }
-
-        // Fullscreen Immersive Synced Lyrics Overlay (Booming Music style)
-        AnimatedVisibility(
-            visible = isLyricsMode,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(tween(200)),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(tween(200))
-        ) {
-            SyncedLyricsSheet(
-                controller = controller,
-                onDismiss = { isLyricsMode = false }
-            )
         }
 
         // 3-Dots Track Options Sheet

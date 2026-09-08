@@ -209,6 +209,7 @@ impl PlaybackEngine {
         let queue = Arc::clone(&self.queue);
         let output_rate_arc = Arc::clone(&self.output_sample_rate);
         let dsd_mode_arc = Arc::clone(&self.dsd_mode);
+        let consumer = Arc::clone(&self.ring_buffer_consumer);
 
         thread::Builder::new()
             .name("audiophile-decode-worker".to_string())
@@ -414,7 +415,20 @@ impl PlaybackEngine {
                                     s.current_stream_info = Some(info);
                                 }
                             } else {
-                                s.playback_state = PlaybackState::Ended;
+                                // Wait for audio output callback to consume all remaining audio in ring buffer
+                                loop {
+                                    let occupied = {
+                                        let cons = consumer.lock();
+                                        cons.occupied_len()
+                                    };
+                                    if occupied == 0 || flush_req.load(Ordering::SeqCst) || !is_running.load(Ordering::Relaxed) {
+                                        break;
+                                    }
+                                    thread::sleep(Duration::from_millis(15));
+                                }
+                                if !flush_req.load(Ordering::SeqCst) {
+                                    s.playback_state = PlaybackState::Ended;
+                                }
                             }
                         }
                     }

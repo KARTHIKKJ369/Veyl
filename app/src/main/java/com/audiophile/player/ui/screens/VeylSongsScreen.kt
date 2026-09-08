@@ -214,19 +214,44 @@ fun VeylSongsScreen(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = colors.surfaceElevated,
-                            modifier = Modifier.size(40.dp)
+                            color = colors.accentSignal,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    controller.playShuffled(filteredTracks)
+                                }
                         ) {
-                            IconButton(onClick = onPickFolder) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = VeylIcons.Shuffle,
+                                    contentDescription = "Shuffle All",
+                                    tint = colors.surfacePanel,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = CircleShape,
+                            color = colors.surfaceElevated,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onPickFolder()
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = VeylIcons.Folder,
                                     contentDescription = "Mount Storage",
                                     tint = colors.textPrimary,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -432,6 +457,37 @@ fun VeylSongsScreen(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                 )
+                            }
+
+                            // Shuffle Action Button in Section Header
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = colors.accentSignal.copy(alpha = 0.22f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.45f)),
+                                modifier = Modifier.clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    controller.playShuffled(filteredTracks)
+                                }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = VeylIcons.Shuffle,
+                                        contentDescription = "Shuffle",
+                                        tint = colors.accentSignal,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = "Shuffle",
+                                        style = VeylTypography.MonoSpec,
+                                        color = colors.accentSignal,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
 

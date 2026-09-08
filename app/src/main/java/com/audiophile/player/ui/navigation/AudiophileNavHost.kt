@@ -11,6 +11,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -86,8 +87,13 @@ fun AudiophileNavHost(
         val currentDestination = navBackStackEntry?.destination
 
         val currentTrack by controller.currentTrack.collectAsState()
-        val dynamicIslandEnabled by controller.dynamicIslandEnabled.collectAsState()
         var isNowPlayingOpen by remember { mutableStateOf(false) }
+
+        LaunchedEffect(Unit) {
+            controller.openNowPlayingEvent.collect {
+                isNowPlayingOpen = true
+            }
+        }
 
         BackHandler(enabled = isNowPlayingOpen) {
             isNowPlayingOpen = false

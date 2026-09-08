@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -85,8 +86,15 @@ fun VeylHomeScreen(
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
     var masterTrackLayout by remember { mutableStateOf(SongViewLayout.GRID) }
+    var randomSeed by remember { mutableIntStateOf(0) }
 
-    // Dynamic list for "Mastered & Recent / Listen Now"
+    val onPlayTrack: (TrackInfo) -> Unit = { track ->
+        isSearchActive = false
+        searchQuery = ""
+        controller.playTrack(track)
+    }
+
+    // Dynamic list for "Recently Played / Listen Now"
     val recentTracks = remember(playbackHistory, lastAddedTracks, tracks) {
         when {
             playbackHistory.isNotEmpty() -> playbackHistory.take(10)
@@ -95,11 +103,12 @@ fun VeylHomeScreen(
         }
     }
 
-    // Dynamic list for "For You / Master Tracks"
-    val forYouTracks = remember(topTracks, tracks) {
-        when {
-            topTracks.isNotEmpty() -> topTracks.take(12)
-            else -> tracks.take(12)
+    // Dynamic randomized list for "All Songs" - refreshed randomly
+    val allSongsRandomized = remember(tracks, randomSeed) {
+        if (tracks.isEmpty()) emptyList()
+        else {
+            val seed = (System.currentTimeMillis() / (1000 * 300)) + randomSeed
+            tracks.shuffled(java.util.Random(seed))
         }
     }
 
@@ -142,19 +151,20 @@ fun VeylHomeScreen(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Interactive Inline Search Toggle
-                    IconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            isSearchActive = !isSearchActive
-                            if (!isSearchActive) searchQuery = ""
-                        },
+                    // Interactive Inline Search Toggle (Isolated Box to prevent touch overlap)
+                    Box(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
                             .background(if (isSearchActive) colors.accentSignal else colors.surfacePanel)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                isSearchActive = !isSearchActive
+                                if (!isSearchActive) searchQuery = ""
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (isSearchActive) VeylIcons.Close else VeylIcons.Search,
@@ -164,16 +174,17 @@ fun VeylHomeScreen(
                         )
                     }
 
-                    // Storage Folder Picker
-                    IconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onPickFolder()
-                        },
+                    // Storage Folder Picker (Isolated Box to prevent touch overlap)
+                    Box(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
                             .background(colors.surfacePanel)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onPickFolder()
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = VeylIcons.Folder,
@@ -268,7 +279,7 @@ fun VeylHomeScreen(
                                 .background(if (isCurrent) colors.surfaceElevated else colors.surfacePanel)
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    controller.playTrack(track)
+                                    onPlayTrack(track)
                                 }
                                 .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -333,13 +344,13 @@ fun VeylHomeScreen(
                 ) {
                     Column {
                         Text(
-                            text = "Mastered & Recent",
+                            text = if (playbackHistory.isNotEmpty()) "Recently Played" else "Recently Added",
                             style = VeylTypography.TitleLarge,
                             color = colors.textPrimary,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Direct DSD streams and Studio Masters",
+                            text = if (playbackHistory.isNotEmpty()) "Pick up where you left off" else "Newly discovered lossless tracks",
                             style = VeylTypography.BodySmall,
                             color = colors.textMuted
                         )
@@ -508,7 +519,7 @@ fun VeylHomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Master Tracks",
+                        text = "All Songs",
                         style = VeylTypography.TitleLarge,
                         color = colors.textPrimary,
                         fontWeight = FontWeight.Bold
@@ -526,51 +537,108 @@ fun VeylHomeScreen(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                         )
                     }
-                }
 
-                // Grid / List View Toggle
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(colors.surfacePanel)
-                        .padding(2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            masterTrackLayout = SongViewLayout.GRID
-                        },
+                    // Shuffle / Randomize order button
+                    Box(
                         modifier = Modifier
-                            .size(30.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (masterTrackLayout == SongViewLayout.GRID) colors.surfaceElevated else Color.Transparent)
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(colors.surfacePanel)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                randomSeed++
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = VeylIcons.StorageLocal,
-                            contentDescription = "Grid View",
-                            tint = if (masterTrackLayout == SongViewLayout.GRID) colors.accentSignal else colors.textMuted,
+                            imageVector = VeylIcons.Shuffle,
+                            contentDescription = "Randomize Songs",
+                            tint = colors.accentSignal,
                             modifier = Modifier.size(15.dp)
                         )
                     }
+                }
 
-                    IconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            masterTrackLayout = SongViewLayout.LIST
-                        },
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (masterTrackLayout == SongViewLayout.LIST) colors.surfaceElevated else Color.Transparent)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Quick Shuffle Play Pill
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.accentSignal,
+                        modifier = Modifier.clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            isSearchActive = false
+                            searchQuery = ""
+                            controller.playShuffled(tracks)
+                        }
                     ) {
-                        Icon(
-                            imageVector = VeylIcons.QueueList,
-                            contentDescription = "List View",
-                            tint = if (masterTrackLayout == SongViewLayout.LIST) colors.accentSignal else colors.textMuted,
-                            modifier = Modifier.size(15.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.Shuffle,
+                                contentDescription = "Shuffle All",
+                                tint = colors.surfacePanel,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "Shuffle",
+                                style = VeylTypography.MonoBadge,
+                                color = colors.surfacePanel,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
+                    // Grid / List View Toggle
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colors.surfacePanel)
+                            .padding(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                masterTrackLayout = SongViewLayout.GRID
+                            },
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (masterTrackLayout == SongViewLayout.GRID) colors.surfaceElevated else Color.Transparent)
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.StorageLocal,
+                                contentDescription = "Grid View",
+                                tint = if (masterTrackLayout == SongViewLayout.GRID) colors.accentSignal else colors.textMuted,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                masterTrackLayout = SongViewLayout.LIST
+                            },
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (masterTrackLayout == SongViewLayout.LIST) colors.surfaceElevated else Color.Transparent)
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.QueueList,
+                                contentDescription = "List View",
+                                tint = if (masterTrackLayout == SongViewLayout.LIST) colors.accentSignal else colors.textMuted,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -579,7 +647,7 @@ fun VeylHomeScreen(
         // Render Master Tracks based on selected layout (Grid vs List)
         if (masterTrackLayout == SongViewLayout.GRID) {
             // Modern 2-Column Grid
-            items(forYouTracks.chunked(2), key = { pair -> pair.first().uri }) { rowItems ->
+            items(allSongsRandomized.chunked(2), key = { pair -> pair.first().uri }) { rowItems ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -597,7 +665,7 @@ fun VeylHomeScreen(
                                 .weight(1f)
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    controller.playTrack(track)
+                                    onPlayTrack(track)
                                 }
                         ) {
                             Column(modifier = Modifier.padding(8.dp)) {
@@ -641,7 +709,7 @@ fun VeylHomeScreen(
                                             .background(if (isPlayingThis) colors.accentSignal else colors.surfaceElevated)
                                             .clickable {
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                controller.playTrack(track)
+                                                onPlayTrack(track)
                                             },
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -682,7 +750,7 @@ fun VeylHomeScreen(
             }
         } else {
             // Sleek List View
-            itemsIndexed(forYouTracks, key = { _, track -> track.uri }) { index, track ->
+            itemsIndexed(allSongsRandomized, key = { _, track -> track.uri }) { index, track ->
                 val isCurrent = currentTrack?.uri == track.uri
                 Row(
                     modifier = Modifier
@@ -690,7 +758,7 @@ fun VeylHomeScreen(
                         .clip(RoundedCornerShape(16.dp))
                         .background(if (isCurrent) colors.surfaceElevated else colors.surfacePanel)
                         .clickable {
-                            controller.playTrack(track)
+                            onPlayTrack(track)
                         }
                         .padding(10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,

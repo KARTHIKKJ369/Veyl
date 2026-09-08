@@ -12,6 +12,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -347,20 +350,12 @@ class AudioEngineController private constructor(private val context: Context) {
         )
     }
 
-    private val _dynamicIslandEnabled = MutableStateFlow(prefs.getBoolean("dynamic_island_enabled", true))
-    val dynamicIslandEnabled: StateFlow<Boolean> = _dynamicIslandEnabled.asStateFlow()
 
-    fun setDynamicIslandEnabled(enabled: Boolean) {
-        _dynamicIslandEnabled.value = enabled
-        prefs.edit().putBoolean("dynamic_island_enabled", enabled).apply()
-    }
+    private val _openNowPlayingEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val openNowPlayingEvent: SharedFlow<Unit> = _openNowPlayingEvent.asSharedFlow()
 
-    private val _screenOverlayIslandEnabled = MutableStateFlow(prefs.getBoolean("screen_overlay_island_enabled", false))
-    val screenOverlayIslandEnabled: StateFlow<Boolean> = _screenOverlayIslandEnabled.asStateFlow()
-
-    fun setScreenOverlayIslandEnabled(enabled: Boolean) {
-        _screenOverlayIslandEnabled.value = enabled
-        prefs.edit().putBoolean("screen_overlay_island_enabled", enabled).apply()
+    fun requestOpenNowPlaying() {
+        _openNowPlayingEvent.tryEmit(Unit)
     }
 
     fun resetThemeToDefault() {
@@ -426,7 +421,12 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private fun observeUsbDacChanges() {
         scope.launch {
+            var isInitial = true
             connectedDac.collect { dac ->
+                if (isInitial) {
+                    isInitial = false
+                    if (dac == null) return@collect
+                }
                 if (dac != null) {
                     Log.i("AudioEngineController", "USB DAC attached: ${dac.name} (Device ID: ${dac.id})")
                     if (_bitPerfectEnabled.value) {
@@ -1112,12 +1112,17 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun play() {
-        if (_status.value?.currentTrack == null) {
+        val curStatus = _status.value
+        val curTrack = curStatus?.currentTrack
+        if (curTrack == null) {
             val trackToPlay = _queue.value.firstOrNull() ?: _libraryTracks.value.firstOrNull()
             if (trackToPlay != null) {
                 playTrack(trackToPlay)
                 return
             }
+        } else if (curStatus.state == PlaybackStateEnum.ENDED) {
+            playTrack(curTrack)
+            return
         }
         nativeEngine?.play()
     }
