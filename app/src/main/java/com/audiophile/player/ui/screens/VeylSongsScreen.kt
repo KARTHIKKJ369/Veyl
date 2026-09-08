@@ -90,16 +90,15 @@ fun VeylSongsScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf("All") }
-    var selectedFormat by remember { mutableStateOf("All") }
-    var viewLayout by remember { mutableStateOf(SongViewLayout.LIST) }
+    var viewLayout by remember { mutableStateOf(SongViewLayout.GRID) }
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
     var expandedArtist by remember { mutableStateOf<String?>(null) }
     var expandedAlbum by remember { mutableStateOf<String?>(null) }
 
     val tabs = listOf("All", "Artists", "Albums", "Playlists", "Favorites")
 
-    // Filter tracks by category, search query, and format
-    val filteredTracks = remember(tracks, searchQuery, selectedTab, selectedFormat, favoriteUris) {
+    // Filter tracks by category and search query
+    val filteredTracks = remember(tracks, searchQuery, selectedTab, favoriteUris) {
         tracks.filter { track ->
             val artistName = track.artist ?: ""
             val albumName = track.album ?: ""
@@ -113,22 +112,9 @@ fun VeylSongsScreen(
                 else -> true
             }
 
-            val matchesFormat = when (selectedFormat) {
-                "FLAC" -> track.formatName.contains("FLAC", true) || track.uri.endsWith(".flac", true)
-                "DSD" -> track.formatName.contains("DSD", true) || track.uri.endsWith(".dsf", true) || track.uri.endsWith(".dff", true)
-                "WAV" -> track.formatName.contains("WAV", true) || track.uri.endsWith(".wav", true)
-                "192k+" -> track.sampleRate >= 192000u
-                else -> true
-            }
-
-            matchesQuery && matchesTab && matchesFormat
+            matchesQuery && matchesTab
         }
     }
-
-    val flacCount = remember(tracks) { tracks.count { it.formatName.contains("FLAC", true) || it.uri.endsWith(".flac", true) } }
-    val dsdCount = remember(tracks) { tracks.count { it.formatName.contains("DSD", true) || it.uri.endsWith(".dsf", true) || it.uri.endsWith(".dff", true) } }
-    val wavCount = remember(tracks) { tracks.count { it.formatName.contains("WAV", true) || it.uri.endsWith(".wav", true) } }
-    val hiResCount = remember(tracks) { tracks.count { it.sampleRate >= 192000u } }
 
     val artistGroups = remember(tracks, searchQuery) {
         tracks
@@ -178,7 +164,7 @@ fun VeylSongsScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 120.dp)
         ) {
-            // 1. Top Header: "Resonate / Audio Library" & Storage Mount
+            // 1. Top Header: "Veyl / Music, without limits." & Action Controls
             item {
                 Row(
                     modifier = Modifier
@@ -188,27 +174,19 @@ fun VeylSongsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                    Column {
                         Text(
                             text = "Veyl",
                             style = VeylTypography.TitleLarge,
                             color = colors.textPrimary,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 22.sp
+                            fontSize = 28.sp
                         )
                         Text(
-                            text = "/",
+                            text = "Music, without limits.",
                             style = VeylTypography.BodySmall,
-                            color = colors.textMuted
-                        )
-                        Text(
-                            text = "Library",
-                            style = VeylTypography.Body,
-                            color = colors.textSecondary,
-                            fontSize = 15.sp
+                            color = colors.textMuted,
+                            fontSize = 13.sp
                         )
                     }
 
@@ -216,44 +194,61 @@ fun VeylSongsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = colors.accentSignal,
+                        // Search Button
+                        Box(
                             modifier = Modifier
-                                .size(40.dp)
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    controller.playShuffled(filteredTracks)
-                                }
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(colors.surfacePanel),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = VeylIcons.Shuffle,
-                                    contentDescription = "Shuffle All",
-                                    tint = colors.surfacePanel,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = VeylIcons.Search,
+                                contentDescription = "Search",
+                                tint = colors.textPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
 
-                        Surface(
-                            shape = CircleShape,
-                            color = colors.surfaceElevated,
+                        // Mount Storage Folder Button
+                        Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(colors.surfacePanel)
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onPickFolder()
-                                }
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = VeylIcons.Folder,
-                                    contentDescription = "Mount Storage",
-                                    tint = colors.textPrimary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = VeylIcons.Folder,
+                                contentDescription = "Mount Storage",
+                                tint = colors.textPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // Stylized Aesthetic Profile Avatar
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    androidx.compose.ui.graphics.Brush.linearGradient(
+                                        listOf(Color(0xFF5B3E7A), Color(0xFFCE608D), Color(0xFF65A0D4))
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "V",
+                                style = VeylTypography.MonoSpec,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
                         }
                     }
                 }
@@ -264,16 +259,17 @@ fun VeylSongsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 2.dp)
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
                 ) {
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         placeholder = {
                             Text(
-                                text = "Search songs, albums, bitrates...",
+                                text = "Search songs, albums, artists, genres...",
                                 style = VeylTypography.Body,
-                                color = colors.textMuted
+                                color = colors.textMuted,
+                                fontSize = 14.sp
                             )
                         },
                         leadingIcon = {
@@ -294,6 +290,13 @@ fun VeylSongsScreen(
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
+                            } else {
+                                Icon(
+                                    imageVector = VeylIcons.Waveform,
+                                    contentDescription = "Audio Waveform",
+                                    tint = colors.textMuted.copy(alpha = 0.55f),
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         },
                         shape = RoundedCornerShape(24.dp),
@@ -301,7 +304,7 @@ fun VeylSongsScreen(
                             focusedContainerColor = colors.surfacePanel,
                             unfocusedContainerColor = colors.surfacePanel,
                             focusedBorderColor = colors.accentSignal,
-                            unfocusedBorderColor = colors.borderHairline,
+                            unfocusedBorderColor = colors.borderHairline.copy(alpha = 0.4f),
                             focusedTextColor = colors.textPrimary,
                             unfocusedTextColor = colors.textPrimary
                         ),
@@ -322,98 +325,32 @@ fun VeylSongsScreen(
                 ) {
                     items(tabs) { tab ->
                         val isSelected = selectedTab == tab
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isSelected) Color.White else colors.surfaceElevated,
+                            border = if (isSelected) null else androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                colors.borderHairline.copy(alpha = 0.5f)
+                            ),
+                            modifier = Modifier.clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 selectedTab = tab
-                            },
-                            label = {
-                                Text(
-                                    text = tab,
-                                    style = VeylTypography.BodySmall,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) colors.surfacePanel else colors.textPrimary
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = colors.surfaceElevated,
-                                selectedContainerColor = colors.accentSignal,
-                                labelColor = colors.textPrimary,
-                                selectedLabelColor = colors.surfacePanel
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                borderColor = colors.borderHairline,
-                                selectedBorderColor = colors.accentSignal,
-                                enabled = true,
-                                selected = isSelected
-                            ),
-                            shape = RoundedCornerShape(16.dp)
-                        )
-                    }
-                }
-            }
-
-            // 4. Format Filter Chips (Stitch Resonate Filter Strip)
-            if (selectedTab == "All" || selectedTab == "Favorites") {
-                item {
-                    LazyRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        val formatPills = listOf(
-                            "All" to "All (${tracks.size})",
-                            "FLAC" to "FLAC ($flacCount)",
-                            "DSD" to "DSD ($dsdCount)",
-                            "WAV" to "WAV ($wavCount)",
-                            "192k+" to "Direct 192k ($hiResCount)"
-                        )
-
-                        items(formatPills) { (key, label) ->
-                            val isSelected = selectedFormat == key
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (isSelected) colors.primaryContainer else colors.surfacePanel,
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    if (isSelected) colors.borderActive else colors.borderHairline
-                                ),
-                                modifier = Modifier.clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    selectedFormat = key
-                                }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    if (isSelected) {
-                                        Icon(
-                                            imageVector = VeylIcons.Check,
-                                            contentDescription = null,
-                                            tint = colors.surfacePanel,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = label,
-                                        style = VeylTypography.MonoSpec,
-                                        color = if (isSelected) colors.surfacePanel else colors.textPrimary,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        fontSize = 11.sp
-                                    )
-                                }
                             }
+                        ) {
+                            Text(
+                                text = tab,
+                                style = VeylTypography.BodySmall,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) Color.Black else colors.textSecondary,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
+                            )
                         }
                     }
                 }
             }
 
-            // 6. Subheader with View Layout Switcher (List vs Grid vs Compact)
+            // 4. Subheader with View Layout Switcher (Grid vs List vs Sort)
             if (selectedTab in listOf("All", "Favorites", "Artists", "Albums")) {
                 item {
                     val sectionTitle = when (selectedTab) {
@@ -443,7 +380,8 @@ fun VeylSongsScreen(
                                 text = sectionTitle,
                                 style = VeylTypography.TitleMedium,
                                 color = colors.textPrimary,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
                             )
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
@@ -452,46 +390,15 @@ fun VeylSongsScreen(
                                 Text(
                                     text = countBadge,
                                     style = VeylTypography.MonoSpec,
-                                    color = colors.accentSignal,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    color = colors.textMuted,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                 )
-                            }
-
-                            // Shuffle Action Button in Section Header
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = colors.accentSignal.copy(alpha = 0.22f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.45f)),
-                                modifier = Modifier.clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    controller.playShuffled(filteredTracks)
-                                }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = VeylIcons.Shuffle,
-                                        contentDescription = "Shuffle",
-                                        tint = colors.accentSignal,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Text(
-                                        text = "Shuffle",
-                                        style = VeylTypography.MonoSpec,
-                                        color = colors.accentSignal,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
                             }
                         }
 
-                        // View Layout Switcher (List, Grid, Compact)
+                        // View Layout Switcher (Grid, List, Sliders)
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
@@ -500,25 +407,6 @@ fun VeylSongsScreen(
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // List View Button
-                            IconButton(
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    viewLayout = SongViewLayout.LIST
-                                },
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (viewLayout == SongViewLayout.LIST) colors.surfaceElevated else Color.Transparent)
-                            ) {
-                                Icon(
-                                    imageVector = VeylIcons.QueueList,
-                                    contentDescription = "List View",
-                                    tint = if (viewLayout == SongViewLayout.LIST) colors.accentSignal else colors.textMuted,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-
                             // Grid View Button
                             IconButton(
                                 onClick = {
@@ -531,28 +419,46 @@ fun VeylSongsScreen(
                                     .background(if (viewLayout == SongViewLayout.GRID) colors.surfaceElevated else Color.Transparent)
                             ) {
                                 Icon(
-                                    imageVector = VeylIcons.StorageLocal,
+                                    imageVector = VeylIcons.GridView,
                                     contentDescription = "Grid View",
-                                    tint = if (viewLayout == SongViewLayout.GRID) colors.accentSignal else colors.textMuted,
+                                    tint = if (viewLayout == SongViewLayout.GRID) Color.White else colors.textMuted,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
 
-                            // Compact View Button
+                            // List View Button
                             IconButton(
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    viewLayout = SongViewLayout.COMPACT
+                                    viewLayout = SongViewLayout.LIST
                                 },
                                 modifier = Modifier
                                     .size(32.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (viewLayout == SongViewLayout.COMPACT) colors.surfaceElevated else Color.Transparent)
+                                    .background(if (viewLayout == SongViewLayout.LIST) colors.surfaceElevated else Color.Transparent)
                             ) {
                                 Icon(
-                                    imageVector = VeylIcons.Equalizer,
-                                    contentDescription = "Compact View",
-                                    tint = if (viewLayout == SongViewLayout.COMPACT) colors.accentSignal else colors.textMuted,
+                                    imageVector = VeylIcons.ListView,
+                                    contentDescription = "List View",
+                                    tint = if (viewLayout == SongViewLayout.LIST) Color.White else colors.textMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            // Sliders / Shuffle Action
+                            IconButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    controller.playShuffled(filteredTracks)
+                                },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                            ) {
+                                Icon(
+                                    imageVector = VeylIcons.Sliders,
+                                    contentDescription = "Shuffle / Filter",
+                                    tint = colors.textMuted,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -949,13 +855,13 @@ fun VeylSongsScreen(
                     } else {
                         when (viewLayout) {
                             SongViewLayout.GRID -> {
-                                // 2-Column Modern Grid
+                                // 2-Column Modern Grid matching the reference audiophile design
                                 items(filteredTracks.chunked(2), key = { pair -> pair.first().uri }) { rowItems ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 5.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         rowItems.forEach { track ->
                                             val isPlayingThis = currentUri == track.uri
@@ -964,7 +870,7 @@ fun VeylSongsScreen(
                                                 colors = CardDefaults.cardColors(containerColor = colors.surfacePanel),
                                                 border = androidx.compose.foundation.BorderStroke(
                                                     1.dp,
-                                                    if (isPlayingThis) colors.accentSignal else colors.borderHairline
+                                                    if (isPlayingThis) colors.accentSignal else colors.borderHairline.copy(alpha = 0.35f)
                                                 ),
                                                 modifier = Modifier
                                                     .weight(1f)
@@ -973,13 +879,13 @@ fun VeylSongsScreen(
                                                         controller.playTrack(track)
                                                     }
                                             ) {
-                                                Column(modifier = Modifier.padding(8.dp)) {
-                                                    // Square artwork with overlay format badge and play FAB
+                                                Column(modifier = Modifier.padding(7.dp)) {
+                                                    // Square artwork with overlay format badge, 3-dots menu, and play FAB
                                                     Box(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .aspectRatio(1f)
-                                                            .clip(RoundedCornerShape(12.dp))
+                                                            .clip(RoundedCornerShape(14.dp))
                                                             .background(colors.surfaceElevated)
                                                     ) {
                                                         AsyncAlbumArt(
@@ -987,32 +893,63 @@ fun VeylSongsScreen(
                                                             modifier = Modifier.fillMaxSize()
                                                         )
 
-                                                        // Format Badge
+                                                        // Format Badge (e.g. FLAC 24-bit, FLAC 16-bit, DSD 64)
+                                                        val depth = track.bitDepth ?: 16u
+                                                        val formatLabel = when {
+                                                            track.formatName.contains("FLAC", true) -> if (depth >= 24u) "FLAC 24-bit" else "FLAC 16-bit"
+                                                            track.formatName.contains("DSD", true) -> "DSD 64"
+                                                            track.formatName.contains("WAV", true) -> if (depth >= 24u) "WAV 24-bit" else "WAV 16-bit"
+                                                            track.formatName.contains("MP3", true) -> "MP3 320k"
+                                                            track.bitDepth != null && track.bitDepth!! > 0u -> "${track.formatName} ${track.bitDepth}-bit"
+                                                            else -> track.formatName
+                                                        }
                                                         Surface(
-                                                            shape = RoundedCornerShape(8.dp),
-                                                            color = Color.Black.copy(alpha = 0.7f),
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = Color.Black.copy(alpha = 0.72f),
                                                             modifier = Modifier
-                                                                .padding(6.dp)
+                                                                .padding(7.dp)
                                                                 .align(Alignment.TopStart)
                                                         ) {
                                                             Text(
-                                                                text = "${track.formatName} ${track.bitDepth}b",
+                                                                text = formatLabel,
                                                                 style = VeylTypography.MonoSpec,
-                                                                color = colors.accentSignal,
-                                                                fontSize = 9.sp,
+                                                                color = Color.White,
+                                                                fontSize = 9.5.sp,
                                                                 fontWeight = FontWeight.Bold,
-                                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                                             )
                                                         }
 
-                                                        // Play FAB
+                                                        // 3-Dots More Options Menu Button
                                                         Box(
                                                             modifier = Modifier
                                                                 .padding(6.dp)
-                                                                .size(32.dp)
+                                                                .size(28.dp)
+                                                                .align(Alignment.TopEnd)
+                                                                .clip(CircleShape)
+                                                                .background(Color.Black.copy(alpha = 0.55f))
+                                                                .clickable {
+                                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                    selectedTrackForOptions = track
+                                                                },
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = VeylIcons.MoreVert,
+                                                                contentDescription = "Options",
+                                                                tint = Color.White,
+                                                                modifier = Modifier.size(15.dp)
+                                                            )
+                                                        }
+
+                                                        // Floating Circular Play FAB
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .padding(7.dp)
+                                                                .size(34.dp)
                                                                 .align(Alignment.BottomEnd)
                                                                 .clip(CircleShape)
-                                                                .background(if (isPlayingThis) colors.accentSignal else colors.surfaceElevated)
+                                                                .background(if (isPlayingThis) colors.accentSignal else Color.Black.copy(alpha = 0.75f))
                                                                 .clickable {
                                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                                     controller.playTrack(track)
@@ -1021,28 +958,30 @@ fun VeylSongsScreen(
                                                         ) {
                                                             Icon(
                                                                 imageVector = if (isPlayingThis) VeylIcons.Pause else VeylIcons.Play,
-                                                                contentDescription = "Play",
-                                                                tint = if (isPlayingThis) colors.surfacePanel else colors.textPrimary,
-                                                                modifier = Modifier.size(16.dp)
+                                                                contentDescription = if (isPlayingThis) "Pause" else "Play",
+                                                                tint = if (isPlayingThis) colors.surfacePanel else Color.White,
+                                                                modifier = Modifier.size(15.dp)
                                                             )
                                                         }
                                                     }
 
-                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    Spacer(modifier = Modifier.height(8.dp))
 
                                                     Text(
                                                         text = track.title,
                                                         style = VeylTypography.BodyMedium,
                                                         color = if (isPlayingThis) colors.accentSignal else colors.textPrimary,
                                                         fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 13.5.sp,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
+                                                    Spacer(modifier = Modifier.height(2.dp))
                                                     Text(
                                                         text = track.artist ?: "Unknown Artist",
                                                         style = VeylTypography.BodySmall,
                                                         color = colors.textMuted,
-                                                        fontSize = 11.sp,
+                                                        fontSize = 11.5.sp,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )

@@ -863,12 +863,142 @@ object VeylIcons {
         }.build()
     }
 
+    val GridView: ImageVector by lazy {
+        ImageVector.Builder("VeylGridView", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(3f, 3f)
+                horizontalLineToRelative(8f)
+                verticalLineToRelative(8f)
+                horizontalLineTo(3f)
+                verticalLineTo(3f)
+                close()
+                moveTo(13f, 3f)
+                horizontalLineToRelative(8f)
+                verticalLineToRelative(8f)
+                horizontalLineToRelative(-8f)
+                verticalLineTo(3f)
+                close()
+                moveTo(3f, 13f)
+                horizontalLineToRelative(8f)
+                verticalLineToRelative(8f)
+                horizontalLineTo(3f)
+                verticalLineToRelative(-8f)
+                close()
+                moveTo(13f, 13f)
+                horizontalLineToRelative(8f)
+                verticalLineToRelative(8f)
+                horizontalLineToRelative(-8f)
+                verticalLineToRelative(-8f)
+                close()
+            }
+        }.build()
+    }
+
+    val ListView: ImageVector by lazy {
+        ImageVector.Builder("VeylListView", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(3f, 5f)
+                horizontalLineToRelative(2.5f)
+                verticalLineToRelative(2.5f)
+                horizontalLineTo(3f)
+                verticalLineTo(5f)
+                close()
+                moveTo(7.5f, 5f)
+                horizontalLineToRelative(13.5f)
+                verticalLineToRelative(2.5f)
+                horizontalLineTo(7.5f)
+                verticalLineTo(5f)
+                close()
+                moveTo(3f, 11f)
+                horizontalLineToRelative(2.5f)
+                verticalLineToRelative(2.5f)
+                horizontalLineTo(3f)
+                verticalLineToRelative(-2.5f)
+                close()
+                moveTo(7.5f, 11f)
+                horizontalLineToRelative(13.5f)
+                verticalLineToRelative(2.5f)
+                horizontalLineTo(7.5f)
+                verticalLineToRelative(-2.5f)
+                close()
+                moveTo(3f, 17f)
+                horizontalLineToRelative(2.5f)
+                verticalLineToRelative(2.5f)
+                horizontalLineTo(3f)
+                verticalLineToRelative(-2.5f)
+                close()
+                moveTo(7.5f, 17f)
+                horizontalLineToRelative(13.5f)
+                verticalLineToRelative(2.5f)
+                horizontalLineTo(7.5f)
+                verticalLineToRelative(-2.5f)
+                close()
+            }
+        }.build()
+    }
+
+    val Waveform: ImageVector by lazy {
+        ImageVector.Builder("VeylWaveform", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(3f, 9f)
+                horizontalLineToRelative(2f)
+                verticalLineToRelative(6f)
+                horizontalLineTo(3f)
+                close()
+                moveTo(7f, 5f)
+                horizontalLineToRelative(2f)
+                verticalLineToRelative(14f)
+                horizontalLineTo(7f)
+                close()
+                moveTo(11f, 2f)
+                horizontalLineToRelative(2f)
+                verticalLineToRelative(20f)
+                horizontalLineToRelative(-2f)
+                close()
+                moveTo(15f, 6f)
+                horizontalLineToRelative(2f)
+                verticalLineToRelative(12f)
+                horizontalLineToRelative(-2f)
+                close()
+                moveTo(19f, 9f)
+                horizontalLineToRelative(2f)
+                verticalLineToRelative(6f)
+                horizontalLineToRelative(-2f)
+                close()
+            }
+        }.build()
+    }
+
+    val MoreVert: ImageVector by lazy {
+        ImageVector.Builder("VeylMoreVert", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(12f, 8f)
+                curveToRelative(1.1f, 0f, 2f, -0.9f, 2f, -2f)
+                reflectiveCurveToRelative(-0.9f, -2f, -2f, -2f)
+                reflectiveCurveToRelative(-2f, 0.9f, -2f, 2f)
+                reflectiveCurveToRelative(0.9f, 2f, 2f, 2f)
+                close()
+                moveTo(12f, 10f)
+                curveToRelative(-1.1f, 0f, -2f, 0.9f, -2f, 2f)
+                reflectiveCurveToRelative(0.9f, 2f, 2f, 2f)
+                reflectiveCurveToRelative(2f, -0.9f, 2f, -2f)
+                reflectiveCurveToRelative(-0.9f, -2f, -2f, -2f)
+                close()
+                moveTo(12f, 16f)
+                curveToRelative(-1.1f, 0f, -2f, 0.9f, -2f, 2f)
+                reflectiveCurveToRelative(0.9f, 2f, 2f, 2f)
+                reflectiveCurveToRelative(2f, -0.9f, 2f, -2f)
+                reflectiveCurveToRelative(-0.9f, -2f, -2f, -2f)
+                close()
+            }
+        }.build()
+    }
+
     val ChevronLeft: ImageVector get() = ArrowBack
     val ChevronRight: ImageVector get() = SkipNext
     val Equalizer: ImageVector get() = ParametricEq
     val FavoriteFilled: ImageVector get() = HeartFilled
     val FavoriteBorder: ImageVector get() = Heart
-    val MoreVert: ImageVector get() = MoreHoriz
     val Next: ImageVector get() = SkipNext
     val Previous: ImageVector get() = SkipPrevious
     val RepeatOne: ImageVector get() = Repeat
