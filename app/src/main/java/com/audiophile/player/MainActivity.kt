@@ -13,14 +13,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.audiophile.player.engine.AudioEngineController
-import com.audiophile.player.service.PlaybackService
 import com.audiophile.player.ui.navigation.AudiophileNavHost
 import com.audiophile.player.ui.theme.VeylTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 
-import android.os.Environment
-import android.provider.Settings
 
 class MainActivity : ComponentActivity() {
 
@@ -28,12 +25,6 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        checkStorageAccessAndScan()
-    }
-
-    private val manageStorageLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
     ) { _ ->
         checkStorageAccessAndScan()
     }
@@ -70,7 +61,6 @@ class MainActivity : ComponentActivity() {
         }
 
         controller = AudioEngineController.getInstance(this)
-        startPlaybackService()
         checkPermissions()
         handleIncomingIntent(intent)
 
@@ -150,19 +140,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startPlaybackService() {
-        try {
-            val serviceIntent = Intent(this, PlaybackService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Failed to start PlaybackService", e)
-        }
-    }
-
     private fun checkPermissions() {
         val permissions = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -180,17 +157,6 @@ class MainActivity : ComponentActivity() {
             permissionLauncher.launch(needed.toTypedArray())
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-            try {
-                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-                manageStorageLauncher.launch(intent)
-            } catch (e: Exception) {
-                val fallbackIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                manageStorageLauncher.launch(fallbackIntent)
-            }
-        }
     }
 
     private fun checkStorageAccessAndScan() {

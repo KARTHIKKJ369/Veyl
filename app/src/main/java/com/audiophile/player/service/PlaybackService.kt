@@ -42,7 +42,8 @@ import uniffi.audiophile_core.TrackInfo
 
 class PlaybackService : MediaBrowserServiceCompat() {
 
-    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
+    private val serviceJob = Job()
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
     private lateinit var engineController: AudioEngineController
     private lateinit var mediaSession: MediaSessionCompat
     private lateinit var audioManager: AudioManager
@@ -183,8 +184,9 @@ class PlaybackService : MediaBrowserServiceCompat() {
             }
 
             observePlaybackState()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("PlaybackService", "Error during service onCreate", e)
+            stopSelf()
         }
     }
 
@@ -219,13 +221,19 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
-                    requestAudioFocus()
-                    engineController.play()
+                    if (requestAudioFocus()) {
+                        engineController.play()
+                    } else {
+                        Log.i("PlaybackService", "Play request ignored because audio focus was denied")
+                    }
                 }
 
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    requestAudioFocus()
-                    engineController.play()
+                    if (requestAudioFocus()) {
+                        engineController.play()
+                    } else {
+                        Log.i("PlaybackService", "Play request ignored because audio focus was denied")
+                    }
                 }
 
                 override fun onPause() {
@@ -293,9 +301,13 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
                 // Manage audio focus and noisy receiver
                 if (isStateChange) {
-                    if (isPlaying) {
-                        requestAudioFocus()
-                        registerNoisyReceiver()
+                if (isPlaying) {
+                        if (requestAudioFocus()) {
+                            registerNoisyReceiver()
+                        } else {
+                            Log.w("PlaybackService", "Pausing because Android denied audio focus")
+                            engineController.pause()
+                        }
                     } else {
                         unregisterNoisyReceiver()
                     }
@@ -524,7 +536,13 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        MediaButtonReceiver.handleIntent(mediaSession, intent)
+        if (::mediaSession.isInitialized) {
+            MediaButtonReceiver.handleIntent(mediaSession, intent)
+        } else {
+            Log.w("PlaybackService", "Ignoring command because media session initialization failed")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 
@@ -584,13 +602,17 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     override fun onDestroy() {
+        artworkJob?.cancel()
+        serviceJob.cancel()
         unregisterNoisyReceiver()
         abandonAudioFocus()
-        try {
-            mediaSession.isActive = false
-            mediaSession.release()
-        } catch (e: Exception) {
-            Log.w("PlaybackService", "Error releasing mediaSession", e)
+        if (::mediaSession.isInitialized) {
+            try {
+                mediaSession.isActive = false
+                mediaSession.release()
+            } catch (e: Exception) {
+                Log.w("PlaybackService", "Error releasing mediaSession", e)
+            }
         }
         super.onDestroy()
     }

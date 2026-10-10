@@ -26,11 +26,14 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -48,11 +51,11 @@ import androidx.navigation.navArgument
 import com.audiophile.player.engine.AudioEngineController
 import com.audiophile.player.ui.components.StickyMiniPlayer
 import com.audiophile.player.ui.screens.VeylEqualizerScreen
-import com.audiophile.player.ui.screens.VeylHomeScreen
+import com.audiophile.player.ui.screens.VeylHomeRedesigned
 import com.audiophile.player.ui.screens.VeylNowPlayingScreen
 import com.audiophile.player.ui.screens.VeylPlaylistDetailScreen
 import com.audiophile.player.ui.screens.VeylQueueScreen
-import com.audiophile.player.ui.screens.VeylSettingsScreen
+import com.audiophile.player.ui.screens.VeylSettingsRedesigned
 import com.audiophile.player.ui.screens.VeylSongsScreen
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
@@ -61,8 +64,8 @@ import com.audiophile.player.ui.theme.VeylTypography
 
 sealed class VeylScreen(val route: String, val title: String, val icon: ImageVector) {
     object Home : VeylScreen("home", "Home", VeylIcons.StorageLocal)
-    object Songs : VeylScreen("songs", "Songs", VeylIcons.Folder)
-    object Favorites : VeylScreen("favorites", "Favorites", VeylIcons.FavoriteFilled)
+    object Songs : VeylScreen("songs", "Library", VeylIcons.Folder)
+    object Favorites : VeylScreen("favorites", "Collection", VeylIcons.FavoriteFilled)
     object Equalizer : VeylScreen("equalizer", "EQ", VeylIcons.Equalizer)
     object Settings : VeylScreen("settings", "Settings", VeylIcons.Settings)
     object NowPlaying : VeylScreen("now_playing", "Playing", VeylIcons.Play)
@@ -72,6 +75,9 @@ sealed class VeylScreen(val route: String, val title: String, val icon: ImageVec
     object History : VeylScreen("history", "History", VeylIcons.QueueList)
 }
 
+private enum class PlayerContextSheet { QUEUE, EQUALIZER }
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudiophileNavHost(
     controller: AudioEngineController,
@@ -88,6 +94,7 @@ fun AudiophileNavHost(
 
         val currentTrack by controller.currentTrack.collectAsState()
         var isNowPlayingOpen by remember { mutableStateOf(false) }
+        var playerContextSheet by remember { mutableStateOf<PlayerContextSheet?>(null) }
 
         LaunchedEffect(Unit) {
             controller.openNowPlayingEvent.collect {
@@ -103,7 +110,6 @@ fun AudiophileNavHost(
             VeylScreen.Home,
             VeylScreen.Songs,
             VeylScreen.Favorites,
-            VeylScreen.Equalizer,
             VeylScreen.Settings
         )
 
@@ -159,7 +165,13 @@ fun AudiophileNavHost(
                                     selected = isSelected,
                                     onClick = {
                                         if (currentDestination?.route != screen.route) {
-                                            navController.navigate(screen.route)
+                                            navController.navigate(screen.route) {
+                                                launchSingleTop = true
+                                                restoreState = true
+                                                popUpTo(navController.graph.startDestinationId) {
+                                                    saveState = true
+                                                }
+                                            }
                                         }
                                     },
                                     colors = NavigationBarItemDefaults.colors(
@@ -186,7 +198,7 @@ fun AudiophileNavHost(
                     enterTransition = { fadeIn(animationSpec = tween(180)) },
                     exitTransition = { fadeOut(animationSpec = tween(140)) }
                 ) {
-                    VeylHomeScreen(
+                    VeylHomeRedesigned(
                         controller = controller,
                         onNavigateToSearch = {
                             navController.navigate(VeylScreen.Songs.route)
@@ -339,14 +351,9 @@ fun AudiophileNavHost(
                     enterTransition = { fadeIn(animationSpec = tween(180)) },
                     exitTransition = { fadeOut(animationSpec = tween(140)) }
                 ) {
-                    VeylSettingsScreen(
+                    VeylSettingsRedesigned(
                         controller = controller,
-                        onSelectRootFolder = onSelectRootFolder,
-                        onBack = {
-                            if (!navController.popBackStack()) {
-                                navController.navigate(VeylScreen.Home.route)
-                            }
-                        }
+                        onSelectRootFolder = onSelectRootFolder
                     )
                 }
 
@@ -392,14 +399,32 @@ fun AudiophileNavHost(
                 controller = controller,
                 onNavigateBack = { isNowPlayingOpen = false },
                 onNavigateToQueue = {
-                    isNowPlayingOpen = false
-                    navController.navigate(VeylScreen.Queue.route)
+                    playerContextSheet = PlayerContextSheet.QUEUE
                 },
                 onNavigateToDsp = {
-                    isNowPlayingOpen = false
-                    navController.navigate(VeylScreen.Equalizer.route)
+                    playerContextSheet = PlayerContextSheet.EQUALIZER
                 }
             )
+        }
+
+        playerContextSheet?.let { sheet ->
+            ModalBottomSheet(
+                onDismissRequest = { playerContextSheet = null },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = colors.background,
+                contentColor = colors.textPrimary
+            ) {
+                when (sheet) {
+                    PlayerContextSheet.QUEUE -> VeylQueueScreen(
+                        controller = controller,
+                        onNavigateBack = { playerContextSheet = null }
+                    )
+                    PlayerContextSheet.EQUALIZER -> VeylEqualizerScreen(
+                        controller = controller,
+                        onNavigateBack = { playerContextSheet = null }
+                    )
+                }
+            }
         }
     }
     }

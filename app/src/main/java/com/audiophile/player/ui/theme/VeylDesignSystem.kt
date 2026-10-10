@@ -28,38 +28,38 @@ import com.audiophile.player.R
  */
 
 // -------------------------------------------------------------------------
-// 1. Color Tokens (Stitch Resonate Audiophile Obsidian & Warm Coral Palette)
+// 1. Color Tokens — quiet charcoal and restrained brass
 // -------------------------------------------------------------------------
-val VeylBackgroundDark = Color(0xFF1B0906)
-val VeylSurfaceDark = Color(0xFF1B0906)
-val VeylSurfaceContainerLowest = Color(0xFF000000)
-val VeylSurfaceContainerLow = Color(0xFF230D09)
-val VeylSurfaceContainer = Color(0xFF2C120D)
-val VeylSurfaceContainerHigh = Color(0xFF351711)
-val VeylSurfaceContainerHighest = Color(0xFF3E1C15)
+val VeylBackgroundDark = Color(0xFF111110)
+val VeylSurfaceDark = Color(0xFF111110)
+val VeylSurfaceContainerLowest = Color(0xFF0B0B0A)
+val VeylSurfaceContainerLow = Color(0xFF171716)
+val VeylSurfaceContainer = Color(0xFF1D1D1B)
+val VeylSurfaceContainerHigh = Color(0xFF242422)
+val VeylSurfaceContainerHighest = Color(0xFF2B2B28)
 
-val VeylPrimary = Color(0xFFFFB7B4)
-val VeylOnPrimary = Color(0xFF6D2E2E)
-val VeylPrimaryContainer = Color(0xFFFDA4A1)
-val VeylOnPrimaryContainer = Color(0xFF612525)
+val VeylPrimary = Color(0xFFD6B36A)
+val VeylOnPrimary = Color(0xFF33270F)
+val VeylPrimaryContainer = Color(0xFF5D4A23)
+val VeylOnPrimaryContainer = Color(0xFFF1DCA5)
 
-val VeylSecondary = Color(0xFFB2CAD3)
-val VeylSecondaryContainer = Color(0xFF122930)
-val VeylOnSecondaryContainer = Color(0xFF90A8B0)
+val VeylSecondary = Color(0xFFB9B7AE)
+val VeylSecondaryContainer = Color(0xFF292923)
+val VeylOnSecondaryContainer = Color(0xFFD6D3C8)
 
-val VeylTertiary = Color(0xFF92EAFF)
-val VeylTertiaryContainer = Color(0xFF5EDFFB)
+val VeylTertiary = Color(0xFFB8C6B0)
+val VeylTertiaryContainer = Color(0xFF465043)
 
-val VeylFavorite = Color(0xFFFFB7B4)
-val VeylError = Color(0xFFFE7453)
+val VeylFavorite = Color(0xFFD6B36A)
+val VeylError = Color(0xFFE07A5F)
 
-val VeylTextPrimary = Color(0xFFFFDED8)
-val VeylTextSecondary = Color(0xFFD59E93)
-val VeylTextMuted = Color(0xFF9A6A60)
+val VeylTextPrimary = Color(0xFFF1EFE8)
+val VeylTextSecondary = Color(0xFFB9B7AE)
+val VeylTextMuted = Color(0xFF85847D)
 
-val VeylBorderHairline = Color(0x33663D35)
-val VeylBorderActive = Color(0x66FFB7B4)
-val VeylGlassButtonBg = Color(0x33351711)
+val VeylBorderHairline = Color(0x265C5B54)
+val VeylBorderActive = Color(0x66D6B36A)
+val VeylGlassButtonBg = Color(0x261F1F1C)
 
 // -------------------------------------------------------------------------
 // Theme Presets & Color Scheme Architecture
@@ -660,4 +660,3 @@ fun VeylTheme(
         )
     }
 }
-

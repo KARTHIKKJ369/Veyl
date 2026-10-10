@@ -65,6 +65,7 @@ import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylTypography
 import kotlinx.coroutines.launch
 import uniffi.audiophile_core.TrackInfo
+import java.io.File
 
 enum class SongViewLayout {
     LIST,
@@ -77,6 +78,8 @@ enum class SongSortOption(val label: String) {
     TITLE("Song Title (A-Z)"),
     ARTIST("Artist Name"),
     ALBUM("Album"),
+    DATE_ADDED("Recently Added"),
+    YEAR("Year"),
     DURATION("Duration"),
     SAMPLE_RATE("Hi-Res Sample Rate")
 }
@@ -101,7 +104,7 @@ fun VeylSongsScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf("All") }
-    var viewLayout by remember { mutableStateOf(SongViewLayout.GRID) }
+    var viewLayout by remember { mutableStateOf(SongViewLayout.LIST) }
     var sortOption by remember { mutableStateOf(SongSortOption.DEFAULT) }
     var sortAscending by remember { mutableStateOf(true) }
     var showSortFilterSheet by remember { mutableStateOf(false) }
@@ -109,7 +112,7 @@ fun VeylSongsScreen(
     var expandedArtist by remember { mutableStateOf<String?>(null) }
     var expandedAlbum by remember { mutableStateOf<String?>(null) }
 
-    val tabs = listOf("All", "Artists", "Albums", "Playlists", "Favorites")
+    val tabs = listOf("All", "Artists", "Albums", "Playlists")
 
     // Filter and sort tracks by category, search query, and sort options
     val filteredTracks = remember(tracks, searchQuery, selectedTab, favoriteUris, sortOption, sortAscending) {
@@ -134,6 +137,8 @@ fun VeylSongsScreen(
             SongSortOption.TITLE -> base.sortedBy { it.title.lowercase() }
             SongSortOption.ARTIST -> base.sortedBy { (it.artist ?: "").lowercase() }
             SongSortOption.ALBUM -> base.sortedBy { (it.album ?: "").lowercase() }
+            SongSortOption.DATE_ADDED -> base.sortedByDescending { File(it.uri).lastModified() }
+            SongSortOption.YEAR -> base.sortedByDescending { it.year ?: 0u }
             SongSortOption.DURATION -> base.sortedBy { it.durationSeconds }
             SongSortOption.SAMPLE_RATE -> base.sortedBy { it.sampleRate ?: 0u }
         }
@@ -201,14 +206,14 @@ fun VeylSongsScreen(
                 ) {
                     Column {
                         Text(
-                            text = "Veyl",
+                            text = "Library",
                             style = VeylTypography.TitleLarge,
                             color = colors.textPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 28.sp
                         )
                         Text(
-                            text = "Music, without limits.",
+                            text = "Your local collection",
                             style = VeylTypography.BodySmall,
                             color = colors.textMuted,
                             fontSize = 13.sp
@@ -219,22 +224,6 @@ fun VeylSongsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Search Button
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(colors.surfacePanel),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.Search,
-                                contentDescription = "Search",
-                                tint = colors.textPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
                         // Mount Storage Folder Button
                         Box(
                             modifier = Modifier
@@ -870,22 +859,12 @@ fun VeylSongsScreen(
                                     ) {
                                         rowItems.forEach { track ->
                                             val isPlayingThis = currentUri == track.uri
-                                            Card(
-                                                shape = RoundedCornerShape(18.dp),
-                                                colors = CardDefaults.cardColors(containerColor = colors.surfacePanel),
-                                                border = androidx.compose.foundation.BorderStroke(
-                                                    1.dp,
-                                                    if (isPlayingThis) colors.accentSignal else colors.borderHairline.copy(alpha = 0.35f)
-                                                ),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clickable {
-                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                        controller.playTrack(track)
-                                                    }
+                                            Column(
+                                                modifier = Modifier.weight(1f).clickable {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    controller.playTrack(track)
+                                                }
                                             ) {
-                                                Column(modifier = Modifier.padding(7.dp)) {
-                                                    // Square artwork with overlay format badge, 3-dots menu, and play FAB
                                                     Box(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
@@ -898,76 +877,6 @@ fun VeylSongsScreen(
                                                             modifier = Modifier.fillMaxSize()
                                                         )
 
-                                                        // Format Badge (e.g. FLAC 24-bit, FLAC 16-bit, DSD 64)
-                                                        val depth = track.bitDepth ?: 16u
-                                                        val formatLabel = when {
-                                                            track.formatName.contains("FLAC", true) -> if (depth >= 24u) "FLAC 24-bit" else "FLAC 16-bit"
-                                                            track.formatName.contains("DSD", true) -> "DSD 64"
-                                                            track.formatName.contains("WAV", true) -> if (depth >= 24u) "WAV 24-bit" else "WAV 16-bit"
-                                                            track.formatName.contains("MP3", true) -> "MP3 320k"
-                                                            track.bitDepth != null && track.bitDepth!! > 0u -> "${track.formatName} ${track.bitDepth}-bit"
-                                                            else -> track.formatName
-                                                        }
-                                                        Surface(
-                                                            shape = RoundedCornerShape(6.dp),
-                                                            color = Color.Black.copy(alpha = 0.72f),
-                                                            modifier = Modifier
-                                                                .padding(7.dp)
-                                                                .align(Alignment.TopStart)
-                                                        ) {
-                                                            Text(
-                                                                text = formatLabel,
-                                                                style = VeylTypography.MonoSpec,
-                                                                color = Color.White,
-                                                                fontSize = 9.5.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                                            )
-                                                        }
-
-                                                        // 3-Dots More Options Menu Button
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .padding(6.dp)
-                                                                .size(28.dp)
-                                                                .align(Alignment.TopEnd)
-                                                                .clip(CircleShape)
-                                                                .background(Color.Black.copy(alpha = 0.55f))
-                                                                .clickable {
-                                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                                    selectedTrackForOptions = track
-                                                                },
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = VeylIcons.MoreVert,
-                                                                contentDescription = "Options",
-                                                                tint = Color.White,
-                                                                modifier = Modifier.size(15.dp)
-                                                            )
-                                                        }
-
-                                                        // Floating Circular Play FAB
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .padding(7.dp)
-                                                                .size(34.dp)
-                                                                .align(Alignment.BottomEnd)
-                                                                .clip(CircleShape)
-                                                                .background(if (isPlayingThis) colors.accentSignal else Color.Black.copy(alpha = 0.75f))
-                                                                .clickable {
-                                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                                    controller.playTrack(track)
-                                                                },
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = if (isPlayingThis) VeylIcons.Pause else VeylIcons.Play,
-                                                                contentDescription = if (isPlayingThis) "Pause" else "Play",
-                                                                tint = if (isPlayingThis) colors.surfacePanel else Color.White,
-                                                                modifier = Modifier.size(15.dp)
-                                                            )
-                                                        }
                                                     }
 
                                                     Spacer(modifier = Modifier.height(8.dp))
@@ -990,7 +899,6 @@ fun VeylSongsScreen(
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
-                                                }
                                             }
                                         }
                                         if (rowItems.size == 1) {
@@ -1072,36 +980,20 @@ fun VeylSongsScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(if (isPlayingThis) colors.surfaceElevated else colors.surfacePanel)
+                                            .padding(horizontal = 16.dp, vertical = 3.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isPlayingThis) colors.surfaceElevated else Color.Transparent)
                                             .clickable {
                                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                 controller.playTrackList(filteredTracks, startIndex = index)
                                             }
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                            .padding(horizontal = 4.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // Index number
-                                        Text(
-                                            text = "%02d".format(index + 1),
-                                            style = VeylTypography.MonoSpec,
-                                            color = if (isPlayingThis) colors.accentSignal else colors.textMuted,
-                                            fontSize = 11.sp,
-                                            fontWeight = if (isPlayingThis) FontWeight.Bold else FontWeight.Normal,
-                                            modifier = Modifier.width(26.dp)
+                                        AsyncAlbumArt(
+                                            uri = track.uri,
+                                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))
                                         )
-
-                                        // 44dp Artwork Thumbnail
-                                        Card(
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier.size(44.dp)
-                                        ) {
-                                            AsyncAlbumArt(
-                                                uri = track.uri,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        }
 
                                         Spacer(modifier = Modifier.width(12.dp))
 
@@ -1115,50 +1007,7 @@ fun VeylSongsScreen(
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                val m = (track.durationSeconds / 60).toInt()
-                                                val s = (track.durationSeconds % 60).toInt()
-                                                Text(
-                                                    text = "${track.artist ?: "Unknown"} • %d:%02d".format(m, s),
-                                                    style = VeylTypography.BodySmall,
-                                                    color = colors.textMuted,
-                                                    fontSize = 11.sp,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Surface(
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    color = colors.surfaceElevated
-                                                ) {
-                                                    Text(
-                                                        text = "${track.formatName} ${track.bitDepth}b",
-                                                        style = VeylTypography.MonoSpec,
-                                                        color = colors.accentSignal,
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        // Heart Favorite Button
-                                        IconButton(
-                                            onClick = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                controller.toggleFavorite(track.uri)
-                                            },
-                                            modifier = Modifier.size(34.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = if (isFav) VeylIcons.FavoriteFilled else VeylIcons.FavoriteBorder,
-                                                contentDescription = "Favorite",
-                                                tint = if (isFav) colors.accentSignal else colors.textMuted,
-                                                modifier = Modifier.size(18.dp)
-                                            )
+                                            Text(track.artist ?: "Unknown artist", style = VeylTypography.BodySmall, color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
 
                                         // More Options

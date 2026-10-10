@@ -61,6 +61,8 @@ enum class RepeatMode {
 class AudioEngineController private constructor(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.Default + Job())
+    /** UniFFI's engine handle is not safe to call from the UI, service and polling threads at once. */
+    private val nativeEngineLock = Any()
     private val prefs = context.getSharedPreferences("audiophile_prefs", Context.MODE_PRIVATE)
 
     // USB DAC Hardware Manager
@@ -75,6 +77,9 @@ class AudioEngineController private constructor(private val context: Context) {
     // Native Rust Engine Handles
     private var nativeEngine: AudiophileEngineHandle? = null
     private val libraryEngine = LibraryEngine()
+
+    private inline fun <T> withNativeEngine(block: (AudiophileEngineHandle) -> T): T? =
+        synchronized(nativeEngineLock) { nativeEngine?.let(block) }
 
     private val _status = MutableStateFlow<EngineStatus?>(null)
     val status: StateFlow<EngineStatus?> = _status.asStateFlow()
@@ -400,8 +405,10 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private fun initEngine() {
         try {
-            nativeEngine = AudiophileEngineHandle(48000f, 2u)
-            nativeEngine?.setDsdMode(_dsdMode.value)
+            synchronized(nativeEngineLock) {
+                nativeEngine = AudiophileEngineHandle(48000f, 2u)
+                nativeEngine?.setDsdMode(_dsdMode.value)
+            }
             currentOutputSampleRate = 48000u
             restoreEqState()
         } catch (e: Throwable) {
@@ -411,12 +418,12 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private fun restoreEqState() {
         val enabled = _isEqEnabled.value
-        nativeEngine?.setEqEnabled(enabled)
-        val defaultBands = nativeEngine?.getEqBands() ?: emptyList()
+        withNativeEngine { it.setEqEnabled(enabled) }
+        val defaultBands = withNativeEngine { it.getEqBands() } ?: emptyList()
         for (i in defaultBands.indices) {
             val savedGain = prefs.getFloat("eq_band_$i", defaultBands[i].gainDb)
             val b = defaultBands[i]
-            nativeEngine?.setEqBand(i.toUInt(), savedGain, b.frequency, b.q)
+            withNativeEngine { it.setEqBand(i.toUInt(), savedGain, b.frequency, b.q) }
         }
         refreshEq()
     }
@@ -453,8 +460,7 @@ class AudioEngineController private constructor(private val context: Context) {
             var tickCount = 0
             while (isActive) {
                 try {
-                    nativeEngine?.let { engine ->
-                        val currentStatus = engine.getStatus()
+                    withNativeEngine { it.getStatus() }?.let { currentStatus ->
                         val pos = currentStatus.positionSeconds
                         val dur = currentStatus.durationSeconds
                         val isPlaying = currentStatus.state == PlaybackStateEnum.PLAYING
@@ -575,8 +581,16 @@ class AudioEngineController private constructor(private val context: Context) {
             RepeatMode.ONE -> {
                 _status.value?.currentTrack?.let { playTrack(it) }
             }
-            RepeatMode.ALL, RepeatMode.OFF -> {
-                skipNext()
+            RepeatMode.ALL -> skipNext()
+            RepeatMode.OFF -> {
+                val currentUri = _status.value?.currentTrack?.uri
+                val currentIndex = _queue.value.indexOfFirst { it.uri == currentUri }
+                val hasNext = if (_isShuffleEnabled.value) {
+                    unplayedShufflePool.isNotEmpty()
+                } else {
+                    currentIndex in 0 until _queue.value.lastIndex
+                }
+                if (hasNext) skipNext() else stop()
             }
         }
     }
@@ -1043,6 +1057,7 @@ class AudioEngineController private constructor(private val context: Context) {
     fun playTrack(track: TrackInfo) {
         ensurePlaybackServiceStarted()
         scope.launch {
+            try {
             // Only switch hardware sample-rate and exclusive mode for external USB DACs!
             // Internal phone speakers, 3.5mm jack, and Bluetooth must remain on standard shared 48kHz output.
             val dac = connectedDac.value
@@ -1077,15 +1092,15 @@ class AudioEngineController private constructor(private val context: Context) {
             _currentPositionSec.value = 0.0
             _currentPositionMs.value = 0L
 
-            nativeEngine?.playTrack(
+            withNativeEngine { engine -> engine.playTrack(
                 uri = track.uri,
                 title = track.title,
                 artist = track.artist,
                 album = track.album
-            )
+            ) }
 
             // Re-apply user's persistent equalizer state on track transition
-            nativeEngine?.setEqEnabled(_isEqEnabled.value)
+            withNativeEngine { it.setEqEnabled(_isEqEnabled.value) }
 
             // Ensure queue always contains all tracks if queue was empty or single
             val currentQ = _queue.value
@@ -1100,19 +1115,22 @@ class AudioEngineController private constructor(private val context: Context) {
             } else if (!currentQ.any { it.uri == track.uri }) {
                 _queue.value = currentQ + track
             }
+            } catch (error: Throwable) {
+                Log.e("AudioEngineController", "Unable to start playback for ${track.uri}", error)
+            }
         }
     }
 
     fun reconfigureHardwareOutput(sampleRate: UInt, deviceId: Int?, exclusive: Boolean): Boolean {
         return try {
-            val success = nativeEngine?.reconfigureOutput(sampleRate, 2u, deviceId, exclusive) ?: false
+            val success = withNativeEngine { it.reconfigureOutput(sampleRate, 2u, deviceId, exclusive) } ?: false
             if (success) {
                 currentOutputSampleRate = sampleRate
-                nativeEngine?.setEqEnabled(_isEqEnabled.value)
+                withNativeEngine { it.setEqEnabled(_isEqEnabled.value) }
                 val bands = _eqBands.value
                 for (i in bands.indices) {
                     val b = bands[i]
-                    nativeEngine?.setEqBand(i.toUInt(), b.gainDb, b.frequency, b.q)
+                    withNativeEngine { it.setEqBand(i.toUInt(), b.gainDb, b.frequency, b.q) }
                 }
                 refreshEq()
             }
@@ -1126,7 +1144,7 @@ class AudioEngineController private constructor(private val context: Context) {
     fun setDsdMode(mode: DsdModeEnum) {
         _dsdMode.value = mode
         prefs.edit().putString("dsd_mode", if (mode == DsdModeEnum.DO_P) "dop" else "pcm").apply()
-        nativeEngine?.setDsdMode(mode)
+        withNativeEngine { it.setDsdMode(mode) }
     }
 
     fun setBitPerfectEnabled(enabled: Boolean) {
@@ -1157,15 +1175,15 @@ class AudioEngineController private constructor(private val context: Context) {
             playTrack(curTrack)
             return
         }
-        nativeEngine?.play()
+        withNativeEngine { it.play() }
     }
 
     fun pause() {
-        nativeEngine?.pause()
+        withNativeEngine { it.pause() }
     }
 
     fun stop() {
-        nativeEngine?.stop()
+        withNativeEngine { it.stop() }
     }
 
     fun seekTo(seconds: Double) {
@@ -1175,11 +1193,11 @@ class AudioEngineController private constructor(private val context: Context) {
         _status.value?.let { current ->
             _status.value = current.copy(positionSeconds = safeSeconds)
         }
-        nativeEngine?.seek(safeSeconds)
+        withNativeEngine { it.seek(safeSeconds) }
     }
 
     fun setVolume(volume: Float) {
-        nativeEngine?.setVolume(volume)
+        withNativeEngine { it.setVolume(volume.coerceIn(0f, 1f)) }
     }
 
     fun toggleEq(enabled: Boolean) {
@@ -1189,7 +1207,7 @@ class AudioEngineController private constructor(private val context: Context) {
     fun setEqEnabled(enabled: Boolean) {
         _isEqEnabled.value = enabled
         prefs.edit().putBoolean("eq_enabled", enabled).apply()
-        nativeEngine?.setEqEnabled(enabled)
+        withNativeEngine { it.setEqEnabled(enabled) }
         refreshEq()
     }
 
@@ -1214,19 +1232,19 @@ class AudioEngineController private constructor(private val context: Context) {
             prefs.edit().putFloat("eq_band_$i", gains[i]).apply()
             if (i in bands.indices) {
                 val b = bands[i]
-                nativeEngine?.setEqBand(i.toUInt(), gains[i], b.frequency, b.q)
+                withNativeEngine { it.setEqBand(i.toUInt(), gains[i], b.frequency, b.q) }
             }
         }
         refreshEq()
     }
 
     fun setEqPreamp(gainDb: Float) {
-        nativeEngine?.setEqPreamp(gainDb)
+        withNativeEngine { it.setEqPreamp(gainDb) }
         refreshEq()
     }
 
     fun updateEqBand(index: UInt, gainDb: Float, freq: Float, q: Float) {
-        nativeEngine?.setEqBand(index, gainDb, freq, q)
+        withNativeEngine { it.setEqBand(index, gainDb, freq, q) }
         refreshEq()
     }
 
@@ -1278,10 +1296,13 @@ class AudioEngineController private constructor(private val context: Context) {
         eqUpdateJob?.cancel()
         eqUpdateJob = scope.launch {
             kotlinx.coroutines.delay(20) // Debounce native FFI curve calls during slider drag
-            nativeEngine?.let { engine ->
+            withNativeEngine { engine ->
                 val bands = engine.getEqBands()
+                val curve = engine.getEqCurve(100u)
+                bands to curve
+            }?.let { (bands, curve) ->
                 _eqBands.value = bands
-                _eqCurve.value = engine.getEqCurve(100u)
+                _eqCurve.value = curve
                 _eqState.value = EqState(enabled = _isEqEnabled.value, bands = bands)
             }
         }
@@ -1289,6 +1310,7 @@ class AudioEngineController private constructor(private val context: Context) {
 
     companion object {
         @Volatile
+        @Suppress("StaticFieldLeak") // The controller receives and retains applicationContext only.
         private var INSTANCE: AudioEngineController? = null
 
         fun getInstance(context: Context): AudioEngineController {

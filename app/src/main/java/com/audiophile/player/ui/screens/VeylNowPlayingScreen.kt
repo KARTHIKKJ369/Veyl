@@ -131,7 +131,7 @@ fun VeylNowPlayingScreen(
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        colors.surfacePanel.copy(alpha = 0.75f),
+                        colors.surfacePanel,
                         colors.background,
                         colors.background
                     )
@@ -190,44 +190,7 @@ fun VeylNowPlayingScreen(
                 ) {}
             }
 
-            // 1. Clean Top Bar: Dismiss Chevron and EQ shortcut (Minimalist & Clean)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onNavigateBack()
-                    },
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Icon(
-                        imageVector = VeylIcons.ChevronDown,
-                        contentDescription = "Collapse",
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onNavigateToDsp()
-                    },
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Icon(
-                        imageVector = VeylIcons.Equalizer,
-                        contentDescription = "Equalizer",
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
+            Text("Now playing", style = VeylTypography.BodySmall, color = colors.textMuted)
 
             Spacer(modifier = Modifier.height(4.dp))
 
@@ -251,8 +214,7 @@ fun VeylNowPlayingScreen(
                 } else {
                     Card(
                         shape = RoundedCornerShape(24.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
@@ -421,9 +383,8 @@ fun VeylNowPlayingScreen(
 
             // 6. Bottom Action Toolbar
             Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = colors.surfaceElevated.copy(alpha = 0.85f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
+                shape = RoundedCornerShape(16.dp),
+                color = colors.surfacePanel,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp)
@@ -477,24 +438,10 @@ fun VeylNowPlayingScreen(
                         )
                     }
 
-                    // DSP / EQ Shortcut
-                    IconButton(onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onNavigateToDsp()
-                    }) {
-                        Icon(
-                            imageVector = VeylIcons.Equalizer,
-                            contentDescription = "Equalizer",
-                            tint = colors.textMuted,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
                     // Synced Lyrics Toggle Button
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = if (isLyricsMode) colors.accentSignal.copy(alpha = 0.22f) else Color.Transparent,
-                        border = if (isLyricsMode) androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.55f)) else null,
+                        color = if (isLyricsMode) colors.surfaceElevated else Color.Transparent,
                         modifier = Modifier.clip(RoundedCornerShape(12.dp))
                     ) {
                         IconButton(onClick = {
