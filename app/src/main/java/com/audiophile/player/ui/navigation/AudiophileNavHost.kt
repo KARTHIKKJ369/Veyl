@@ -37,6 +37,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +56,7 @@ import com.audiophile.player.ui.screens.VeylHomeRedesigned
 import com.audiophile.player.ui.screens.VeylNowPlayingScreen
 import com.audiophile.player.ui.screens.VeylPlaylistDetailScreen
 import com.audiophile.player.ui.screens.VeylQueueScreen
+import com.audiophile.player.ui.screens.VeylSearchScreen
 import com.audiophile.player.ui.screens.VeylSettingsRedesigned
 import com.audiophile.player.ui.screens.VeylSongsScreen
 import com.audiophile.player.ui.theme.LocalVeylColors
@@ -69,6 +71,7 @@ sealed class VeylScreen(val route: String, val title: String, val icon: ImageVec
     object Equalizer : VeylScreen("equalizer", "EQ", VeylIcons.Equalizer)
     object Settings : VeylScreen("settings", "Settings", VeylIcons.Settings)
     object NowPlaying : VeylScreen("now_playing", "Playing", VeylIcons.Play)
+    object Search : VeylScreen("search", "Search", VeylIcons.Search)
     object Queue : VeylScreen("queue", "Queue", VeylIcons.QueueList)
     object TopTracks : VeylScreen("top_tracks", "Top Tracks", VeylIcons.Equalizer)
     object LastAdded : VeylScreen("last_added", "Last Added", VeylIcons.Folder)
@@ -84,15 +87,12 @@ fun AudiophileNavHost(
     onSelectRootFolder: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDarkMode by controller.isDarkMode.collectAsState()
-    val colorScheme by controller.currentVeylColorScheme.collectAsState()
-    VeylTheme(isDarkMode = isDarkMode, colorScheme = colorScheme) {
-        val colors = LocalVeylColors.current
+    val colors = LocalVeylColors.current
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination
 
-        val currentTrack by controller.currentTrack.collectAsState()
+        val currentTrack by controller.currentTrack.collectAsStateWithLifecycle()
         var isNowPlayingOpen by remember { mutableStateOf(false) }
         var playerContextSheet by remember { mutableStateOf<PlayerContextSheet?>(null) }
 
@@ -201,7 +201,7 @@ fun AudiophileNavHost(
                     VeylHomeRedesigned(
                         controller = controller,
                         onNavigateToSearch = {
-                            navController.navigate(VeylScreen.Songs.route)
+                            navController.navigate(VeylScreen.Search.route)
                         },
                         onNavigateToTopTracks = {
                             navController.navigate(VeylScreen.TopTracks.route)
@@ -358,6 +358,11 @@ fun AudiophileNavHost(
                 }
 
                 // Screen 10: Now Playing Screen Route (redirects to overlay)
+                composable(route = VeylScreen.Search.route) {
+                    VeylSearchScreen(controller = controller, onBack = { navController.popBackStack() })
+                }
+
+                // Screen 10: Now Playing Screen Route (redirects to overlay)
                 composable(route = VeylScreen.NowPlaying.route) {
                     androidx.compose.runtime.LaunchedEffect(Unit) {
                         isNowPlayingOpen = true
@@ -426,6 +431,5 @@ fun AudiophileNavHost(
                 }
             }
         }
-    }
-    }
+}
 }

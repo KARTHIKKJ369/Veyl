@@ -1,10 +1,11 @@
 # Veyl — Rust-Powered Audiophile Android Music Player
 
-**Veyl** is a reference-grade, bit-perfect native Android music player engineered for audiophiles. It combines a pure Rust audio DSP & decoding core with a precision Jetpack Compose interface, in-place synchronized lyrics, randomized library exploration, and bespoke audiophile typography.
+**Veyl** is a reference-grade, bit-perfect native Android music player engineered for audiophiles. It combines a pure Rust audio DSP & decoding core with a precision Jetpack Compose interface, in-place synchronized lyrics, dedicated full-screen search, randomized library exploration, and bespoke audiophile typography.
 
 ### 📥 Latest Compiled APK
 Download the compiled application directly onto your Android device:
-- **[Download veyl-debug.apk](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)**
+- **[Download Latest GitHub Release (v1.2.0)](https://github.com/KARTHIKKJ369/Veyl/releases/latest)**
+- **[Direct APK Download (veyl-debug.apk)](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)**
 
 ---
 
@@ -17,7 +18,7 @@ Download the compiled application directly onto your Android device:
 - **Live Transfer Function Curve**: Dynamic frequency response computation ($20\text{ Hz} - 20\text{ kHz}$) rendered directly on an interactive Compose canvas with draggable band nodes.
 - **High-Fidelity Sinc Resampling**: Wrapped `rubato` sinc interpolation with 64-point Blackman-Harris windowing.
 - **TPDF Dither**: Triangular Probability Density Function noise decorrelation on bit-depth quantization.
-- **Lock-Free Concurrency**: Atomic ring-buffer scheduler for zero-drop audio rendering with full buffer drainage before track termination.
+- **Lock-Free Concurrency & Asynchronous Dispatch**: Atomic ring-buffer scheduler for zero-drop audio rendering. Engine calls run on a dedicated native coroutine dispatcher to maintain zero UI thread friction.
 - **Gapless & Crossfade**: Background track pre-buffering across track boundaries.
 - **Lofty Tag Scanner**: Comprehensive tag and embedded album art parsing.
 
@@ -26,13 +27,18 @@ Download the compiled application directly onto your Android device:
 - **AAudio MMAP Exclusive Mode**: Bypasses Android AudioFlinger mixer for bit-perfect direct DAC output on supported hardware.
 - **Graceful Shared Mode Fallback**: Automatically falls back to shared stream when exclusive mode is unsupported by OEM.
 - **Background Playback & MediaSession Control Panel**: Full foreground playback service with `setSessionActivity` linking directly back to Now Playing from notification center and lock screen.
+- **Accurate Audio Ducking Restoration**: Preserves user-configured volume and faithfully restores it when audio focus returns after transient interrupts.
 - **Desktop Fallback (`cpal`)**: Run and test audio core headless on macOS and Linux.
 
 ### 3. Jetpack Compose Audiophile UI
+- **Dedicated Full-Screen Search**: Instant, non-blocking multi-category search across Songs, Artists, and Albums with recent search history chips and fast pre-computed metadata grouping.
+- **Collapsible In-Library Quick Filter**: Fast inline search bar in the Songs screen to instantly filter through thousands of tracks without navigating away.
+- **Lifecycle-Aware Performance**: All Compose screens utilize `collectAsStateWithLifecycle` to halt unneeded recompositions and optimize battery usage when in the background.
 - **Redesigned Engine Settings**: Luxury audiophile control cockpit featuring acoustic vinyl aperture hero art, segmented 3-way theme controls (`Light`, `Dark`, `System`), curated aesthetic palettes (`Monochrome Carbon`, `Braun Dieter Rams`, `Macintosh Lab`), direct USB DAC hardware monitor, and unified bit-perfect driver settings.
 - **Library Sort & Filter Bottom Sheet**: Dedicated arrangement modal allowing sorting by Title, Artist, Album, Duration, and Hi-Res Sample Rate in Ascending/Descending orders.
 - **In-Place Synchronized Lyrics**: Flip between album art and synchronized lyrics with ambient album art backdrop, smooth line tracking, word-level illumination, and tap-to-seek.
 - **Randomized Library & Quick Shuffle**: Dynamic randomized "All Songs" view with dedicated shuffle playback in both home and library sections.
+- **Adaptive App Icons**: Multi-density adaptive icons with gold acoustic crest and OLED black backdrop.
 - **Dark-First Tactical Theme**: OLED Black (`#07090C`), Elevated Slate (`#171C26`), Signal Amber (`#FFB300`), Cyber Cyan (`#00E5FF`), and Spectral Green (`#00E676`).
 - **Now Playing Cockpit**: Format badges (`FLAC 192kHz/24bit`, sample rate, bit depth), 16-band live spectrum visualizer, millisecond precision scrubber.
 - **DSP Cockpit**: Live interactive frequency response curve, 10 parametric band controls, preamp fader, ReplayGain & Dither toggles.

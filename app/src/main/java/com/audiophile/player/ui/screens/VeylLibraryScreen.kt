@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,9 +86,9 @@ fun VeylLibraryScreen(
 ) {
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
-    val tracks by controller.libraryTracks.collectAsState()
-    val status by controller.status.collectAsState()
-    val favoriteUris by controller.favoriteUris.collectAsState()
+    val tracks by controller.libraryTracks.collectAsStateWithLifecycle()
+    val status by controller.status.collectAsStateWithLifecycle()
+    val favoriteUris by controller.favoriteUris.collectAsStateWithLifecycle()
 
     val currentTrack = status?.currentTrack
     val isPlaying = status?.state == PlaybackStateEnum.PLAYING

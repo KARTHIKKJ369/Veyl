@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,13 +64,13 @@ fun VeylPlaylistDetailScreen(
 ) {
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
-    val allTracks by controller.tracks.collectAsState()
-    val favoriteUris by controller.favoriteUris.collectAsState()
-    val topTracks by controller.topTracks.collectAsState()
-    val lastAddedTracks by controller.lastAddedTracks.collectAsState()
-    val historyTracks by controller.playbackHistory.collectAsState()
-    val playlists by controller.playlists.collectAsState()
-    val currentUri by controller.currentUri.collectAsState()
+    val allTracks by controller.tracks.collectAsStateWithLifecycle()
+    val favoriteUris by controller.favoriteUris.collectAsStateWithLifecycle()
+    val topTracks by controller.topTracks.collectAsStateWithLifecycle()
+    val lastAddedTracks by controller.lastAddedTracks.collectAsStateWithLifecycle()
+    val historyTracks by controller.playbackHistory.collectAsStateWithLifecycle()
+    val playlists by controller.playlists.collectAsStateWithLifecycle()
+    val currentUri by controller.currentUri.collectAsStateWithLifecycle()
 
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
 

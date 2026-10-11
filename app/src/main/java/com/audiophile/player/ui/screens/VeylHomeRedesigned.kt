@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,7 +40,6 @@ import com.audiophile.player.engine.AudioEngineController
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylTypography
-import uniffi.audiophile_core.PlaybackStateEnum
 import uniffi.audiophile_core.TrackInfo
 import java.util.Locale
 
@@ -57,10 +57,11 @@ fun VeylHomeRedesigned(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVeylColors.current
-    val tracks by controller.tracks.collectAsState()
-    val recent by controller.lastAddedTracks.collectAsState()
-    val history by controller.playbackHistory.collectAsState()
-    val currentTrack by controller.currentTrack.collectAsState()
+    val tracks by controller.tracks.collectAsStateWithLifecycle()
+    val recent by controller.lastAddedTracks.collectAsStateWithLifecycle()
+    val history by controller.playbackHistory.collectAsStateWithLifecycle()
+    val currentTrack by controller.currentTrack.collectAsStateWithLifecycle()
+    val isScanning by controller.isScanning.collectAsStateWithLifecycle()
     val recentTracks = recent.ifEmpty { tracks }.take(8)
 
     LazyColumn(
@@ -84,7 +85,18 @@ fun VeylHomeRedesigned(
             }
         }
 
-        if (tracks.isEmpty()) {
+        if (isScanning) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("Loading your library", style = VeylTypography.HeadlineMedium, color = colors.textPrimary)
+                    Text("Finding your music…", style = VeylTypography.BodySmall, color = colors.textMuted)
+                }
+            }
+        } else if (tracks.isEmpty()) {
             item {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),

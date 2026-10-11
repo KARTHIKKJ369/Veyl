@@ -52,14 +52,14 @@ jobs:
           body: |
             ## 🎵 Veyl — Audiophile Android Music Player
 
-            ### 🚀 Features & Fixes in this build:
-            - **Audio Playback Engine Fixed**: Fixed hardware stream reconfigure and Oboe multi-tier fallback so music plays flawlessly on internal phone speakers, Bluetooth, wired headphones, and USB DACs.
-            - **Native MediaStore Library Discovery**: Automatically discovers all local audio tracks on phone storage out-of-the-box.
-            - **Native HyperOS Super Island Integration**: Direct media notification integration via `miui.focus.param` (Reference Screenshots 3 & 4). No intrusive permissions or "displaying over other apps" alerts.
-            - **Luxury Typography**: Custom geometric **Outfit** display fonts and precision **JetBrains Mono** telemetry.
-            - **Clean Background Lifecycle**: Automatic teardown and playback pause when swiped away from Recents.
-            - **Audiophile DSP & Themes**: 10-band biquad parametric EQ, HSV color wheel, hardware presets (Sony Walkman Gold, Abbey Road, Monochrome Carbon).
-            - **Modern Library Views**: Multi-column grid mode, category chips, and alphabet scrubber.
+            ### 🚀 Features & Fixes in this release:
+            - **Dedicated Full-Screen Search**: Instant multi-category search across Songs, Artists, and Albums with recent search history and zero-lag indexing.
+            - **Collapsible In-Library Quick Filter**: Fast inline filter in Songs screen to quickly isolate tracks without interrupting browsing.
+            - **Lifecycle-Aware Performance**: Upgraded to `collectAsStateWithLifecycle` to halt background recompositions and drastically improve battery and CPU efficiency.
+            - **Asynchronous Native Engine Execution**: Native audio commands (play, pause, seek, EQ faders, volume) are executed on a dedicated background scope for stutter-free UI smoothness.
+            - **Accurate Audio Ducking Restoration**: Audio focus ducking preserves and restores exact prior volume levels rather than resetting to 100%.
+            - **Updated Adaptive App Icons**: Polished adaptive launcher icons with multi-density mipmap support.
+            - **Audiophile DSP & Pure Rust Engine**: 10-band biquad parametric EQ, high-fidelity resampling, lock-free ring-buffer, and bit-perfect hardware output.
 
             ### 📥 Download
             Download and install **`veyl-debug.apk`** from the Assets below.

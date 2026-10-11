@@ -52,6 +52,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
     private var hasAudioFocus = false
     private var resumeOnFocusGain = false
     private var isNoisyReceiverRegistered = false
+    // Volume in effect before a transient duck so we can restore it exactly.
+    private var preDuckVolume = 1.0f
 
     private var lastTrackUri: String? = null
     private var cachedArtwork: Bitmap? = null
@@ -64,7 +66,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 hasAudioFocus = true
-                engineController.setVolume(1.0f)
+                // Restore exactly the volume that was set before we ducked (not a hard-coded 1.0).
+                engineController.setVolume(preDuckVolume)
                 if (resumeOnFocusGain) {
                     resumeOnFocusGain = false
                     engineController.play()
@@ -84,6 +87,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // Save current volume so we can restore it on AUDIOFOCUS_GAIN.
+                preDuckVolume = engineController.volume
                 engineController.setVolume(0.2f)
             }
         }

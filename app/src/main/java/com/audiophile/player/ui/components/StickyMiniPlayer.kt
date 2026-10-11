@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,9 +59,9 @@ fun StickyMiniPlayer(
 ) {
     val colors = LocalVeylColors.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    val track by controller.currentTrack.collectAsState()
+    val track by controller.currentTrack.collectAsStateWithLifecycle()
     val currentTrack = track
-    val playbackState by controller.playbackState.collectAsState()
+    val playbackState by controller.playbackState.collectAsStateWithLifecycle()
     val isVisible = currentTrack != null
     val isPlaying = playbackState == PlaybackStateEnum.PLAYING
 
@@ -214,8 +215,8 @@ private fun MiniPlayerProgressBar(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVeylColors.current
-    val positionSec by controller.currentPositionSec.collectAsState()
-    val status by controller.status.collectAsState()
+    val positionSec by controller.currentPositionSec.collectAsStateWithLifecycle()
+    val status by controller.status.collectAsStateWithLifecycle()
     val dur = status?.durationSeconds?.takeIf { !it.isNaN() && it > 0.0 }
         ?: fallbackDuration.takeIf { !it.isNaN() && it > 0.0 } ?: 1.0
     val progress = (positionSec / dur).toFloat().coerceIn(0f, 1f)

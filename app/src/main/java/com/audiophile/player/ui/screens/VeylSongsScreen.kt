@@ -43,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -97,12 +98,13 @@ fun VeylSongsScreen(
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    val tracks by controller.tracks.collectAsState()
-    val favoriteUris by controller.favoriteUris.collectAsState()
-    val playlists by controller.playlists.collectAsState()
-    val currentUri by controller.currentUri.collectAsState()
+    val tracks by controller.tracks.collectAsStateWithLifecycle()
+    val favoriteUris by controller.favoriteUris.collectAsStateWithLifecycle()
+    val playlists by controller.playlists.collectAsStateWithLifecycle()
+    val currentUri by controller.currentUri.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
+    var isSearchExpanded by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf("All") }
     var viewLayout by remember { mutableStateOf(SongViewLayout.LIST) }
     var sortOption by remember { mutableStateOf(SongSortOption.DEFAULT) }
@@ -146,39 +148,15 @@ fun VeylSongsScreen(
         if (!sortAscending && sortOption != SongSortOption.DEFAULT) sorted.reversed() else sorted
     }
 
-    val artistGroups = remember(tracks, searchQuery) {
-        tracks
-            .groupBy { it.artist?.takeIf { a -> a.isNotBlank() } ?: "Unknown Artist" }
-            .map { (artistName, trackList) ->
-                val albums = trackList.mapNotNull { it.album?.takeIf { alb -> alb.isNotBlank() } }.distinct()
-                Triple(
-                    artistName,
-                    trackList,
-                    albums.size.coerceAtLeast(1)
-                )
-            }
-            .filter { (name, _, _) ->
-                searchQuery.isBlank() || name.contains(searchQuery, ignoreCase = true)
-            }
-            .sortedBy { it.first.lowercase() }
+    val preparedArtistGroups by controller.artistGroups.collectAsStateWithLifecycle()
+    val preparedAlbumGroups by controller.albumGroups.collectAsStateWithLifecycle()
+    val artistGroups = remember(preparedArtistGroups, searchQuery) {
+        preparedArtistGroups.filter { (name, _, _) -> searchQuery.isBlank() || name.contains(searchQuery, ignoreCase = true) }
     }
-
-    val albumGroups = remember(tracks, searchQuery) {
-        tracks
-            .groupBy { (it.album?.takeIf { a -> a.isNotBlank() } ?: "Unknown Album") to (it.artist?.takeIf { a -> a.isNotBlank() } ?: "Unknown Artist") }
-            .map { (key, trackList) ->
-                Triple(
-                    key.first,
-                    key.second,
-                    trackList.sortedBy { it.trackNumber ?: 0u }
-                )
-            }
-            .filter { (title, artist, _) ->
-                searchQuery.isBlank() ||
-                        title.contains(searchQuery, ignoreCase = true) ||
-                        artist.contains(searchQuery, ignoreCase = true)
-            }
-            .sortedBy { it.first.lowercase() }
+    val albumGroups = remember(preparedAlbumGroups, searchQuery) {
+        preparedAlbumGroups.filter { (title, artist, _) ->
+            searchQuery.isBlank() || title.contains(searchQuery, ignoreCase = true) || artist.contains(searchQuery, ignoreCase = true)
+        }
     }
 
     // Alphabet Scrubber Indexer
@@ -224,6 +202,27 @@ fun VeylSongsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        // Quick Search / Filter Toggle Button
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(if (isSearchExpanded || searchQuery.isNotEmpty()) colors.accentSignal.copy(alpha = 0.2f) else colors.surfacePanel)
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    isSearchExpanded = !isSearchExpanded
+                                    if (!isSearchExpanded) searchQuery = ""
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isSearchExpanded || searchQuery.isNotEmpty()) VeylIcons.Close else VeylIcons.Search,
+                                contentDescription = if (isSearchExpanded || searchQuery.isNotEmpty()) "Close Filter" else "Filter Library",
+                                tint = if (isSearchExpanded || searchQuery.isNotEmpty()) colors.accentSignal else colors.textPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
                         // Mount Storage Folder Button
                         Box(
                             modifier = Modifier
@@ -247,63 +246,65 @@ fun VeylSongsScreen(
                 }
             }
 
-            // 2. Search Field
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                ) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = {
-                            Text(
-                                text = "Search songs, albums, artists, genres...",
-                                style = VeylTypography.Body,
-                                color = colors.textMuted,
-                                fontSize = 14.sp
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = VeylIcons.Search,
-                                contentDescription = "Search",
-                                tint = colors.textMuted,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
+            // 2. Search Field (Collapsible inline filter for library browsing)
+            if (isSearchExpanded || searchQuery.isNotEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = {
+                                Text(
+                                    text = "Filter songs, albums, artists, genres...",
+                                    style = VeylTypography.Body,
+                                    color = colors.textMuted,
+                                    fontSize = 14.sp
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = VeylIcons.Search,
+                                    contentDescription = "Search",
+                                    tint = colors.textMuted,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(
+                                            imageVector = VeylIcons.Close,
+                                            contentDescription = "Clear",
+                                            tint = colors.textMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else {
                                     Icon(
-                                        imageVector = VeylIcons.Close,
-                                        contentDescription = "Clear",
-                                        tint = colors.textMuted,
+                                        imageVector = VeylIcons.Waveform,
+                                        contentDescription = "Audio Waveform",
+                                        tint = colors.textMuted.copy(alpha = 0.55f),
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
-                            } else {
-                                Icon(
-                                    imageVector = VeylIcons.Waveform,
-                                    contentDescription = "Audio Waveform",
-                                    tint = colors.textMuted.copy(alpha = 0.55f),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        },
-                        shape = RoundedCornerShape(24.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = colors.surfacePanel,
-                            unfocusedContainerColor = colors.surfacePanel,
-                            focusedBorderColor = colors.accentSignal,
-                            unfocusedBorderColor = colors.borderHairline.copy(alpha = 0.4f),
-                            focusedTextColor = colors.textPrimary,
-                            unfocusedTextColor = colors.textPrimary
-                        ),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                            },
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = colors.surfacePanel,
+                                unfocusedContainerColor = colors.surfacePanel,
+                                focusedBorderColor = colors.accentSignal,
+                                unfocusedBorderColor = colors.borderHairline.copy(alpha = 0.4f),
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
 

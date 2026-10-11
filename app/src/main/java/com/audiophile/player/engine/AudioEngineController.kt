@@ -10,6 +10,8 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -34,6 +36,7 @@ import uniffi.audiophile_core.TrackInfo
 import java.io.File
 import java.util.Collections
 import java.util.Random
+import java.util.concurrent.Executors
 import androidx.compose.ui.graphics.Color
 import com.audiophile.player.ui.theme.CuratedPresets
 import com.audiophile.player.ui.theme.ThemePreset
@@ -61,6 +64,12 @@ enum class RepeatMode {
 class AudioEngineController private constructor(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.Default + Job())
+    // All frequent FFI commands share one serial dispatcher. This removes UI-thread contention
+    // during seek, Bluetooth/call focus events, and the position polling loop.
+    private val nativeDispatcher = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "VeylNativeEngine").apply { isDaemon = true }
+    }.asCoroutineDispatcher()
+    private val nativeScope = CoroutineScope(nativeDispatcher + SupervisorJob())
     /** UniFFI's engine handle is not safe to call from the UI, service and polling threads at once. */
     private val nativeEngineLock = Any()
     private val prefs = context.getSharedPreferences("audiophile_prefs", Context.MODE_PRIVATE)
@@ -136,6 +145,12 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private val _lastAddedTracks = MutableStateFlow<List<TrackInfo>>(emptyList())
     val lastAddedTracks: StateFlow<List<TrackInfo>> = _lastAddedTracks.asStateFlow()
+
+    // Prepared off the UI thread so opening Library does not rebuild a large collection on demand.
+    private val _artistGroups = MutableStateFlow<List<Triple<String, List<TrackInfo>, Int>>>(emptyList())
+    val artistGroups: StateFlow<List<Triple<String, List<TrackInfo>, Int>>> = _artistGroups.asStateFlow()
+    private val _albumGroups = MutableStateFlow<List<Triple<String, String, List<TrackInfo>>>>(emptyList())
+    val albumGroups: StateFlow<List<Triple<String, String, List<TrackInfo>>>> = _albumGroups.asStateFlow()
 
     private val _playbackHistory = MutableStateFlow<List<TrackInfo>>(emptyList())
     val playbackHistory: StateFlow<List<TrackInfo>> = _playbackHistory.asStateFlow()
@@ -372,7 +387,8 @@ class AudioEngineController private constructor(private val context: Context) {
     private val _selectedRootPath = MutableStateFlow<String?>(null)
     val selectedRootPath: StateFlow<String?> = _selectedRootPath.asStateFlow()
 
-    private val _isScanning = MutableStateFlow(false)
+    // Home must not briefly show an empty-library prompt while the initial scan is starting.
+    private val _isScanning = MutableStateFlow(true)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
     // DSD & Bit-Perfect Settings
@@ -456,7 +472,7 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private fun startPolling() {
         pollJob?.cancel()
-        pollJob = scope.launch {
+        pollJob = nativeScope.launch {
             var tickCount = 0
             while (isActive) {
                 try {
@@ -558,22 +574,27 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     private fun updateDerivedTrackLists(tracks: List<TrackInfo>) {
-        if (tracks.isEmpty()) return
-        // 1. Top Tracks sorted by play count descending
-        val sortedByPlays = tracks.sortedByDescending { track ->
-            playCountPrefs.getInt(track.uri, 0)
-        }
-        _topTracks.value = sortedByPlays.take(50)
-
-        // 2. Last Added sorted by file last modified timestamp
-        val sortedByDate = tracks.sortedByDescending { track ->
-            try {
-                java.io.File(track.uri).lastModified()
-            } catch (e: Exception) {
-                0L
+        scope.launch(Dispatchers.Default) {
+            if (tracks.isEmpty()) {
+                _topTracks.value = emptyList()
+                _lastAddedTracks.value = emptyList()
+                _artistGroups.value = emptyList()
+                _albumGroups.value = emptyList()
+                return@launch
             }
+            _topTracks.value = tracks.sortedByDescending { playCountPrefs.getInt(it.uri, 0) }.take(50)
+            _lastAddedTracks.value = tracks.sortedByDescending { File(it.uri).lastModified() }.take(50)
+            _artistGroups.value = tracks
+                .groupBy { it.artist?.takeIf(String::isNotBlank) ?: "Unknown Artist" }
+                .map { (artist, artistTracks) ->
+                    Triple(artist, artistTracks, artistTracks.mapNotNull { it.album?.takeIf(String::isNotBlank) }.distinct().size.coerceAtLeast(1))
+                }
+                .sortedBy { it.first.lowercase() }
+            _albumGroups.value = tracks
+                .groupBy { (it.album?.takeIf(String::isNotBlank) ?: "Unknown Album") to (it.artist?.takeIf(String::isNotBlank) ?: "Unknown Artist") }
+                .map { (key, albumTracks) -> Triple(key.first, key.second, albumTracks.sortedBy { it.trackNumber ?: 0u }) }
+                .sortedBy { it.first.lowercase() }
         }
-        _lastAddedTracks.value = sortedByDate.take(50)
     }
 
     private fun handleTrackEnded() {
@@ -841,6 +862,7 @@ class AudioEngineController private constructor(private val context: Context) {
     fun scanDirectory(path: String) {
         scope.launch(Dispatchers.IO) {
             _isScanning.value = true
+            var delegatedToMediaStore = false
             try {
                 val dir = File(path)
                 if (dir.exists()) {
@@ -855,16 +877,19 @@ class AudioEngineController private constructor(private val context: Context) {
                         }
                     }
                     if (tracks.isEmpty()) {
+                        delegatedToMediaStore = true
                         scanMediaStore()
                     }
                 } else {
+                    delegatedToMediaStore = true
                     scanMediaStore()
                 }
             } catch (e: Exception) {
                 Log.e("AudioEngineController", "Error scanning directory $path", e)
+                delegatedToMediaStore = true
                 scanMediaStore()
             } finally {
-                _isScanning.value = false
+                if (!delegatedToMediaStore) _isScanning.value = false
             }
         }
     }
@@ -1056,7 +1081,7 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun playTrack(track: TrackInfo) {
         ensurePlaybackServiceStarted()
-        scope.launch {
+        nativeScope.launch {
             try {
             // Only switch hardware sample-rate and exclusive mode for external USB DACs!
             // Internal phone speakers, 3.5mm jack, and Bluetooth must remain on standard shared 48kHz output.
@@ -1144,7 +1169,7 @@ class AudioEngineController private constructor(private val context: Context) {
     fun setDsdMode(mode: DsdModeEnum) {
         _dsdMode.value = mode
         prefs.edit().putString("dsd_mode", if (mode == DsdModeEnum.DO_P) "dop" else "pcm").apply()
-        withNativeEngine { it.setDsdMode(mode) }
+        nativeScope.launch { withNativeEngine { it.setDsdMode(mode) } }
     }
 
     fun setBitPerfectEnabled(enabled: Boolean) {
@@ -1163,27 +1188,29 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun play() {
         ensurePlaybackServiceStarted()
-        val curStatus = _status.value
-        val curTrack = curStatus?.currentTrack
-        if (curTrack == null) {
-            val trackToPlay = _queue.value.firstOrNull() ?: _libraryTracks.value.firstOrNull()
-            if (trackToPlay != null) {
-                playTrack(trackToPlay)
-                return
+        nativeScope.launch {
+            val curStatus = _status.value
+            val curTrack = curStatus?.currentTrack
+            if (curTrack == null) {
+                val trackToPlay = _queue.value.firstOrNull() ?: _libraryTracks.value.firstOrNull()
+                if (trackToPlay != null) {
+                    playTrack(trackToPlay)
+                    return@launch
+                }
+            } else if (curStatus.state == PlaybackStateEnum.ENDED || curStatus.state == PlaybackStateEnum.STOPPED) {
+                playTrack(curTrack)
+                return@launch
             }
-        } else if (curStatus.state == PlaybackStateEnum.ENDED || curStatus.state == PlaybackStateEnum.STOPPED) {
-            playTrack(curTrack)
-            return
+            withNativeEngine { it.play() }
         }
-        withNativeEngine { it.play() }
     }
 
     fun pause() {
-        withNativeEngine { it.pause() }
+        nativeScope.launch { withNativeEngine { it.pause() } }
     }
 
     fun stop() {
-        withNativeEngine { it.stop() }
+        nativeScope.launch { withNativeEngine { it.stop() } }
     }
 
     fun seekTo(seconds: Double) {
@@ -1193,11 +1220,17 @@ class AudioEngineController private constructor(private val context: Context) {
         _status.value?.let { current ->
             _status.value = current.copy(positionSeconds = safeSeconds)
         }
-        withNativeEngine { it.seek(safeSeconds) }
+        nativeScope.launch { withNativeEngine { it.seek(safeSeconds) } }
     }
 
+    /** Current software volume (0.0–1.0). Exposed so PlaybackService can save it before ducking. */
+    private val _volume = MutableStateFlow(1.0f)
+    val volume: Float get() = _volume.value
+
     fun setVolume(volume: Float) {
-        withNativeEngine { it.setVolume(volume.coerceIn(0f, 1f)) }
+        val clamped = volume.coerceIn(0f, 1f)
+        _volume.value = clamped
+        nativeScope.launch { withNativeEngine { it.setVolume(clamped) } }
     }
 
     fun toggleEq(enabled: Boolean) {
@@ -1207,7 +1240,7 @@ class AudioEngineController private constructor(private val context: Context) {
     fun setEqEnabled(enabled: Boolean) {
         _isEqEnabled.value = enabled
         prefs.edit().putBoolean("eq_enabled", enabled).apply()
-        withNativeEngine { it.setEqEnabled(enabled) }
+        nativeScope.launch { withNativeEngine { it.setEqEnabled(enabled) } }
         refreshEq()
     }
 
@@ -1232,19 +1265,19 @@ class AudioEngineController private constructor(private val context: Context) {
             prefs.edit().putFloat("eq_band_$i", gains[i]).apply()
             if (i in bands.indices) {
                 val b = bands[i]
-                withNativeEngine { it.setEqBand(i.toUInt(), gains[i], b.frequency, b.q) }
+                nativeScope.launch { withNativeEngine { it.setEqBand(i.toUInt(), gains[i], b.frequency, b.q) } }
             }
         }
         refreshEq()
     }
 
     fun setEqPreamp(gainDb: Float) {
-        withNativeEngine { it.setEqPreamp(gainDb) }
+        nativeScope.launch { withNativeEngine { it.setEqPreamp(gainDb) } }
         refreshEq()
     }
 
     fun updateEqBand(index: UInt, gainDb: Float, freq: Float, q: Float) {
-        withNativeEngine { it.setEqBand(index, gainDb, freq, q) }
+        nativeScope.launch { withNativeEngine { it.setEqBand(index, gainDb, freq, q) } }
         refreshEq()
     }
 
