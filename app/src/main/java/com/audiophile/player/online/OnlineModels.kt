@@ -14,3 +14,14 @@ data class OnlineSongItem(
     val thumbnailUrl: String = "",
     val streamUrl: String = ""
 )
+
+/**
+ * Model representing an artist in discovery and recommendations.
+ */
+data class OnlineArtistItem(
+    val id: String = "",
+    val name: String = "",
+    val role: String = "Artist",
+    val imageUrl: String = "",
+    val language: String = ""
+)

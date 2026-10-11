@@ -13,8 +13,8 @@ android {
         applicationId = "com.audiophile.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3.6"
+        versionCode = 5
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         

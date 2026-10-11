@@ -38,9 +38,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.audiophile.player.engine.AsyncAlbumArt
 import com.audiophile.player.engine.AudioEngineController
+import androidx.compose.ui.graphics.Color
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylTypography
+import com.audiophile.player.ui.theme.isColorLight
 import uniffi.audiophile_core.TrackInfo
 import java.util.Locale
 
@@ -111,10 +113,12 @@ fun VeylHomeRedesigned(
                         style = VeylTypography.BodySmall,
                         color = colors.textMuted
                     )
+                    val isLight = isColorLight(colors.accentSignal)
+                    val btnTextColor = if (isLight) Color(0xFF0F0F0F) else Color.White
                     Button(
                         onClick = onPickFolder,
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.accentSignal, contentColor = colors.background)
-                    ) { Text("Choose music folder") }
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.accentSignal, contentColor = btnTextColor)
+                    ) { Text("Choose music folder", color = btnTextColor, fontWeight = FontWeight.Bold) }
                 }
             }
         } else {

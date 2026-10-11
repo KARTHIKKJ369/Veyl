@@ -63,6 +63,11 @@ enum class RepeatMode {
     ONE
 }
 
+enum class AppExperienceMode {
+    LOCAL_FIRST,
+    CLOUD_FIRST
+}
+
 class AudioEngineController private constructor(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.Default + Job())
@@ -204,6 +209,74 @@ class AudioEngineController private constructor(private val context: Context) {
     // Dark / Light Theme Mode
     private val _isDarkMode = MutableStateFlow(prefs.getBoolean("is_dark_mode", true))
     val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
+
+    // App Experience Mode (Local First vs Cloud First)
+    private val _appExperienceMode = MutableStateFlow(
+        try {
+            AppExperienceMode.valueOf(prefs.getString("app_experience_mode", AppExperienceMode.LOCAL_FIRST.name) ?: AppExperienceMode.LOCAL_FIRST.name)
+        } catch (_: Exception) {
+            AppExperienceMode.LOCAL_FIRST
+        }
+    )
+    val appExperienceMode: StateFlow<AppExperienceMode> = _appExperienceMode.asStateFlow()
+
+    private val _hasCompletedOnboarding = MutableStateFlow(
+        prefs.getBoolean("has_completed_onboarding", prefs.contains("app_experience_mode"))
+    )
+    val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
+
+    private val _selectedLanguages = MutableStateFlow<Set<String>>(
+        prefs.getStringSet("selected_languages", setOf("English", "Malayalam", "Tamil", "Hindi")) ?: setOf("English", "Malayalam", "Tamil", "Hindi")
+    )
+    val selectedLanguages: StateFlow<Set<String>> = _selectedLanguages.asStateFlow()
+
+    private val _selectedArtists = MutableStateFlow<Set<String>>(
+        prefs.getStringSet("selected_artists", emptySet()) ?: emptySet()
+    )
+    val selectedArtists: StateFlow<Set<String>> = _selectedArtists.asStateFlow()
+
+    val onlineSongMetadataCache = java.util.concurrent.ConcurrentHashMap<String, OnlineSongItem>()
+
+    private val _isAutoplayEnabled = MutableStateFlow(prefs.getBoolean("autoplay_enabled", true))
+    val isAutoplayEnabled: StateFlow<Boolean> = _isAutoplayEnabled.asStateFlow()
+
+    fun toggleAutoplay() {
+        val next = !_isAutoplayEnabled.value
+        _isAutoplayEnabled.value = next
+        prefs.edit().putBoolean("autoplay_enabled", next).apply()
+    }
+
+    fun setAppExperienceMode(mode: AppExperienceMode) {
+        _appExperienceMode.value = mode
+        prefs.edit().putString("app_experience_mode", mode.name).apply()
+    }
+
+    fun completeOnboarding(mode: AppExperienceMode, languages: Set<String>, artists: Set<String>) {
+        _appExperienceMode.value = mode
+        _hasCompletedOnboarding.value = true
+        _selectedLanguages.value = languages
+        _selectedArtists.value = artists
+        prefs.edit()
+            .putString("app_experience_mode", mode.name)
+            .putBoolean("has_completed_onboarding", true)
+            .putStringSet("selected_languages", languages)
+            .putStringSet("selected_artists", artists)
+            .apply()
+    }
+
+    fun updateMusicPreferences(languages: Set<String>, artists: Set<String>) {
+        _selectedLanguages.value = languages
+        _selectedArtists.value = artists
+        prefs.edit()
+            .putStringSet("selected_languages", languages)
+            .putStringSet("selected_artists", artists)
+            .apply()
+    }
+
+    fun resetOnboarding() {
+        _hasCompletedOnboarding.value = false
+        prefs.edit().putBoolean("has_completed_onboarding", false).apply()
+    }
 
     // -------------------------------------------------------------------------
     // Dynamic Color Palette & Theme Engine
@@ -813,7 +886,66 @@ class AudioEngineController private constructor(private val context: Context) {
                 } else {
                     currentIndex in 0 until _queue.value.lastIndex
                 }
-                if (hasNext) skipNext() else stop()
+                if (hasNext) {
+                    skipNext()
+                } else {
+                    val isCloud = _appExperienceMode.value == AppExperienceMode.CLOUD_FIRST ||
+                            _isOnlineStreaming.value ||
+                            _status.value?.currentTrack?.genre == "Online Stream"
+                    if (isCloud && _isAutoplayEnabled.value) {
+                        triggerAutoplayNext()
+                    } else {
+                        stop()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun triggerAutoplayNext() {
+        val current = _status.value?.currentTrack
+        val artist = current?.artist ?: "Top 50"
+        val title = current?.title ?: ""
+
+        scope.launch(Dispatchers.IO) {
+            Log.i("AudioEngineController", "Autoplay: fetching continuous radio for $artist ($title)")
+            val newItems = com.audiophile.player.online.CloudRecommendationService.getAutoplayRadioTracks(artist, title)
+            if (newItems.isNotEmpty()) {
+                val newTracks = newItems.map { item ->
+                    onlineSongMetadataCache[item.id] = item
+                    onlineSongMetadataCache["online://${item.id}"] = item
+                    onlineSongMetadataCache[item.title.lowercase()] = item
+                    ArtworkCache.registerOnlineArtwork("online://${item.id}", item.thumbnailUrl)
+
+                    TrackInfo(
+                        uri = "online://${item.id}",
+                        title = item.title,
+                        artist = item.artist,
+                        album = item.album,
+                        albumArtist = null,
+                        genre = "Online Stream",
+                        year = null,
+                        trackNumber = null,
+                        discNumber = null,
+                        durationSeconds = item.durationSeconds,
+                        sampleRate = 44100u,
+                        bitDepth = 16u,
+                        bitrate = 320000u,
+                        channels = 2u,
+                        formatName = "AAC 320k",
+                        hasArtwork = true
+                    )
+                }
+                withContext(Dispatchers.Main) {
+                    _queue.value = _queue.value + newTracks
+                    _originalQueue.value = _originalQueue.value + newTracks
+                    if (_isShuffleEnabled.value) {
+                        unplayedShufflePool.addAll(newTracks.shuffled())
+                    }
+                    skipNext()
+                }
+            } else {
+                withContext(Dispatchers.Main) { stop() }
             }
         }
     }
@@ -866,8 +998,8 @@ class AudioEngineController private constructor(private val context: Context) {
         if (newShuffle) {
             val orig = _queue.value.toMutableList()
             if (orig.isNotEmpty()) {
-                val currentItem = orig.firstOrNull { it.uri == currentTrack?.uri }
-                orig.removeAll { it.uri == currentTrack?.uri }
+                val currentItem = orig.firstOrNull { it.uri == currentTrack?.uri || (currentTrack != null && it.title.equals(currentTrack.title, ignoreCase = true)) }
+                orig.removeAll { it.uri == currentTrack?.uri || (currentTrack != null && it.title.equals(currentTrack.title, ignoreCase = true)) }
                 
                 val rng = Random()
                 for (i in orig.size - 1 downTo 1) {
@@ -904,20 +1036,36 @@ class AudioEngineController private constructor(private val context: Context) {
         }
 
         val current = _status.value?.currentTrack
-        val currentIndex = q.indexOfFirst { it.uri == current?.uri }
+        val currentIndex = q.indexOfFirst { it.uri == current?.uri || (current != null && it.title.equals(current.title, ignoreCase = true)) }
 
         val nextTrack = if (_isShuffleEnabled.value) {
             if (unplayedShufflePool.isEmpty()) {
-                unplayedShufflePool.addAll(q.filter { it.uri != current?.uri })
+                unplayedShufflePool.addAll(q.filter { it.uri != current?.uri && !it.title.equals(current?.title, ignoreCase = true) })
             }
             if (unplayedShufflePool.isNotEmpty()) {
                 val next = unplayedShufflePool.removeAt(0)
                 if (current != null) playHistory.add(current)
                 next
             } else {
+                val isCloud = _appExperienceMode.value == AppExperienceMode.CLOUD_FIRST ||
+                        _isOnlineStreaming.value ||
+                        _status.value?.currentTrack?.genre == "Online Stream"
+                if (isCloud && _isAutoplayEnabled.value) {
+                    triggerAutoplayNext()
+                    return
+                }
                 q.firstOrNull()
             }
         } else {
+            if (currentIndex != -1 && currentIndex >= q.size - 1) {
+                val isCloud = _appExperienceMode.value == AppExperienceMode.CLOUD_FIRST ||
+                        _isOnlineStreaming.value ||
+                        _status.value?.currentTrack?.genre == "Online Stream"
+                if (isCloud && _isAutoplayEnabled.value) {
+                    triggerAutoplayNext()
+                    return
+                }
+            }
             val nextIndex = if (currentIndex != -1) (currentIndex + 1) % q.size else 0
             q[nextIndex]
         }
@@ -997,7 +1145,6 @@ class AudioEngineController private constructor(private val context: Context) {
                 val isOnline = resolved.uri.contains("veyl_online_stream_") || resolved.genre == "Online Stream"
                 if (isOnline) {
                     playlistManager.registerOnlineTrack(resolved, _currentOnlineSong.value)
-                    downloadTrack(resolved)
                 }
             }
         }
@@ -1010,7 +1157,6 @@ class AudioEngineController private constructor(private val context: Context) {
             val isOnline = resolved.uri.contains("veyl_online_stream_") || resolved.genre == "Online Stream"
             if (isOnline) {
                 playlistManager.registerOnlineTrack(resolved, _currentOnlineSong.value)
-                downloadTrack(resolved)
             }
         }
     }
@@ -1436,7 +1582,12 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
-    fun playOnlineSong(song: OnlineSongItem) {
+    fun playOnlineSong(
+        song: OnlineSongItem,
+        contextQueue: List<OnlineSongItem> = emptyList(),
+        startShuffled: Boolean = false,
+        preserveQueue: Boolean = false
+    ) {
         // Immediately pause existing audio so previous track does not conflict or auto-advance
         nativeScope.launch {
             withNativeEngine { it.pause() }
@@ -1448,6 +1599,78 @@ class AudioEngineController private constructor(private val context: Context) {
         _isOnlineStreaming.value = true
         _isOnlineBuffering.value = true
         _currentOnlineSong.value = song
+
+        // Cache metadata for this song
+        onlineSongMetadataCache[song.id] = song
+        onlineSongMetadataCache["online://${song.id}"] = song
+        onlineSongMetadataCache[song.title.lowercase()] = song
+        ArtworkCache.registerOnlineArtwork("online://${song.id}", song.thumbnailUrl)
+
+        // Setup Queue if contextQueue is provided
+        if (contextQueue.isNotEmpty()) {
+            val queueTracks = contextQueue.map { item ->
+                onlineSongMetadataCache[item.id] = item
+                onlineSongMetadataCache["online://${item.id}"] = item
+                onlineSongMetadataCache[item.title.lowercase()] = item
+                ArtworkCache.registerOnlineArtwork("online://${item.id}", item.thumbnailUrl)
+
+                TrackInfo(
+                    uri = if (item.id.startsWith("online://")) item.id else "online://${item.id}",
+                    title = item.title,
+                    artist = item.artist,
+                    album = item.album,
+                    albumArtist = null,
+                    genre = "Online Stream",
+                    year = null,
+                    trackNumber = null,
+                    discNumber = null,
+                    durationSeconds = item.durationSeconds,
+                    sampleRate = 44100u,
+                    bitDepth = 16u,
+                    bitrate = 320000u,
+                    channels = 2u,
+                    formatName = "AAC 320k",
+                    hasArtwork = true
+                )
+            }
+
+            _originalQueue.value = queueTracks
+
+            if (startShuffled || _isShuffleEnabled.value) {
+                _isShuffleEnabled.value = true
+                prefs.edit().putBoolean("shuffle_enabled", true).apply()
+                val currentPlaceholder = queueTracks.firstOrNull { it.title.equals(song.title, ignoreCase = true) }
+                    ?: queueTracks.first()
+                val remaining = queueTracks.filter { !it.title.equals(song.title, ignoreCase = true) }.shuffled()
+                val shuffledQueue = listOf(currentPlaceholder) + remaining
+                _queue.value = shuffledQueue
+                unplayedShufflePool.clear()
+                unplayedShufflePool.addAll(remaining)
+            } else {
+                _queue.value = queueTracks
+            }
+        } else if (!preserveQueue && _queue.value.none { it.title.equals(song.title, ignoreCase = true) }) {
+            val placeholder = TrackInfo(
+                uri = "online://${song.id}",
+                title = song.title,
+                artist = song.artist,
+                album = song.album,
+                albumArtist = null,
+                genre = "Online Stream",
+                year = null,
+                trackNumber = null,
+                discNumber = null,
+                durationSeconds = song.durationSeconds,
+                sampleRate = 44100u,
+                bitDepth = 16u,
+                bitrate = 320000u,
+                channels = 2u,
+                formatName = "AAC 320k",
+                hasArtwork = true
+            )
+            _queue.value = listOf(placeholder)
+            _originalQueue.value = listOf(placeholder)
+        }
 
         scope.launch(Dispatchers.IO) {
             val streamUrl = if (song.streamUrl.isNotBlank()) {
@@ -1473,8 +1696,27 @@ class AudioEngineController private constructor(private val context: Context) {
                     val trackInfo = onlineStreamManager.createTrackInfo(song, cacheFile)
                     ArtworkCache.registerOnlineArtwork(cacheFile.absolutePath, song.thumbnailUrl)
                     ArtworkCache.registerOnlineArtwork("online://${song.id}", song.thumbnailUrl)
-                    _queue.value = listOf(trackInfo)
-                    _originalQueue.value = listOf(trackInfo)
+
+                    // Update track in _queue without replacing other tracks!
+                    val curQ = _queue.value
+                    val updatedQ = curQ.map { qItem ->
+                        if (qItem.title.equals(song.title, ignoreCase = true) || qItem.uri == "online://${song.id}") {
+                            trackInfo
+                        } else {
+                            qItem
+                        }
+                    }
+                    _queue.value = if (updatedQ.none { it.uri == trackInfo.uri }) listOf(trackInfo) + curQ else updatedQ
+
+                    val curOrig = _originalQueue.value
+                    _originalQueue.value = curOrig.map { qItem ->
+                        if (qItem.title.equals(song.title, ignoreCase = true) || qItem.uri == "online://${song.id}") {
+                            trackInfo
+                        } else {
+                            qItem
+                        }
+                    }
+
                     playTrack(trackInfo)
                 },
                 onError = { error ->
@@ -1752,10 +1994,12 @@ class AudioEngineController private constructor(private val context: Context) {
             if (targetFile.exists() && targetFile.length() > 50_000L) {
                 actualTrack = actualTrack.copy(uri = targetFile.absolutePath)
                 playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
-            } else if (actualTrack.genre == "Online Stream" || actualTrack.uri.contains("veyl_online_stream_")) {
+            } else if (actualTrack.genre == "Online Stream" || actualTrack.uri.contains("veyl_online_stream_") || actualTrack.uri.startsWith("online://")) {
                 val songItem = _currentOnlineSong.value?.takeIf { it.title.equals(actualTrack.title, ignoreCase = true) }
+                    ?: onlineSongMetadataCache[actualTrack.uri]
+                    ?: onlineSongMetadataCache[actualTrack.title.lowercase()]
                     ?: OnlineSongItem(
-                        id = actualTrack.uri,
+                        id = actualTrack.uri.removePrefix("online://"),
                         title = actualTrack.title,
                         artist = actualTrack.artist ?: "Unknown Artist",
                         album = actualTrack.album ?: "",
@@ -1763,7 +2007,7 @@ class AudioEngineController private constructor(private val context: Context) {
                         thumbnailUrl = ArtworkCache.getOnlineArtwork(actualTrack.uri) ?: "",
                         streamUrl = ""
                     )
-                playOnlineSong(songItem)
+                playOnlineSong(song = songItem, preserveQueue = true)
                 return
             }
         }
@@ -1825,8 +2069,10 @@ class AudioEngineController private constructor(private val context: Context) {
             // Ensure queue always contains all tracks if queue was empty or single
             val currentQ = _queue.value
             if (isOnline) {
-                _queue.value = listOf(actualTrack)
-                _originalQueue.value = listOf(actualTrack)
+                if (currentQ.isEmpty()) {
+                    _queue.value = listOf(actualTrack)
+                    _originalQueue.value = listOf(actualTrack)
+                }
             } else if (currentQ.isEmpty() || currentQ.size <= 1) {
                 val lib = _libraryTracks.value
                 if (lib.isNotEmpty()) {

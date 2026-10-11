@@ -386,7 +386,9 @@ data class VeylColorScheme(
     val textMuted: Color = VeylTextMuted,
     val textMono: Color = VeylSecondary,
     val glassButtonBg: Color = VeylGlassButtonBg
-)
+) {
+    val borderSubtle: Color get() = borderHairline
+}
 
 val VeylDarkColorScheme = VeylColorScheme(
     background = VeylBackgroundDark,
@@ -496,7 +498,7 @@ object VeylTypography {
         fontWeight = FontWeight.Bold,
         fontSize = 24.sp,
         letterSpacing = (-0.5).sp,
-        color = VeylTextPrimary
+        color = Color.Unspecified
     )
 
     val HeadlineMedium = TextStyle(
@@ -504,7 +506,7 @@ object VeylTypography {
         fontWeight = FontWeight.Bold,
         fontSize = 19.sp,
         letterSpacing = (-0.3).sp,
-        color = VeylTextPrimary
+        color = Color.Unspecified
     )
 
     val DisplayLarge = TextStyle(
@@ -512,7 +514,7 @@ object VeylTypography {
         fontWeight = FontWeight.Bold,
         fontSize = 24.sp,
         letterSpacing = (-0.5).sp,
-        color = VeylTextPrimary
+        color = Color.Unspecified
     )
 
     val DisplayMedium = TextStyle(
@@ -520,7 +522,7 @@ object VeylTypography {
         fontWeight = FontWeight.Bold,
         fontSize = 19.sp,
         letterSpacing = (-0.3).sp,
-        color = VeylTextPrimary
+        color = Color.Unspecified
     )
 
     val SectionHeader = TextStyle(
@@ -528,7 +530,7 @@ object VeylTypography {
         fontWeight = FontWeight.Bold,
         fontSize = 16.sp,
         letterSpacing = (-0.2).sp,
-        color = VeylTextPrimary
+        color = Color.Unspecified
     )
 
     val TitleLarge = TextStyle(
@@ -536,7 +538,7 @@ object VeylTypography {
         fontWeight = FontWeight.Bold,
         fontSize = 20.sp,
         letterSpacing = (-0.3).sp,
-        color = VeylTextPrimary
+        color = Color.Unspecified
     )
 
     val TitleMedium = TextStyle(
@@ -544,28 +546,28 @@ object VeylTypography {
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         letterSpacing = (-0.1).sp,
-        color = VeylTextPrimary
+        color = Color.Unspecified
     )
 
     val BodyMedium = TextStyle(
         fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
-        color = VeylTextPrimary
+        color = Color.Unspecified
     )
 
     val Body = TextStyle(
         fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,
-        color = VeylTextSecondary
+        color = Color.Unspecified
     )
 
     val BodySmall = TextStyle(
         fontFamily = VeylOutfitFont,
         fontWeight = FontWeight.Normal,
         fontSize = 11.sp,
-        color = VeylTextMuted
+        color = Color.Unspecified
     )
 
     val MonoSpec = TextStyle(
@@ -573,7 +575,7 @@ object VeylTypography {
         fontWeight = FontWeight.SemiBold,
         fontSize = 11.sp,
         letterSpacing = 0.5.sp,
-        color = VeylPrimary
+        color = Color.Unspecified
     )
 
     val MonoBadge = TextStyle(
@@ -581,7 +583,7 @@ object VeylTypography {
         fontWeight = FontWeight.Bold,
         fontSize = 10.sp,
         letterSpacing = 0.8.sp,
-        color = VeylPrimary
+        color = Color.Unspecified
     )
 }
 
@@ -652,7 +654,8 @@ fun VeylTheme(
     }
 
     CompositionLocalProvider(
-        LocalVeylColors provides veylColors
+        LocalVeylColors provides veylColors,
+        androidx.compose.material3.LocalContentColor provides veylColors.textPrimary
     ) {
         MaterialTheme(
             colorScheme = m3Colors,

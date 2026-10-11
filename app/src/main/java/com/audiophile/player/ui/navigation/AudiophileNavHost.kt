@@ -49,11 +49,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.audiophile.player.engine.AppExperienceMode
 import com.audiophile.player.engine.AudioEngineController
 import com.audiophile.player.ui.components.StickyMiniPlayer
+import com.audiophile.player.ui.screens.VeylCloudHomeScreen
 import com.audiophile.player.ui.screens.VeylEqualizerScreen
 import com.audiophile.player.ui.screens.VeylHomeRedesigned
 import com.audiophile.player.ui.screens.VeylNowPlayingScreen
+import com.audiophile.player.ui.screens.VeylOnboardingScreen
 import com.audiophile.player.ui.screens.VeylPlaylistDetailScreen
 import com.audiophile.player.ui.screens.VeylQueueScreen
 import com.audiophile.player.ui.screens.VeylSearchScreen
@@ -92,6 +95,18 @@ fun AudiophileNavHost(
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination
 
+        val hasCompletedOnboarding by controller.hasCompletedOnboarding.collectAsStateWithLifecycle()
+        val appExperienceMode by controller.appExperienceMode.collectAsStateWithLifecycle()
+
+        if (!hasCompletedOnboarding) {
+            VeylOnboardingScreen(
+                controller = controller,
+                onSelectRootFolder = onSelectRootFolder,
+                modifier = modifier
+            )
+            return
+        }
+
         val currentTrack by controller.currentTrack.collectAsStateWithLifecycle()
         var isNowPlayingOpen by remember { mutableStateOf(false) }
         var playerContextSheet by remember { mutableStateOf<PlayerContextSheet?>(null) }
@@ -105,6 +120,9 @@ fun AudiophileNavHost(
         BackHandler(enabled = isNowPlayingOpen) {
             isNowPlayingOpen = false
         }
+
+        val homeTitle = if (appExperienceMode == AppExperienceMode.CLOUD_FIRST) "Discover" else "Home"
+        val homeIcon = if (appExperienceMode == AppExperienceMode.CLOUD_FIRST) VeylIcons.Waveform else VeylIcons.StorageLocal
 
         val bottomNavItems = listOf(
             VeylScreen.Home,
@@ -145,17 +163,20 @@ fun AudiophileNavHost(
                         ) {
                             bottomNavItems.forEach { screen ->
                                 val isSelected = currentDestination?.route == screen.route
+                                val displayTitle = if (screen == VeylScreen.Home) homeTitle else screen.title
+                                val displayIcon = if (screen == VeylScreen.Home) homeIcon else screen.icon
+
                                 NavigationBarItem(
                                     icon = {
                                         Icon(
-                                            imageVector = screen.icon,
-                                            contentDescription = screen.title,
+                                            imageVector = displayIcon,
+                                            contentDescription = displayTitle,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     },
                                     label = {
                                         Text(
-                                            text = screen.title,
+                                            text = displayTitle,
                                             style = if (isSelected) VeylTypography.TitleMedium else VeylTypography.BodySmall,
                                             fontSize = 11.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
@@ -192,34 +213,49 @@ fun AudiophileNavHost(
                 startDestination = VeylScreen.Home.route,
                 modifier = modifier.padding(bottom = innerPadding.calculateBottomPadding())
             ) {
-                // Screen 1: Home (Bento Grid, Suggestions, Carousel)
+                // Screen 1: Home (Cloud Feed in Cloud First mode, Bento Grid in Local First mode)
                 composable(
                     route = VeylScreen.Home.route,
                     enterTransition = { fadeIn(animationSpec = tween(180)) },
                     exitTransition = { fadeOut(animationSpec = tween(140)) }
                 ) {
-                    VeylHomeRedesigned(
-                        controller = controller,
-                        onNavigateToSearch = {
-                            navController.navigate(VeylScreen.Search.route)
-                        },
-                        onNavigateToTopTracks = {
-                            navController.navigate(VeylScreen.TopTracks.route)
-                        },
-                        onNavigateToLastAdded = {
-                            navController.navigate(VeylScreen.LastAdded.route)
-                        },
-                        onNavigateToHistory = {
-                            navController.navigate(VeylScreen.History.route)
-                        },
-                        onNavigateToQueue = {
-                            navController.navigate(VeylScreen.Queue.route)
-                        },
-                        onNavigateToNowPlaying = {
-                            isNowPlayingOpen = true
-                        },
-                        onPickFolder = onSelectRootFolder
-                    )
+                    if (appExperienceMode == AppExperienceMode.CLOUD_FIRST) {
+                        VeylCloudHomeScreen(
+                            controller = controller,
+                            onNavigateToSearch = {
+                                navController.navigate(VeylScreen.Search.route)
+                            },
+                            onNavigateToLibrary = {
+                                navController.navigate(VeylScreen.Songs.route)
+                            },
+                            onNavigateToNowPlaying = {
+                                isNowPlayingOpen = true
+                            }
+                        )
+                    } else {
+                        VeylHomeRedesigned(
+                            controller = controller,
+                            onNavigateToSearch = {
+                                navController.navigate(VeylScreen.Search.route)
+                            },
+                            onNavigateToTopTracks = {
+                                navController.navigate(VeylScreen.TopTracks.route)
+                            },
+                            onNavigateToLastAdded = {
+                                navController.navigate(VeylScreen.LastAdded.route)
+                            },
+                            onNavigateToHistory = {
+                                navController.navigate(VeylScreen.History.route)
+                            },
+                            onNavigateToQueue = {
+                                navController.navigate(VeylScreen.Queue.route)
+                            },
+                            onNavigateToNowPlaying = {
+                                isNowPlayingOpen = true
+                            },
+                            onPickFolder = onSelectRootFolder
+                        )
+                    }
                 }
 
                 // Screen 2: Songs (Fast searchable library list with tabs)

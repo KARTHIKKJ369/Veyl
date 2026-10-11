@@ -570,12 +570,56 @@ fun VeylSearchScreen(
                                         }
                                     }
 
-                                    if (isSearchingOnline) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(14.dp),
-                                            strokeWidth = 2.dp,
-                                            color = colors.accentSignal
-                                        )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        if (onlineResults.isNotEmpty()) {
+                                            Surface(
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        val randomSong = onlineResults.random()
+                                                        controller.playOnlineSong(
+                                                            song = randomSong,
+                                                            contextQueue = onlineResults,
+                                                            startShuffled = true
+                                                        )
+                                                    }
+                                                    .clip(RoundedCornerShape(12.dp)),
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = colors.surfaceElevated,
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderSubtle)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Icon(
+                                                        VeylIcons.Shuffle,
+                                                        contentDescription = "Shuffle",
+                                                        tint = colors.accentSignal,
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                    Text(
+                                                        text = "Shuffle",
+                                                        style = VeylTypography.MonoSpec,
+                                                        color = colors.textPrimary,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        if (isSearchingOnline) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(14.dp),
+                                                strokeWidth = 2.dp,
+                                                color = colors.accentSignal
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -594,7 +638,11 @@ fun VeylSearchScreen(
                                     onClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         saveRecentSearch(recentSearches, query, prefs)
-                                        controller.playOnlineSong(item)
+                                        controller.playOnlineSong(
+                                            song = item,
+                                            contextQueue = onlineResults,
+                                            startShuffled = false
+                                        )
                                     },
                                     onDownloadClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)

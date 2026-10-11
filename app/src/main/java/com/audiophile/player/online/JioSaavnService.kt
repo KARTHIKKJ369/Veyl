@@ -22,6 +22,8 @@ object JioSaavnService {
     private const val TAG = "JioSaavnService"
     private const val DES_KEY = "38346591"
     private const val SEARCH_ENDPOINT = "https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&api_version=4&ctx=android&n=25&q="
+    private const val ARTIST_SEARCH_ENDPOINT = "https://www.jiosaavn.com/api.php?__call=search.getArtistResults&_format=json&_marker=0&n=15&q="
+    private const val AUTOCOMPLETE_ENDPOINT = "https://www.jiosaavn.com/api.php?__call=autocomplete.get&_format=json&_marker=0&query="
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -56,18 +58,158 @@ object JioSaavnService {
         }
     }
 
+    suspend fun searchArtists(query: String): List<OnlineArtistItem> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.length < 2) return@withContext emptyList()
+
+        val results = mutableListOf<OnlineArtistItem>()
+        val seenNames = mutableSetOf<String>()
+
+        try {
+            val encodedQuery = URLEncoder.encode(trimmed, "UTF-8")
+            val request = Request.Builder()
+                .url(ARTIST_SEARCH_ENDPOINT + encodedQuery)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    if (body.isNotBlank()) {
+                        val json = JSONObject(body)
+                        val arr = json.optJSONArray("results")
+                        if (arr != null) {
+                            for (i in 0 until arr.length()) {
+                                val r = arr.optJSONObject(i) ?: continue
+                                val rawName = r.optString("name")
+                                val cleanName = decodeHtml(rawName).trim()
+                                if (cleanName.isNotBlank() && seenNames.add(cleanName.lowercase())) {
+                                    val id = r.optString("id")
+                                    val role = decodeHtml(r.optString("role", "Artist"))
+                                    val rawImg = r.optString("image")
+                                    val highResImg = rawImg.replace("50x50", "500x500").replace("150x150", "500x500")
+                                    results.add(
+                                        OnlineArtistItem(
+                                            id = id,
+                                            name = cleanName,
+                                            role = role,
+                                            imageUrl = highResImg
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Artist search error for '$trimmed'", e)
+        }
+
+        // Fallback to autocomplete if few results
+        if (results.size < 3) {
+            try {
+                val encodedQuery = URLEncoder.encode(trimmed, "UTF-8")
+                val request = Request.Builder()
+                    .url(AUTOCOMPLETE_ENDPOINT + encodedQuery)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .get()
+                    .build()
+
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: ""
+                        if (body.isNotBlank()) {
+                            val json = JSONObject(body)
+                            val top = json.optJSONObject("topquery")?.optJSONArray("data")
+                            if (top != null) {
+                                for (i in 0 until top.length()) {
+                                    val item = top.optJSONObject(i) ?: continue
+                                    if (item.optString("type") == "artist") {
+                                        val name = decodeHtml(item.optString("title")).trim()
+                                        if (name.isNotBlank() && seenNames.add(name.lowercase())) {
+                                            val img = item.optString("image").replace("50x50", "500x500").replace("150x150", "500x500")
+                                            results.add(
+                                                OnlineArtistItem(
+                                                    id = item.optString("id"),
+                                                    name = name,
+                                                    role = decodeHtml(item.optString("description", "Artist")),
+                                                    imageUrl = img
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            val artistsArr = json.optJSONObject("artists")?.optJSONArray("data")
+                            if (artistsArr != null) {
+                                for (i in 0 until artistsArr.length()) {
+                                    val item = artistsArr.optJSONObject(i) ?: continue
+                                    val name = decodeHtml(item.optString("title")).trim()
+                                    if (name.isNotBlank() && seenNames.add(name.lowercase())) {
+                                        val img = item.optString("image").replace("50x50", "500x500").replace("150x150", "500x500")
+                                        results.add(
+                                            OnlineArtistItem(
+                                                id = item.optString("id"),
+                                                name = name,
+                                                role = decodeHtml(item.optString("description", "Artist")),
+                                                imageUrl = img
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore fallback error
+            }
+        }
+
+        results
+    }
+
+    suspend fun getPlaylistSongs(listId: String): List<OnlineSongItem> = withContext(Dispatchers.IO) {
+        if (listId.isBlank()) return@withContext emptyList()
+        try {
+            val url = "https://www.jiosaavn.com/api.php?__call=playlist.getDetails&_format=json&_marker=0&api_version=4&listid=$listId"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body?.string() ?: return@withContext emptyList()
+                val json = JSONObject(body)
+                val arr = json.optJSONArray("list") ?: json.optJSONArray("songs") ?: return@withContext emptyList()
+                return@withContext parseJsonSongArray(arr)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching playlist $listId", e)
+            emptyList()
+        }
+    }
+
     private fun parseSearchResults(json: JSONObject): List<OnlineSongItem> {
-        val items = mutableListOf<OnlineSongItem>()
         val results = json.optJSONArray("results") ?: return emptyList()
+        return parseJsonSongArray(results)
+    }
+
+    fun parseJsonSongArray(results: org.json.JSONArray): List<OnlineSongItem> {
+        val items = mutableListOf<OnlineSongItem>()
 
         for (i in 0 until results.length()) {
             val r = results.optJSONObject(i) ?: continue
             val id = r.optString("id")
-            val rawTitle = r.optString("title")
+            val rawTitle = r.optString("title").ifBlank { r.optString("song") }
             val cleanTitle = decodeHtml(rawTitle)
 
-            val moreInfo = r.optJSONObject("more_info") ?: JSONObject()
-            val rawAlbum = moreInfo.optString("album")
+            val moreInfo = r.optJSONObject("more_info") ?: r
+            val rawAlbum = moreInfo.optString("album").ifBlank { r.optString("album") }
             val cleanAlbum = decodeHtml(rawAlbum)
 
             // Extract primary artists
@@ -86,12 +228,21 @@ object JioSaavnService {
                 }
             }
             if (artist.isBlank()) {
+                val primaryArtistsStr = moreInfo.optString("primary_artists").ifBlank { r.optString("primary_artists") }
+                if (primaryArtistsStr.isNotBlank()) {
+                    artist = decodeHtml(primaryArtistsStr)
+                }
+            }
+            if (artist.isBlank()) {
                 val music = moreInfo.optString("music")
                 artist = if (music.isNotBlank()) decodeHtml(music) else decodeHtml(r.optString("subtitle"))
             }
+            if (artist.isBlank()) {
+                artist = decodeHtml(r.optString("singers"))
+            }
             if (artist.isBlank()) artist = "Unknown Artist"
 
-            val durationSeconds = moreInfo.optDouble("duration", 0.0)
+            val durationSeconds = moreInfo.optDouble("duration", r.optDouble("duration", 0.0))
             val durationText = formatDuration(durationSeconds)
 
             // High-res album art (convert 150x150 to 500x500)
@@ -99,7 +250,7 @@ object JioSaavnService {
             val highResImage = rawImage.replace("150x150", "500x500").replace("50x50", "500x500")
 
             // Decrypt direct stream URL
-            val encryptedUrl = moreInfo.optString("encrypted_media_url")
+            val encryptedUrl = moreInfo.optString("encrypted_media_url").ifBlank { r.optString("encrypted_media_url") }
             val streamUrl = decryptMediaUrl(encryptedUrl) ?: continue
 
             items.add(
