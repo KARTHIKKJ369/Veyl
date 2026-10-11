@@ -89,6 +89,7 @@ fun VeylLibraryScreen(
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
     val tracks by controller.libraryTracks.collectAsStateWithLifecycle()
+    val isScanning by controller.isScanning.collectAsStateWithLifecycle()
     val status by controller.status.collectAsStateWithLifecycle()
     val favoriteUris by controller.favoriteUris.collectAsStateWithLifecycle()
 
@@ -211,6 +212,34 @@ fun VeylLibraryScreen(
                                 tint = colors.textPrimary,
                                 modifier = Modifier.size(20.dp)
                             )
+                        }
+
+                        // Refresh / Rescan Library
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                controller.rescanLibrary()
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(colors.glassButtonBg)
+                                .border(1.dp, colors.borderHairline, CircleShape)
+                        ) {
+                            if (isScanning) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = colors.accentSignal,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = VeylIcons.Refresh,
+                                    contentDescription = "Rescan Library",
+                                    tint = colors.textPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
 
                         // Storage Scan / Directory Picker

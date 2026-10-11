@@ -100,6 +100,7 @@ fun VeylSongsScreen(
     val listState = rememberLazyListState()
 
     val tracks by controller.tracks.collectAsStateWithLifecycle()
+    val isScanning by controller.isScanning.collectAsStateWithLifecycle()
     val favoriteUris by controller.favoriteUris.collectAsStateWithLifecycle()
     val playlists by controller.playlists.collectAsStateWithLifecycle()
     val currentUri by controller.currentUri.collectAsStateWithLifecycle()
@@ -188,7 +189,7 @@ fun VeylSongsScreen(
                             fontSize = 28.sp
                         )
                         Text(
-                            text = "Your local collection",
+                            text = if (isScanning) "Refreshing library…" else "Your local collection",
                             style = VeylTypography.BodySmall,
                             color = colors.textMuted,
                             fontSize = 13.sp
@@ -197,7 +198,7 @@ fun VeylSongsScreen(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         // Search Button (1 click to open full search & keyboard)
                         Box(
@@ -219,6 +220,34 @@ fun VeylSongsScreen(
                             )
                         }
 
+                        // Refresh / Rescan Library Button
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(colors.surfacePanel)
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    controller.rescanLibrary()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isScanning) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = colors.accentSignal,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = VeylIcons.Refresh,
+                                    contentDescription = "Refresh Library",
+                                    tint = colors.textPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
                         // Mount Storage Folder Button
                         Box(
                             modifier = Modifier
@@ -233,7 +262,7 @@ fun VeylSongsScreen(
                         ) {
                             Icon(
                                 imageVector = VeylIcons.Folder,
-                                contentDescription = "Mount Storage",
+                                contentDescription = "Choose Music Folder",
                                 tint = colors.textPrimary,
                                 modifier = Modifier.size(18.dp)
                             )

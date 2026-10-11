@@ -1089,6 +1089,33 @@ class AudioEngineController private constructor(private val context: Context) {
         updateDerivedTrackLists(current)
     }
 
+    fun rescanLibrary() {
+        val root = _selectedRootPath.value ?: prefs.getString("root_audio_dir", null)
+        if (root != null && File(root).exists()) {
+            _selectedRootPath.value = root
+            scanDirectory(root)
+        } else {
+            val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+            val sdcardMusic = File("/storage/emulated/0/Music")
+            val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+
+            val detected = when {
+                musicDir != null && musicDir.exists() && musicDir.canRead() -> musicDir.absolutePath
+                sdcardMusic.exists() && sdcardMusic.canRead() -> sdcardMusic.absolutePath
+                downloadDir != null && downloadDir.exists() && downloadDir.canRead() -> downloadDir.absolutePath
+                else -> null
+            }
+
+            if (detected != null) {
+                _selectedRootPath.value = detected
+                prefs.edit().putString("root_audio_dir", detected).apply()
+                scanDirectory(detected)
+            } else {
+                scanMediaStore()
+            }
+        }
+    }
+
     fun scanDirectory(path: String) {
         scope.launch(Dispatchers.IO) {
             _isScanning.value = true
@@ -1096,8 +1123,19 @@ class AudioEngineController private constructor(private val context: Context) {
             try {
                 val dir = File(path)
                 if (dir.exists()) {
-                    val rawTracks = libraryEngine.scanDirectory(dir.absolutePath)
-                    val tracks = enrichTracksWithKnownMetadata(rawTracks)
+                    val rawTracks = libraryEngine.scanDirectory(dir.absolutePath).toMutableList()
+                    val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+                    val veylDir = if (musicDir != null) File(musicDir, "Veyl") else null
+                    if (veylDir != null && veylDir.exists() && !veylDir.canonicalPath.startsWith(dir.canonicalPath)) {
+                        try {
+                            val veylTracks = libraryEngine.scanDirectory(veylDir.absolutePath)
+                            rawTracks.addAll(veylTracks)
+                        } catch (e: Exception) {
+                            Log.w("AudioEngineController", "Error scanning Veyl downloads dir", e)
+                        }
+                    }
+                    val distinctRawTracks = rawTracks.distinctBy { it.uri }
+                    val tracks = enrichTracksWithKnownMetadata(distinctRawTracks)
                     Log.i("AudioEngineController", "Scanned ${tracks.size} tracks from $path")
                     withContext(Dispatchers.Main) {
                         _libraryTracks.value = tracks
@@ -1442,8 +1480,7 @@ class AudioEngineController private constructor(private val context: Context) {
                     _downloadingUris.value = _downloadingUris.value - track.uri - targetFile.absolutePath
                     withContext(Dispatchers.Main) {
                         addTrackToLibrary(downloadedTrack)
-                        val root = _selectedRootPath.value
-                        if (root != null) scanDirectory(root) else scanMediaStore()
+                        rescanLibrary()
                         onCompleted?.invoke(targetFile)
                     }
                     return@launch
@@ -1466,8 +1503,7 @@ class AudioEngineController private constructor(private val context: Context) {
                     _downloadedUris.value = _downloadedUris.value + track.uri + file.absolutePath
                     _downloadingUris.value = _downloadingUris.value - track.uri - targetFile.absolutePath
                     addTrackToLibrary(downloadedTrack)
-                    val root = _selectedRootPath.value
-                    if (root != null) scanDirectory(root) else scanMediaStore()
+                    rescanLibrary()
                     onCompleted?.invoke(file)
                 },
                 onError = { err ->
@@ -1565,8 +1601,7 @@ class AudioEngineController private constructor(private val context: Context) {
                     _downloadedUris.value = _downloadedUris.value + file.absolutePath + song.id
                     _downloadingUris.value = _downloadingUris.value - targetFile.absolutePath
                     addTrackToLibrary(downloadedTrack)
-                    val root = _selectedRootPath.value
-                    if (root != null) scanDirectory(root) else scanMediaStore()
+                    rescanLibrary()
                     onCompleted(file)
                 },
                 onError = { err ->

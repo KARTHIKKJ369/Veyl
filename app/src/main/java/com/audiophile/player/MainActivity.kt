@@ -160,11 +160,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkStorageAccessAndScan() {
-        val path = controller.selectedRootPath.value
-        if (path != null) {
-            controller.scanDirectory(path)
-        } else {
-            controller.scanMediaStore()
-        }
+        controller.rescanLibrary()
     }
 }

@@ -176,7 +176,7 @@ fun VeylSettingsScreen(
                         IconButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onSelectRootFolder()
+                                controller.rescanLibrary()
                             },
                             modifier = Modifier.size(36.dp)
                         ) {
@@ -604,7 +604,7 @@ fun VeylSettingsScreen(
                             border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
                             modifier = Modifier.clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onSelectRootFolder()
+                                controller.rescanLibrary()
                             }
                         ) {
                             Row(

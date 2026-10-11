@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -43,6 +44,7 @@ fun VeylSettingsRedesigned(
 ) {
     val colors = LocalVeylColors.current
     val rootPath by controller.selectedRootPath.collectAsState()
+    val isScanning by controller.isScanning.collectAsState()
     val trackCount by controller.libraryTracks.collectAsState()
     val gapless by controller.gaplessEnabled.collectAsState()
     val lyrics by controller.autoFetchLyrics.collectAsState()
@@ -71,10 +73,20 @@ fun VeylSettingsRedesigned(
                     trailing = { Icon(VeylIcons.ChevronRight, null, tint = colors.textMuted) }
                 )
                 SettingsRow(
-                    title = "Library",
-                    subtitle = "${trackCount.size} tracks available",
-                    onClick = onSelectRootFolder,
-                    trailing = { Text("Rescan", style = VeylTypography.BodySmall, color = colors.accentSignal) }
+                    title = "Rescan library",
+                    subtitle = if (isScanning) "Scanning audio storage…" else "${trackCount.size} tracks available",
+                    onClick = { controller.rescanLibrary() },
+                    trailing = {
+                        if (isScanning) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = colors.accentSignal,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Rescan", style = VeylTypography.BodySmall, color = colors.accentSignal)
+                        }
+                    }
                 )
             }
         }
