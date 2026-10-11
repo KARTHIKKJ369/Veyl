@@ -72,6 +72,7 @@ fun VeylTrackOptionsSheet(
     val isFav = favoriteUris.contains(track.uri)
     var showPlaylistDialog by remember { mutableStateOf(false) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
 
     ModalBottomSheet(
@@ -214,6 +215,25 @@ fun VeylTrackOptionsSheet(
                 )
             }
 
+            // Divider before Delete
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp)
+                    .height(1.dp)
+                    .background(colors.borderHairline.copy(alpha = 0.5f))
+            )
+
+            // Option: Delete Song
+            OptionItem(
+                icon = VeylIcons.Trash,
+                title = "Delete Song",
+                tint = Color(0xFFFF5252),
+                onClick = {
+                    showDeleteConfirmDialog = true
+                }
+            )
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
@@ -338,6 +358,46 @@ fun VeylTrackOptionsSheet(
             },
             dismissButton = {
                 TextButton(onClick = { showCreatePlaylistDialog = false }) {
+                    Text("Cancel", color = colors.textMuted)
+                }
+            }
+        )
+    }
+
+    // Delete Confirmation Dialog
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            containerColor = colors.surfacePanel,
+            title = {
+                Text(
+                    text = "Delete Song?",
+                    style = VeylTypography.SectionHeader,
+                    color = colors.textPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "Permanently delete \"${track.title}\" from your device storage, playlists, and recently played?",
+                    style = VeylTypography.Body,
+                    color = colors.textMuted
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        controller.deleteTrack(track)
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
                     Text("Cancel", color = colors.textMuted)
                 }
             }

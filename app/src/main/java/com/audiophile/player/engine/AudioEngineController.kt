@@ -434,6 +434,7 @@ class AudioEngineController private constructor(private val context: Context) {
         LyricsManager.init(context)
         initEngine()
         startPolling()
+        loadPlaybackHistory()
         loadSavedRootDirectory()
         observeUsbDacChanges()
     }
@@ -579,16 +580,163 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
+    private fun loadPlaybackHistory() {
+        val json = playCountPrefs.getString("playback_history_uris", "[]") ?: "[]"
+        try {
+            val arr = org.json.JSONArray(json)
+            val uris = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                val u = arr.getString(i)
+                if (u.isNotBlank()) uris.add(u)
+            }
+            if (uris.isNotEmpty()) {
+                val tracks = uris.mapNotNull { resolveTrackInfo(it) }
+                _playbackHistory.value = tracks
+            }
+        } catch (e: Exception) {
+            Log.w("AudioEngineController", "Error loading playback history", e)
+        }
+    }
+
+    private fun persistPlaybackHistory(history: List<TrackInfo>) {
+        try {
+            val arr = org.json.JSONArray()
+            history.forEach { arr.put(it.uri) }
+            playCountPrefs.edit().putString("playback_history_uris", arr.toString()).apply()
+        } catch (e: Exception) {
+            Log.w("AudioEngineController", "Error persisting playback history", e)
+        }
+    }
+
     private fun recordTrackPlayed(uri: String) {
         val currentCount = playCountPrefs.getInt(uri, 0)
         playCountPrefs.edit().putInt(uri, currentCount + 1).apply()
 
         val all = _libraryTracks.value
-        val track = all.firstOrNull { it.uri == uri }
+        val track = all.firstOrNull { it.uri == uri } ?: resolveTrackInfo(uri) ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
         if (track != null) {
-            val updatedHistory = listOf(track) + _playbackHistory.value.filter { it.uri != uri }
-            _playbackHistory.value = updatedHistory.take(50)
+            val updatedHistory = (listOf(track) + _playbackHistory.value.filter {
+                it.uri != uri && !it.title.equals(track.title, ignoreCase = true)
+            }).take(50)
+            _playbackHistory.value = updatedHistory
+            persistPlaybackHistory(updatedHistory)
             updateDerivedTrackLists(all)
+        }
+    }
+
+    fun deleteTrack(track: TrackInfo, onDeleteComplete: (() -> Unit)? = null) {
+        val uri = track.uri
+        val fileName = File(uri).name
+        val targetFile = onlineStreamManager.getTargetStorageFileForTrack(track)
+
+        // 1. If currently playing this track, stop or advance
+        val currentUri = _status.value?.currentTrack?.uri
+        val isCurrentlyPlaying = currentUri == uri ||
+                (currentUri != null && (File(currentUri).name == fileName || File(currentUri).name == targetFile.name))
+        if (isCurrentlyPlaying) {
+            val q = _queue.value
+            val currentIdx = q.indexOfFirst { it.uri == currentUri }
+            if (q.size > 1 && currentIdx != -1 && currentIdx < q.size - 1) {
+                skipNext()
+            } else if (q.size > 1) {
+                val next = q.firstOrNull { it.uri != currentUri }
+                if (next != null) playTrack(next) else pause()
+            } else {
+                pause()
+                _queue.value = emptyList()
+                _originalQueue.value = emptyList()
+            }
+        }
+
+        // 2. Remove from Queue & Original Queue
+        _queue.value = _queue.value.filter { it.uri != uri && it.uri != targetFile.absolutePath && File(it.uri).name != fileName }
+        _originalQueue.value = _originalQueue.value.filter { it.uri != uri && it.uri != targetFile.absolutePath && File(it.uri).name != fileName }
+
+        // 3. Remove from Recently Played / Playback History
+        val filteredHistory = _playbackHistory.value.filter {
+            it.uri != uri &&
+            it.uri != targetFile.absolutePath &&
+            File(it.uri).name != fileName &&
+            File(it.uri).name != targetFile.name &&
+            !it.title.equals(track.title, ignoreCase = true)
+        }
+        _playbackHistory.value = filteredHistory
+        persistPlaybackHistory(filteredHistory)
+        playHistory.removeAll { it.uri == uri || it.uri == targetFile.absolutePath || File(it.uri).name == fileName }
+
+        // 4. Remove Play Count
+        playCountPrefs.edit().remove(uri).remove(targetFile.absolutePath).remove(fileName).apply()
+
+        // 5. Remove from Favorites, Playlists & onlineTrackMeta
+        playlistManager.removeTrackEverywhere(uri)
+        playlistManager.removeTrackEverywhere(targetFile.absolutePath)
+
+        // 6. Remove from downloaded / downloading URIs
+        _downloadedUris.value = _downloadedUris.value - uri - targetFile.absolutePath - fileName - targetFile.name
+        _downloadingUris.value = _downloadingUris.value - uri - targetFile.absolutePath
+
+        // 7. Remove from Library & Derived Lists
+        val filteredLibrary = _libraryTracks.value.filter {
+            it.uri != uri &&
+            it.uri != targetFile.absolutePath &&
+            File(it.uri).name != fileName &&
+            File(it.uri).name != targetFile.name
+        }
+        _libraryTracks.value = filteredLibrary
+        updateDerivedTrackLists(filteredLibrary)
+
+        // 8. Delete physical files from storage & Android MediaStore on IO dispatcher
+        scope.launch(Dispatchers.IO) {
+            val filesToDelete = mutableListOf<File>()
+            val f1 = File(uri)
+            if (f1.exists()) filesToDelete.add(f1)
+            val f2 = targetFile
+            if (f2.exists() && !filesToDelete.any { it.absolutePath == f2.absolutePath }) filesToDelete.add(f2)
+
+            // Companion cover images
+            for (f in filesToDelete.toList()) {
+                val companionJpg = File(f.parentFile, "${f.nameWithoutExtension}.jpg")
+                if (companionJpg.exists()) filesToDelete.add(companionJpg)
+            }
+
+            // Remove from Android MediaStore ContentResolver
+            try {
+                for (f in filesToDelete) {
+                    context.contentResolver.delete(
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                        "${MediaStore.Audio.Media.DATA} = ?",
+                        arrayOf(f.absolutePath)
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w("AudioEngineController", "MediaStore delete error", e)
+            }
+
+            // Delete files from storage
+            val deletedPaths = mutableListOf<String>()
+            for (f in filesToDelete) {
+                try {
+                    val ok = f.delete()
+                    Log.i("AudioEngineController", "Deleted file: ${f.absolutePath} ($ok)")
+                    deletedPaths.add(f.absolutePath)
+                } catch (e: Exception) {
+                    Log.w("AudioEngineController", "Failed to delete file ${f.absolutePath}", e)
+                }
+            }
+
+            // Scan deleted paths so Android MediaStore updates
+            if (deletedPaths.isNotEmpty()) {
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    deletedPaths.toTypedArray(),
+                    null,
+                    null
+                )
+            }
+
+            withContext(Dispatchers.Main) {
+                onDeleteComplete?.invoke()
+            }
         }
     }
 

@@ -65,6 +65,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.widget.Toast
 import com.audiophile.player.engine.AsyncAlbumArt
 import com.audiophile.player.engine.AudioEngineController
+import com.audiophile.player.ui.components.VeylTrackOptionsSheet
 import com.audiophile.player.online.JioSaavnService
 import com.audiophile.player.online.OnlineSongItem
 import com.audiophile.player.ui.theme.LocalVeylColors
@@ -116,6 +117,7 @@ fun VeylSearchScreen(
     val recentSearches = remember { mutableStateListOf<String>() }
     var showAllSongs by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(SearchTab.ALL) }
+    var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
 
     var onlineResults by remember { mutableStateOf<List<OnlineSongItem>>(emptyList()) }
     var isSearchingOnline by remember { mutableStateOf(false) }
@@ -414,6 +416,10 @@ fun VeylSearchScreen(
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     controller.playTrack(track)
+                                },
+                                onOpenOptions = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedTrackForOptions = track
                                 }
                             )
                         }
@@ -467,6 +473,10 @@ fun VeylSearchScreen(
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     saveRecentSearch(recentSearches, query, prefs)
                                     controller.playTrack(track)
+                                },
+                                onOpenOptions = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedTrackForOptions = track
                                 }
                             )
                         }
@@ -633,6 +643,14 @@ fun VeylSearchScreen(
             }
         }
     }
+
+    if (selectedTrackForOptions != null) {
+        VeylTrackOptionsSheet(
+            track = selectedTrackForOptions,
+            controller = controller,
+            onDismiss = { selectedTrackForOptions = null }
+        )
+    }
 }
 
 private fun saveRecentSearch(
@@ -678,7 +696,11 @@ private fun SearchSectionHeader(label: String, count: Int) {
 }
 
 @Composable
-private fun SearchTrackRow(track: TrackInfo, onClick: () -> Unit) {
+private fun SearchTrackRow(
+    track: TrackInfo,
+    onClick: () -> Unit,
+    onOpenOptions: (() -> Unit)? = null
+) {
     val colors = LocalVeylColors.current
     Row(
         modifier = Modifier
@@ -720,12 +742,26 @@ private fun SearchTrackRow(track: TrackInfo, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(8.dp))
         Text(
-            "${track.formatName} ${track.bitDepth}b",
+            "${track.formatName} ${track.bitDepth ?: 16}b",
             style = VeylTypography.MonoSpec,
             color = colors.accentSignal,
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold
         )
+        if (onOpenOptions != null) {
+            Spacer(Modifier.width(4.dp))
+            IconButton(
+                onClick = onOpenOptions,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = VeylIcons.MoreVert,
+                    contentDescription = "Options",
+                    tint = colors.textMuted,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
     }
 }
 

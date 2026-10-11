@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.audiophile.player.engine.AsyncAlbumArt
 import com.audiophile.player.engine.AudioEngineController
+import com.audiophile.player.ui.components.VeylTrackOptionsSheet
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylSpacing
@@ -99,6 +100,7 @@ fun VeylLibraryScreen(
     var searchQuery by remember { mutableStateOf("") }
     var isSearchExpanded by remember { mutableStateOf(false) }
     var currentFolderDirectory by remember { mutableStateOf<String?>(null) }
+    var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
 
     // Quick search suggestions
     val searchSuggestions = listOf("DSD", "FLAC 192k", "24-bit", "ALAC", "Master", "Acoustic")
@@ -420,6 +422,10 @@ fun VeylLibraryScreen(
                             onToggleFavorite = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 controller.toggleFavorite(track.uri)
+                            },
+                            onOpenOptions = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                selectedTrackForOptions = track
                             }
                         )
                     }
@@ -430,6 +436,15 @@ fun VeylLibraryScreen(
                 Spacer(modifier = Modifier.height(96.dp))
             }
         }
+    }
+
+    // Modal Track Options Sheet (with Delete, Favorites, Playlists)
+    if (selectedTrackForOptions != null) {
+        VeylTrackOptionsSheet(
+            track = selectedTrackForOptions,
+            controller = controller,
+            onDismiss = { selectedTrackForOptions = null }
+        )
     }
 }
 
@@ -618,7 +633,8 @@ private fun VeylTrackRow(
     isPlaying: Boolean,
     isFavorite: Boolean,
     onPlay: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    onOpenOptions: () -> Unit
 ) {
     val colors = LocalVeylColors.current
 
@@ -757,12 +773,25 @@ private fun VeylTrackRow(
         // Favorite Toggle
         IconButton(
             onClick = onToggleFavorite,
-            modifier = Modifier.size(44.dp)
+            modifier = Modifier.size(38.dp)
         ) {
             Icon(
                 imageVector = if (isFavorite) VeylIcons.HeartFilled else VeylIcons.Heart,
                 contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
                 tint = if (isFavorite) colors.accentFavorite else colors.textMuted,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        // More Options Menu (Delete, Playlist, etc.)
+        IconButton(
+            onClick = onOpenOptions,
+            modifier = Modifier.size(38.dp)
+        ) {
+            Icon(
+                imageVector = VeylIcons.MoreVert,
+                contentDescription = "Options",
+                tint = colors.textMuted,
                 modifier = Modifier.size(18.dp)
             )
         }

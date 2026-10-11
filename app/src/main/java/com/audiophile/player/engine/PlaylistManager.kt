@@ -127,6 +127,35 @@ class PlaylistManager(context: Context) {
     }
 
     /**
+     * Completely removes a track from Favorites, Playlists, and online metadata mapping.
+     */
+    fun removeTrackEverywhere(uri: String) {
+        val fileName = java.io.File(uri).name
+
+        // Remove from favorites
+        val currentFavs = _favoriteUris.value.toMutableSet()
+        val toRemove = currentFavs.filter { it == uri || (fileName.isNotBlank() && java.io.File(it).name == fileName) }
+        if (toRemove.isNotEmpty()) {
+            currentFavs.removeAll(toRemove.toSet())
+            _favoriteUris.value = currentFavs
+            prefs.edit().putStringSet("favorites_set", currentFavs).apply()
+        }
+
+        // Remove from playlists
+        val updatedPlaylists = _playlists.value.map { pl ->
+            pl.copy(trackUris = pl.trackUris.filter { it != uri && (fileName.isBlank() || java.io.File(it).name != fileName) })
+        }
+        savePlaylists(updatedPlaylists)
+
+        // Remove from metadata mapping
+        val currentMeta = _onlineTrackMeta.value.toMutableMap()
+        currentMeta.remove(uri)
+        if (fileName.isNotBlank()) currentMeta.remove(fileName)
+        _onlineTrackMeta.value = currentMeta
+        persistOnlineTracks(currentMeta.values.toList())
+    }
+
+    /**
      * Replaces an old temporary URI (e.g. streaming cache) with a new permanent local file URI
      * across Favorites and all custom Playlists.
      */
