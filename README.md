@@ -44,12 +44,13 @@ Download the compiled application directly onto your Android device:
 - **DSP Cockpit**: Live interactive frequency response curve, 10 parametric band controls, preamp fader, ReplayGain & Dither toggles.
 - **Playback Queue**: Gapless boundary indicators and reorderable track list.
 
-### 4. High-Fidelity Online Streaming (Powered by Rust Engine)
-- **Official Music Only**: Direct integration with YouTube Music's `WEB_REMIX` catalog with strict songs-only filtering (`EgWKAQIIAWoKEAkQBRAKEAMQBBAK`), automatically excluding all user vlogs, memes, and amateur clips.
-- **High-Bitrate Opus (~160 kbps @ 48 kHz)**: Streams transparent Opus audio (Format 251), preserving the complete 20 Hz – 20 kHz acoustic spectrum with zero MP3 cutoffs.
-- **No-Download Progressive Streaming**: Immediate playback (<200 ms) via rolling cache buffer with automatic cleanup on completion or track switch. Zero permanent storage footprint.
-- **Full Rust DSP Processing**: Streamed music is decoded natively by Symphonia, enhanced through the 10-band biquad parametric EQ, resampled with 64-point sinc interpolation, and sent directly to hardware via AAudio MMAP.
-- **Integrated Search UI**: Unified search screen with filter pills (`All`, `Local`, `Online YouTube Music`) and dynamic real-time catalog discovery.
+### 4. High-Fidelity Online Studio Engine & Library Downloader
+- **Studio 320 kbps Master Quality**: Delivers crystal-clear 320 kbps AAC/M4A streams directly from high-speed edge CDN endpoints with zero YouTube throttling or socket errors.
+- **Sub-Second Playback Latency (<1s)**: Search results return instant pre-decrypted stream URLs with zero client-side signature scraping overhead. Tap to play starts immediately.
+- **One-Tap Offline Download**: Directly save any online song to device storage (`Music/Veyl/`) with automatic Android `MediaScanner` registration, seamlessly adding tracks to your permanent offline library.
+- **100% Free & No Accounts**: Complete access to millions of official studio tracks with zero account logins, zero API keys, and zero advertisements.
+- **Full Rust DSP Architecture**: Online tracks are decoded by native Rust Symphonia, routed through the 10-band biquad hardware EQ, resampled with 64-point sinc interpolation, and delivered over low-latency AAudio MMAP output.
+- **Unified Search Cockpit**: Seamlessly search across local library files and global online studio catalogs with instant filter pills (`All`, `Local`, `Online Music`).
 
 ---
 

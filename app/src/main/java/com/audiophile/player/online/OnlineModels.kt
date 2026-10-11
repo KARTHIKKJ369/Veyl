@@ -1,14 +1,16 @@
 package com.audiophile.player.online
 
 /**
- * Model representing an official online music track retrieved from YouTube Music.
+ * Model representing an official online music track.
  */
 data class OnlineSongItem(
-    val videoId: String,
-    val title: String,
-    val artist: String,
-    val album: String,
-    val durationSeconds: Double,
-    val durationText: String,
-    val thumbnailUrl: String
+    val id: String = "",
+    val videoId: String = id,
+    val title: String = "",
+    val artist: String = "",
+    val album: String = "",
+    val durationSeconds: Double = 0.0,
+    val durationText: String = "",
+    val thumbnailUrl: String = "",
+    val streamUrl: String = ""
 )

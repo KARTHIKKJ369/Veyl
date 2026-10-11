@@ -1106,8 +1106,13 @@ class AudioEngineController private constructor(private val context: Context) {
         _currentOnlineSong.value = song
 
         scope.launch(Dispatchers.IO) {
-            val streamUrl = onlineStreamManager.resolveAudioStreamUrl(song.videoId)
-            if (streamUrl == null) {
+            val streamUrl = if (song.streamUrl.isNotBlank()) {
+                song.streamUrl
+            } else {
+                onlineStreamManager.resolveAudioStreamUrl(song)
+            }
+
+            if (streamUrl.isNullOrBlank()) {
                 Log.e("AudioEngineController", "Failed to resolve stream URL for ${song.title}")
                 withContext(Dispatchers.Main) {
                     _isOnlineBuffering.value = false
@@ -1117,13 +1122,13 @@ class AudioEngineController private constructor(private val context: Context) {
                 return@launch
             }
 
-            onlineStreamManager.startProgressiveStream(
+            onlineStreamManager.startStream(
                 streamUrl = streamUrl,
-                onPrebufferReady = { cacheFile ->
+                onStreamReady = { cacheFile ->
                     _isOnlineBuffering.value = false
                     val trackInfo = onlineStreamManager.createTrackInfo(song, cacheFile)
                     ArtworkCache.registerOnlineArtwork(cacheFile.absolutePath, song.thumbnailUrl)
-                    ArtworkCache.registerOnlineArtwork("online://${song.videoId}", song.thumbnailUrl)
+                    ArtworkCache.registerOnlineArtwork("online://${song.id}", song.thumbnailUrl)
                     _queue.value = listOf(trackInfo)
                     _originalQueue.value = listOf(trackInfo)
                     playTrack(trackInfo)
@@ -1134,6 +1139,26 @@ class AudioEngineController private constructor(private val context: Context) {
                     _isOnlineStreaming.value = false
                     _currentOnlineSong.value = null
                 }
+            )
+        }
+    }
+
+    fun downloadOnlineSong(
+        song: OnlineSongItem,
+        onProgress: (Float) -> Unit = {},
+        onCompleted: (File) -> Unit = {},
+        onError: (Throwable) -> Unit = {}
+    ) {
+        scope.launch(Dispatchers.IO) {
+            onlineStreamManager.downloadSongToStorage(
+                song = song,
+                onProgress = onProgress,
+                onCompleted = { file ->
+                    val root = _selectedRootPath.value
+                    if (root != null) scanDirectory(root) else scanMediaStore()
+                    onCompleted(file)
+                },
+                onError = onError
             )
         }
     }

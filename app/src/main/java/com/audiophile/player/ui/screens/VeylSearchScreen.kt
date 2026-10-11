@@ -62,10 +62,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.widget.Toast
 import com.audiophile.player.engine.AsyncAlbumArt
 import com.audiophile.player.engine.AudioEngineController
+import com.audiophile.player.online.JioSaavnService
 import com.audiophile.player.online.OnlineSongItem
-import com.audiophile.player.online.YouTubeMusicService
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylTypography
@@ -78,7 +79,7 @@ private const val MAX_RECENT_SEARCHES = 8
 enum class SearchTab(val label: String) {
     ALL("All"),
     LOCAL("Local"),
-    ONLINE("YouTube Music")
+    ONLINE("Online Music")
 }
 
 /**
@@ -131,14 +132,14 @@ fun VeylSearchScreen(
     }
     BackHandler(onBack = onBack)
 
-    // Debounced Online Search for official YouTube Music tracks
+    // Debounced Online Search for official studio tracks
     LaunchedEffect(query) {
         val q = query.trim()
         if (q.length >= 2) {
-            delay(300)
+            delay(250)
             isSearchingOnline = true
             try {
-                val results = YouTubeMusicService.searchSongs(q)
+                val results = JioSaavnService.searchSongs(q)
                 onlineResults = results
             } catch (e: Exception) {
                 onlineResults = emptyList()
@@ -539,7 +540,7 @@ fun VeylSearchScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Text(
-                                            "ONLINE STREAMS (YOUTUBE MUSIC)",
+                                            "ONLINE MUSIC (STUDIO 320k)",
                                             style = VeylTypography.MonoBadge,
                                             color = colors.textSecondary
                                         )
@@ -548,7 +549,7 @@ fun VeylSearchScreen(
                                             color = colors.accentSignal.copy(alpha = 0.15f)
                                         ) {
                                             Text(
-                                                "160k OPUS",
+                                                "320k AAC",
                                                 style = VeylTypography.MonoSpec,
                                                 color = colors.accentSignal,
                                                 fontSize = 9.sp,
@@ -570,8 +571,8 @@ fun VeylSearchScreen(
                         }
 
                         if (onlineResults.isNotEmpty()) {
-                            items(onlineResults, key = { "yt_${it.videoId}" }) { item ->
-                                val isCurrent = currentOnlineSong?.videoId == item.videoId
+                            items(onlineResults, key = { "saavn_${it.id}" }) { item ->
+                                val isCurrent = currentOnlineSong?.id == item.id
                                 val isBufferingThis = isCurrent && isOnlineBuffering
                                 val isPlayingThis = isCurrent && playbackState == PlaybackStateEnum.PLAYING
 
@@ -583,6 +584,19 @@ fun VeylSearchScreen(
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         saveRecentSearch(recentSearches, query, prefs)
                                         controller.playOnlineSong(item)
+                                    },
+                                    onDownloadClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        Toast.makeText(context, "Downloading \"${item.title}\" to storage\u2026", Toast.LENGTH_SHORT).show()
+                                        controller.downloadOnlineSong(
+                                            song = item,
+                                            onCompleted = {
+                                                Toast.makeText(context, "Saved to Music/Veyl: ${item.title}", Toast.LENGTH_LONG).show()
+                                            },
+                                            onError = { err ->
+                                                Toast.makeText(context, "Download failed: ${err.message}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
                                     }
                                 )
                             }
@@ -604,7 +618,7 @@ fun VeylSearchScreen(
                                             color = colors.accentSignal
                                         )
                                         Text(
-                                            "Finding official music tracks on YouTube Music…",
+                                            "Finding official studio tracks\u2026",
                                             style = VeylTypography.BodySmall,
                                             color = colors.textMuted
                                         )
@@ -720,7 +734,8 @@ private fun SearchOnlineSongRow(
     item: OnlineSongItem,
     isBuffering: Boolean,
     isPlaying: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDownloadClick: () -> Unit
 ) {
     val colors = LocalVeylColors.current
     Row(
@@ -766,7 +781,7 @@ private fun SearchOnlineSongRow(
                     color = colors.accentSignal.copy(alpha = 0.15f)
                 ) {
                     Text(
-                        "STREAM",
+                        "320k STUDIO",
                         style = VeylTypography.MonoSpec,
                         color = colors.accentSignal,
                         fontSize = 8.sp,
@@ -782,7 +797,22 @@ private fun SearchOnlineSongRow(
                 )
             }
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(4.dp))
+
+        // Quick download button to save track directly to device storage
+        IconButton(
+            onClick = onDownloadClick,
+            modifier = Modifier.size(34.dp)
+        ) {
+            Icon(
+                VeylIcons.Download,
+                contentDescription = "Download to device storage",
+                tint = colors.textMuted,
+                modifier = Modifier.size(17.dp)
+            )
+        }
+
+        Spacer(Modifier.width(4.dp))
 
         if (isBuffering) {
             CircularProgressIndicator(

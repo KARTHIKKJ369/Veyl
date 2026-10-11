@@ -1190,6 +1190,28 @@ object VeylIcons {
         }.build()
     }
 
+    val Download: ImageVector by lazy {
+        ImageVector.Builder("VeylDownload", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(19f, 9f)
+                horizontalLineToRelative(-4f)
+                verticalLineTo(3f)
+                horizontalLineTo(9f)
+                verticalLineToRelative(6f)
+                horizontalLineTo(5f)
+                lineToRelative(7f, 7f)
+                lineToRelative(7f, -7f)
+                close()
+                moveTo(5f, 18f)
+                verticalLineToRelative(2f)
+                horizontalLineToRelative(14f)
+                verticalLineToRelative(-2f)
+                horizontalLineTo(5f)
+                close()
+            }
+        }.build()
+    }
+
     val Equalizer: ImageVector get() = ParametricEq
     val FavoriteFilled: ImageVector get() = HeartFilled
     val FavoriteBorder: ImageVector get() = Heart
@@ -1199,4 +1221,5 @@ object VeylIcons {
     val Playlist: ImageVector get() = QueueList
     val Disc: ImageVector get() = StorageLocal
 }
+
 
