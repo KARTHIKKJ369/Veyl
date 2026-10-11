@@ -112,12 +112,11 @@ class OnlineStreamManager(private val context: Context) {
 
         activeStreamJob = scope.launch {
             var tempFile: File? = null
-            var prebufferNotified = false
 
             try {
                 cleanOldStreamCaches()
 
-                val ext = if (streamUrl.contains("mime=audio%2Fwebm") || streamUrl.contains("webm")) "opus" else "m4a"
+                val ext = if (streamUrl.contains("webm") || streamUrl.contains("audio%2Fwebm")) "webm" else "m4a"
                 tempFile = File(context.cacheDir, "veyl_online_stream_${System.currentTimeMillis()}.$ext")
                 currentStreamFile = tempFile
 
@@ -138,44 +137,32 @@ class OnlineStreamManager(private val context: Context) {
                 val inputStream = body.byteStream()
                 val outputStream = FileOutputStream(tempFile)
 
-                val buffer = ByteArray(32768)
+                val buffer = ByteArray(65536)
                 var bytesRead = inputStream.read(buffer)
                 var totalBytesWritten = 0L
 
                 try {
                     while (isActive && bytesRead != -1) {
                         outputStream.write(buffer, 0, bytesRead)
-                        outputStream.flush()
                         totalBytesWritten += bytesRead
-
-                        if (!prebufferNotified && totalBytesWritten >= PREBUFFER_THRESHOLD_BYTES) {
-                            prebufferNotified = true
-                            Log.d(TAG, "Pre-buffer ready (${totalBytesWritten / 1024} KB). Triggering playback.")
-                            withContext(Dispatchers.Main) {
-                                onPrebufferReady(tempFile)
-                            }
-                        }
-
                         bytesRead = inputStream.read(buffer)
                     }
-
-                    // If stream completed and was smaller than threshold, notify now
-                    if (!prebufferNotified && totalBytesWritten > 0) {
-                        prebufferNotified = true
-                        withContext(Dispatchers.Main) {
-                            onPrebufferReady(tempFile)
-                        }
-                    }
-
-                    Log.d(TAG, "Finished streaming full track (${totalBytesWritten / 1024} KB)")
+                    outputStream.flush()
                 } finally {
-                    try { outputStream.close() } catch (e: Exception) {}
-                    try { inputStream.close() } catch (e: Exception) {}
+                    try { outputStream.close() } catch (_: Exception) {}
+                    try { inputStream.close() } catch (_: Exception) {}
+                }
+
+                if (isActive && totalBytesWritten > 0) {
+                    Log.d(TAG, "Stream buffered completely (${totalBytesWritten / 1024} KB). Triggering playback.")
+                    withContext(Dispatchers.Main) {
+                        onPrebufferReady(tempFile)
+                    }
                 }
             } catch (e: CancellationException) {
                 Log.d(TAG, "Streaming cancelled by user")
             } catch (e: Exception) {
-                Log.e(TAG, "Error during progressive streaming", e)
+                Log.e(TAG, "Error during streaming", e)
                 withContext(Dispatchers.Main) {
                     onError(e)
                 }

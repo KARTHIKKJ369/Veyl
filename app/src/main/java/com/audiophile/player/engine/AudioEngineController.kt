@@ -1093,6 +1093,13 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun playOnlineSong(song: OnlineSongItem) {
+        // Immediately pause existing audio so previous track does not conflict or auto-advance
+        nativeScope.launch {
+            withNativeEngine { it.pause() }
+        }
+        isTransitioning = false
+        lastTransitionTimestamp = System.currentTimeMillis()
+
         ensurePlaybackServiceStarted()
         _isOnlineStreaming.value = true
         _isOnlineBuffering.value = true
@@ -1102,8 +1109,11 @@ class AudioEngineController private constructor(private val context: Context) {
             val streamUrl = onlineStreamManager.resolveAudioStreamUrl(song.videoId)
             if (streamUrl == null) {
                 Log.e("AudioEngineController", "Failed to resolve stream URL for ${song.title}")
-                _isOnlineBuffering.value = false
-                _isOnlineStreaming.value = false
+                withContext(Dispatchers.Main) {
+                    _isOnlineBuffering.value = false
+                    _isOnlineStreaming.value = false
+                    _currentOnlineSong.value = null
+                }
                 return@launch
             }
 
@@ -1114,12 +1124,15 @@ class AudioEngineController private constructor(private val context: Context) {
                     val trackInfo = onlineStreamManager.createTrackInfo(song, cacheFile)
                     ArtworkCache.registerOnlineArtwork(cacheFile.absolutePath, song.thumbnailUrl)
                     ArtworkCache.registerOnlineArtwork("online://${song.videoId}", song.thumbnailUrl)
+                    _queue.value = listOf(trackInfo)
+                    _originalQueue.value = listOf(trackInfo)
                     playTrack(trackInfo)
                 },
                 onError = { error ->
                     Log.e("AudioEngineController", "Error streaming ${song.title}", error)
                     _isOnlineBuffering.value = false
                     _isOnlineStreaming.value = false
+                    _currentOnlineSong.value = null
                 }
             )
         }
@@ -1127,7 +1140,8 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun playTrack(track: TrackInfo) {
         ensurePlaybackServiceStarted()
-        if (track.genre != "Online Stream") {
+        val isOnline = track.uri.contains("veyl_online_stream_") || track.genre == "Online Stream"
+        if (!isOnline && _isOnlineStreaming.value) {
             onlineStreamManager.stopCurrentStream()
             _isOnlineStreaming.value = false
             _isOnlineBuffering.value = false
@@ -1181,7 +1195,10 @@ class AudioEngineController private constructor(private val context: Context) {
 
             // Ensure queue always contains all tracks if queue was empty or single
             val currentQ = _queue.value
-            if (currentQ.isEmpty() || currentQ.size <= 1) {
+            if (isOnline) {
+                _queue.value = listOf(track)
+                _originalQueue.value = listOf(track)
+            } else if (currentQ.isEmpty() || currentQ.size <= 1) {
                 val lib = _libraryTracks.value
                 if (lib.isNotEmpty()) {
                     _queue.value = lib

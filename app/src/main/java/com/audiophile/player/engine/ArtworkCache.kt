@@ -94,6 +94,10 @@ object ArtworkCache {
             } catch (e: Throwable) {
                 Log.w("ArtworkCache", "Failed to load remote artwork from $actualUri", e)
             }
+            if (bitmap != null) {
+                memoryCache.put(cacheKey, bitmap)
+                return@withContext bitmap
+            }
         }
 
         // 1. Try Rust native LibraryEngine (handles DSF, DFF, FLAC, Lofty tags)

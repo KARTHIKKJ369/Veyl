@@ -541,6 +541,33 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        try {
+            val curTrack = if (::engineController.isInitialized) engineController.currentTrack.value else null
+            val isPlaying = if (::engineController.isInitialized) engineController.playbackState.value == PlaybackStateEnum.PLAYING else false
+            val curPos = if (::engineController.isInitialized) engineController.currentPositionSec.value else 0.0
+
+            val notification = buildNotification(
+                track = curTrack,
+                isPlaying = isPlaying,
+                positionSec = curPos,
+                durationSec = curTrack?.durationSeconds ?: 1.0,
+                artwork = cachedArtwork
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("PlaybackService", "Error calling startForeground in onStartCommand", e)
+        }
+
         if (::mediaSession.isInitialized) {
             MediaButtonReceiver.handleIntent(mediaSession, intent)
         } else {
