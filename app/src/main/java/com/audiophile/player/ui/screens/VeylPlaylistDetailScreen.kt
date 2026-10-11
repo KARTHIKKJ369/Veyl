@@ -75,7 +75,7 @@ fun VeylPlaylistDetailScreen(
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
 
     val playlistTracks = when (title) {
-        "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }
+        "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.distinctBy { it.uri }
         "Top Tracks" -> if (topTracks.isNotEmpty()) topTracks else allTracks
         "Last added" -> if (lastAddedTracks.isNotEmpty()) lastAddedTracks else allTracks
         "History" -> historyTracks

@@ -115,7 +115,7 @@ fun VeylNowPlayingScreen(
     val downloadedUris by controller.downloadedUris.collectAsState()
     val isDownloading = track?.let { controller.isTrackDownloading(it) } ?: false
     val isDownloaded = track?.let { controller.isTrackDownloaded(it) } ?: false
-    val isFav = track?.let { favoriteUris.contains(it.uri) } ?: false
+    val isFav = track?.let { controller.isTrackFavorite(it) } ?: false
     val isDsd = track?.formatName?.contains("DSD", ignoreCase = true) == true
     val isHiRes = (track?.sampleRate ?: 0u) >= 96000u || (track?.bitDepth ?: 0u) >= 24u
     var isLyricsMode by remember { mutableStateOf(false) }

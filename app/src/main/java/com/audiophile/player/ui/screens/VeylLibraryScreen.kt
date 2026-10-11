@@ -118,7 +118,7 @@ fun VeylLibraryScreen(
                 it.sampleRate >= 88200u ||
                 (it.bitDepth ?: 16u) > 16u
             }
-            LibrarySourceTab.FAVORITES -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }
+            LibrarySourceTab.FAVORITES -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.distinctBy { it.uri }
         }
 
         // Apply secondary tag filter
@@ -436,7 +436,7 @@ fun VeylLibraryScreen(
                         key = { _, track -> track.uri }
                     ) { index, track ->
                         val isCurrent = currentTrack?.uri == track.uri
-                        val isFavorite = favoriteUris.contains(track.uri)
+                        val isFavorite = controller.isTrackFavorite(track)
 
                         VeylTrackRow(
                             track = track,
@@ -450,7 +450,7 @@ fun VeylLibraryScreen(
                             },
                             onToggleFavorite = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                controller.toggleFavorite(track.uri)
+                                controller.toggleFavorite(track.uri, track)
                             },
                             onOpenOptions = {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)

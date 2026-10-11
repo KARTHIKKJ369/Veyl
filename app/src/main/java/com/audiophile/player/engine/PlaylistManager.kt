@@ -95,6 +95,22 @@ class PlaylistManager(context: Context) {
         prefs.edit().putStringSet("favorites_set", current).apply()
     }
 
+    fun addFavorites(uris: Set<String>) {
+        if (uris.isEmpty()) return
+        val current = _favoriteUris.value.toMutableSet()
+        current.addAll(uris)
+        _favoriteUris.value = current
+        prefs.edit().putStringSet("favorites_set", current).apply()
+    }
+
+    fun removeFavorites(uris: Set<String>) {
+        if (uris.isEmpty()) return
+        val current = _favoriteUris.value.toMutableSet()
+        current.removeAll(uris)
+        _favoriteUris.value = current
+        prefs.edit().putStringSet("favorites_set", current).apply()
+    }
+
     fun createPlaylist(name: String): UserPlaylist {
         val id = UUID.randomUUID().toString()
         val pl = UserPlaylist(id, name, emptyList())
@@ -162,10 +178,11 @@ class PlaylistManager(context: Context) {
     fun updateTrackUri(oldUri: String, newUri: String) {
         if (oldUri == newUri) return
 
-        // Update favorites
+        // Update favorites: ensure newUri is present and keep oldUri so ongoing playback stays favorited
         val currentFavs = _favoriteUris.value.toMutableSet()
-        if (currentFavs.remove(oldUri)) {
+        if (currentFavs.contains(oldUri) || currentFavs.contains(newUri)) {
             currentFavs.add(newUri)
+            currentFavs.add(oldUri)
             _favoriteUris.value = currentFavs
             prefs.edit().putStringSet("favorites_set", currentFavs).apply()
         }

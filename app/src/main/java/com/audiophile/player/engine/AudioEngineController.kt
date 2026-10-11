@@ -914,15 +914,63 @@ class AudioEngineController private constructor(private val context: Context) {
         prevTrack?.let { playTrack(it) }
     }
 
+    fun isTrackFavorite(track: TrackInfo?): Boolean {
+        if (track == null) return false
+        val favs = favoriteUris.value
+        if (favs.contains(track.uri)) return true
+
+        val targetFile = onlineStreamManager.getTargetStorageFileForTrack(track)
+        if (favs.contains(targetFile.absolutePath)) return true
+
+        val meta = playlistManager.getTrackMeta(track.uri)
+        if (meta != null) {
+            if (favs.contains(meta.uri)) return true
+            val metaTarget = onlineStreamManager.getTargetStorageFileForTrack(meta)
+            if (favs.contains(metaTarget.absolutePath)) return true
+        }
+
+        val fName = File(track.uri).name
+        val match = playlistManager.onlineTrackMeta.value[fName]
+        if (match != null) {
+            if (favs.contains(match.uri)) return true
+            val matchTarget = onlineStreamManager.getTargetStorageFileForTrack(match)
+            if (favs.contains(matchTarget.absolutePath)) return true
+        }
+
+        return false
+    }
+
     fun toggleFavorite(uri: String, trackInfo: TrackInfo? = null) {
-        val wasFav = playlistManager.isFavorite(uri)
-        playlistManager.toggleFavorite(uri)
         val resolved = trackInfo ?: resolveTrackInfo(uri) ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
-        if (!wasFav && resolved != null) {
-            val isOnline = resolved.uri.contains("veyl_online_stream_") || resolved.genre == "Online Stream"
-            if (isOnline) {
-                playlistManager.registerOnlineTrack(resolved, _currentOnlineSong.value)
-                downloadTrack(resolved)
+        val targetPath = resolved?.let { onlineStreamManager.getTargetStorageFileForTrack(it).absolutePath }
+        val meta = resolved?.let { playlistManager.getTrackMeta(it.uri) }
+        val metaUri = meta?.uri
+
+        val isCurrentlyFav = isTrackFavorite(resolved) || playlistManager.isFavorite(uri) ||
+                (targetPath != null && playlistManager.isFavorite(targetPath)) ||
+                (metaUri != null && playlistManager.isFavorite(metaUri))
+
+        if (isCurrentlyFav) {
+            // Remove from favorites: remove all associated URIs
+            val toRemove = mutableSetOf(uri)
+            if (targetPath != null) toRemove.add(targetPath)
+            if (metaUri != null) toRemove.add(metaUri)
+            if (resolved != null) toRemove.add(resolved.uri)
+            playlistManager.removeFavorites(toRemove)
+        } else {
+            // Add to favorites: immediately add all associated URIs so UI turns red instantly
+            val toAdd = mutableSetOf(uri)
+            if (targetPath != null) toAdd.add(targetPath)
+            if (metaUri != null) toAdd.add(metaUri)
+            if (resolved != null) toAdd.add(resolved.uri)
+            playlistManager.addFavorites(toAdd)
+
+            if (resolved != null) {
+                val isOnline = resolved.uri.contains("veyl_online_stream_") || resolved.genre == "Online Stream"
+                if (isOnline) {
+                    playlistManager.registerOnlineTrack(resolved, _currentOnlineSong.value)
+                    downloadTrack(resolved)
+                }
             }
         }
     }

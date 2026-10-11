@@ -120,7 +120,7 @@ fun VeylSongsScreen(
 
     // Filter and sort tracks by category, search query, and sort options
     val filteredTracks = remember(tracks, searchQuery, selectedTab, favoriteUris, sortOption, sortAscending) {
-        val sourceTracks = if (selectedTab == "Favorites") favoriteUris.mapNotNull { controller.resolveTrackInfo(it) } else tracks
+        val sourceTracks = if (selectedTab == "Favorites") favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.distinctBy { it.uri } else tracks
         val base = sourceTracks.filter { track ->
             val artistName = track.artist ?: ""
             val albumName = track.album ?: ""
@@ -939,7 +939,7 @@ fun VeylSongsScreen(
                                 // Detailed Modern Audio List (Stitch Resonate List Row)
                                 itemsIndexed(filteredTracks, key = { _, track -> track.uri }) { index, track ->
                                     val isPlayingThis = currentUri == track.uri
-                                    val isFav = favoriteUris.contains(track.uri)
+                                    val isFav = controller.isTrackFavorite(track)
 
                                     Row(
                                         modifier = Modifier
