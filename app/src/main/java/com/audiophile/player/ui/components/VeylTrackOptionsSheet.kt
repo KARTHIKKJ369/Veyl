@@ -146,7 +146,7 @@ fun VeylTrackOptionsSheet(
                 title = if (isFav) "Remove from Favorites" else "Add to Favorites",
                 tint = if (isFav) Color(0xFFFF6584) else colors.textPrimary,
                 onClick = {
-                    controller.toggleFavorite(track.uri)
+                    controller.toggleFavorite(track.uri, track)
                 }
             )
 
@@ -156,6 +156,25 @@ fun VeylTrackOptionsSheet(
                 title = "Add to Playlist",
                 onClick = {
                     showPlaylistDialog = true
+                }
+            )
+
+            // Option 3: Download Studio Master
+            val isDownloading = controller.isTrackDownloading(track)
+            val isDownloaded = controller.isTrackDownloaded(track)
+            OptionItem(
+                icon = if (isDownloaded) VeylIcons.Check else VeylIcons.Download,
+                title = when {
+                    isDownloaded -> "Saved to Music/Veyl"
+                    isDownloading -> "Downloading Studio Master\u2026"
+                    else -> "Download Studio Master"
+                },
+                tint = if (isDownloaded) colors.accentSignal else colors.textPrimary,
+                onClick = {
+                    if (!isDownloaded && !isDownloading) {
+                        controller.downloadTrack(track)
+                    }
+                    onDismiss()
                 }
             )
 
@@ -172,25 +191,25 @@ fun VeylTrackOptionsSheet(
             }
 
             // Option 4: View Album
-            if (track.album != null && onViewAlbum != null) {
+            if (track.album.isNotBlank() && onViewAlbum != null) {
                 OptionItem(
                     icon = VeylIcons.Disc,
                     title = "Album: ${track.album}",
                     onClick = {
                         onDismiss()
-                        onViewAlbum(track.album!!)
+                        onViewAlbum(track.album)
                     }
                 )
             }
 
             // Option 5: View Artist
-            if (track.artist != null && onViewArtist != null) {
+            if (track.artist.isNotBlank() && onViewArtist != null) {
                 OptionItem(
                     icon = VeylIcons.StorageLocal,
                     title = "Artist: ${track.artist}",
                     onClick = {
                         onDismiss()
-                        onViewArtist(track.artist!!)
+                        onViewArtist(track.artist)
                     }
                 )
             }
@@ -240,7 +259,7 @@ fun VeylTrackOptionsSheet(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
                                         .clickable {
-                                            controller.playlistManager.addTrackToPlaylist(pl.id, track.uri)
+                                            controller.addTrackToPlaylist(pl.id, track.uri, track)
                                             showPlaylistDialog = false
                                             onDismiss()
                                         }

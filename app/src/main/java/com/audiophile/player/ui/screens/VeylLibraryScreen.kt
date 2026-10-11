@@ -115,7 +115,7 @@ fun VeylLibraryScreen(
                 it.sampleRate >= 88200u ||
                 (it.bitDepth ?: 16u) > 16u
             }
-            LibrarySourceTab.FAVORITES -> tracks.filter { favoriteUris.contains(it.uri) }
+            LibrarySourceTab.FAVORITES -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }
         }
 
         // Apply secondary tag filter

@@ -75,15 +75,14 @@ fun VeylPlaylistDetailScreen(
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
 
     val playlistTracks = when (title) {
-        "Favorites" -> allTracks.filter { favoriteUris.contains(it.uri) }
+        "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }
         "Top Tracks" -> if (topTracks.isNotEmpty()) topTracks else allTracks
         "Last added" -> if (lastAddedTracks.isNotEmpty()) lastAddedTracks else allTracks
         "History" -> historyTracks
         else -> {
             val custom = playlists.find { it.name.equals(title, ignoreCase = true) }
             if (custom != null) {
-                val uriSet = custom.trackUris.toSet()
-                allTracks.filter { uriSet.contains(it.uri) }
+                custom.trackUris.mapNotNull { controller.resolveTrackInfo(it) }
             } else {
                 allTracks
             }

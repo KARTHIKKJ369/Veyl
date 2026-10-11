@@ -43,12 +43,15 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.widget.Toast
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -93,6 +96,7 @@ fun VeylNowPlayingScreen(
 ) {
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
 
     BackHandler {
         onNavigateBack()
@@ -107,6 +111,10 @@ fun VeylNowPlayingScreen(
     val currentLyrics by controller.currentLyrics.collectAsState()
     val connectedDac by controller.connectedDac.collectAsState()
     val favoriteUris by controller.favoriteUris.collectAsState()
+    val downloadingUris by controller.downloadingUris.collectAsState()
+    val downloadedUris by controller.downloadedUris.collectAsState()
+    val isDownloading = track?.let { controller.isTrackDownloading(it) } ?: false
+    val isDownloaded = track?.let { controller.isTrackDownloaded(it) } ?: false
     val isFav = track?.let { favoriteUris.contains(it.uri) } ?: false
     val isDsd = track?.formatName?.contains("DSD", ignoreCase = true) == true
     val isHiRes = (track?.sampleRate ?: 0u) >= 96000u || (track?.bitDepth ?: 0u) >= 24u
@@ -270,12 +278,49 @@ fun VeylNowPlayingScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    // Download Studio Track Button
+                    IconButton(
+                        onClick = {
+                            track?.let { t ->
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                if (isDownloaded) {
+                                    Toast.makeText(context, "Already saved to Music/Veyl", Toast.LENGTH_SHORT).show()
+                                } else if (!isDownloading) {
+                                    Toast.makeText(context, "Downloading \"${t.title}\" to storage\u2026", Toast.LENGTH_SHORT).show()
+                                    controller.downloadCurrentTrack(
+                                        onCompleted = { file ->
+                                            Toast.makeText(context, "Saved to Music/Veyl: ${t.title}", Toast.LENGTH_LONG).show()
+                                        },
+                                        onError = { err ->
+                                            Toast.makeText(context, "Download failed: ${err.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    ) {
+                        if (isDownloading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = colors.accentSignal
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (isDownloaded) VeylIcons.Check else VeylIcons.Download,
+                                contentDescription = if (isDownloaded) "Downloaded" else "Download Track",
+                                tint = if (isDownloaded) colors.accentSignal else colors.textMuted,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
                     // Favorite Heart Button
                     IconButton(
                         onClick = {
                             track?.let {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                controller.toggleFavorite(it.uri)
+                                controller.toggleFavorite(it.uri, it)
                             }
                         }
                     ) {

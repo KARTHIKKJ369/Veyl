@@ -57,6 +57,10 @@ object ArtworkCache {
         }
     }
 
+    fun getOnlineArtwork(trackUri: String): String? {
+        return onlineArtMapping[trackUri]
+    }
+
     fun getArtwork(uri: String, targetSizePx: Int = 128): Bitmap? {
         val actualUri = onlineArtMapping[uri] ?: uri
         val cacheKey = if (targetSizePx > 256) "${actualUri}_lg" else "${actualUri}_sm"

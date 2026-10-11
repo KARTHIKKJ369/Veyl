@@ -41,9 +41,20 @@ class OnlineStreamManager(private val context: Context) {
 
     /**
      * Resolves the direct audio stream URL. If already present, returns immediately (<1ms).
+     * If missing, queries JioSaavnService for the stream URL.
      */
     suspend fun resolveAudioStreamUrl(song: OnlineSongItem): String? {
         if (song.streamUrl.isNotBlank()) return song.streamUrl
+        try {
+            val query = "${song.title} ${song.artist}".trim()
+            val results = JioSaavnService.searchSongs(query)
+            if (results.isNotEmpty()) {
+                val match = results.first()
+                return match.streamUrl
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to resolve stream URL for ${song.title}", e)
+        }
         return null
     }
 
@@ -136,6 +147,33 @@ class OnlineStreamManager(private val context: Context) {
         startStream(streamUrl, onPrebufferReady, onError)
     }
 
+    fun getTargetStorageFile(song: OnlineSongItem): File {
+        val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+        val veylDir = File(musicDir, "Veyl").apply { mkdirs() }
+        val sanitized = "${song.title} - ${song.artist}".replace(Regex("[^a-zA-Z0-9.\\- ]"), "_").trim()
+        return File(veylDir, "$sanitized.m4a")
+    }
+
+    fun getTargetStorageFileForTrack(track: TrackInfo): File {
+        val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+        val veylDir = File(musicDir, "Veyl").apply { mkdirs() }
+        val sanitized = "${track.title} - ${track.artist ?: ""}".replace(Regex("[^a-zA-Z0-9.\\- ]"), "_").trim()
+        return File(veylDir, "$sanitized.m4a")
+    }
+
+    fun isSongDownloaded(song: OnlineSongItem): Boolean {
+        val f = getTargetStorageFile(song)
+        return f.exists() && f.length() > 50_000L
+    }
+
+    fun isTrackDownloaded(track: TrackInfo): Boolean {
+        if (!track.uri.contains("veyl_online_stream_") && File(track.uri).exists()) {
+            return true
+        }
+        val f = getTargetStorageFileForTrack(track)
+        return f.exists() && f.length() > 50_000L
+    }
+
     /**
      * Downloads an online song permanently to the user's Music/Veyl directory
      * and triggers Android's MediaScanner so it immediately appears in the local library.
@@ -147,13 +185,37 @@ class OnlineStreamManager(private val context: Context) {
         onError: (Throwable) -> Unit
     ) = withContext(Dispatchers.IO) {
         try {
-            val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-            val veylDir = File(musicDir, "Veyl").apply { mkdirs() }
-            val sanitized = "${song.title} - ${song.artist}".replace(Regex("[^a-zA-Z0-9.\\- ]"), "_").trim()
-            val targetFile = File(veylDir, "$sanitized.m4a")
+            val targetFile = getTargetStorageFile(song)
+            if (targetFile.exists() && targetFile.length() > 50_000L) {
+                withContext(Dispatchers.Main) {
+                    onCompleted(targetFile)
+                }
+                return@withContext
+            }
+
+            // If active streaming cache file is already buffered for this song, copy directly!
+            val activeCache = currentStreamFile
+            if (activeCache != null && activeCache.exists() && activeCache.length() > 50_000L) {
+                activeCache.copyTo(targetFile, overwrite = true)
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(targetFile.absolutePath),
+                    arrayOf("audio/mp4")
+                ) { _, _ -> }
+                withContext(Dispatchers.Main) {
+                    onProgress(1f)
+                    onCompleted(targetFile)
+                }
+                return@withContext
+            }
+
+            val streamUrl = if (song.streamUrl.isNotBlank()) song.streamUrl else resolveAudioStreamUrl(song)
+            if (streamUrl.isNullOrBlank()) {
+                throw IOException("Unable to resolve audio stream URL for ${song.title}")
+            }
 
             val request = okhttp3.Request.Builder()
-                .url(song.streamUrl)
+                .url(streamUrl)
                 .build()
 
             val call = okHttpClient.newCall(request)
@@ -245,9 +307,9 @@ class OnlineStreamManager(private val context: Context) {
             discNumber = null,
             durationSeconds = song.durationSeconds,
             sampleRate = 44100u,
-            bitDepth = 16u,
+            bitDepth = 16u.toUByte(),
             bitrate = 320000u,
-            channels = 2u,
+            channels = 2u.toUByte(),
             formatName = "AAC 320k (Studio Master)",
             hasArtwork = song.thumbnailUrl.isNotBlank()
         )

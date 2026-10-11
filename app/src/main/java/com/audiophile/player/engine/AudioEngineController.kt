@@ -182,6 +182,12 @@ class AudioEngineController private constructor(private val context: Context) {
     private val _currentOnlineSong = MutableStateFlow<OnlineSongItem?>(null)
     val currentOnlineSong: StateFlow<OnlineSongItem?> = _currentOnlineSong.asStateFlow()
 
+    private val _downloadingUris = MutableStateFlow<Set<String>>(emptySet())
+    val downloadingUris: StateFlow<Set<String>> = _downloadingUris.asStateFlow()
+
+    private val _downloadedUris = MutableStateFlow<Set<String>>(emptySet())
+    val downloadedUris: StateFlow<Set<String>> = _downloadedUris.asStateFlow()
+
     private val _autoFetchLyrics = MutableStateFlow(prefs.getBoolean("auto_fetch_lyrics", true))
     val autoFetchLyrics: StateFlow<Boolean> = _autoFetchLyrics.asStateFlow()
 
@@ -760,8 +766,29 @@ class AudioEngineController private constructor(private val context: Context) {
         prevTrack?.let { playTrack(it) }
     }
 
-    fun toggleFavorite(uri: String) {
+    fun toggleFavorite(uri: String, trackInfo: TrackInfo? = null) {
+        val wasFav = playlistManager.isFavorite(uri)
         playlistManager.toggleFavorite(uri)
+        val resolved = trackInfo ?: resolveTrackInfo(uri) ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
+        if (!wasFav && resolved != null) {
+            val isOnline = resolved.uri.contains("veyl_online_stream_") || resolved.genre == "Online Stream"
+            if (isOnline) {
+                playlistManager.registerOnlineTrack(resolved, _currentOnlineSong.value)
+                downloadTrack(resolved)
+            }
+        }
+    }
+
+    fun addTrackToPlaylist(playlistId: String, uri: String, trackInfo: TrackInfo? = null) {
+        playlistManager.addTrackToPlaylist(playlistId, uri)
+        val resolved = trackInfo ?: resolveTrackInfo(uri) ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
+        if (resolved != null) {
+            val isOnline = resolved.uri.contains("veyl_online_stream_") || resolved.genre == "Online Stream"
+            if (isOnline) {
+                playlistManager.registerOnlineTrack(resolved, _currentOnlineSong.value)
+                downloadTrack(resolved)
+            }
+        }
     }
 
     fun removeFromQueue(index: Int) {
@@ -1143,29 +1170,194 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
+    fun isTrackDownloading(track: TrackInfo?): Boolean {
+        if (track == null) return false
+        val target = onlineStreamManager.getTargetStorageFileForTrack(track).absolutePath
+        return _downloadingUris.value.contains(track.uri) || _downloadingUris.value.contains(target)
+    }
+
+    fun isTrackDownloaded(track: TrackInfo?): Boolean {
+        if (track == null) return false
+        val target = onlineStreamManager.getTargetStorageFileForTrack(track).absolutePath
+        if (_downloadedUris.value.contains(track.uri) || _downloadedUris.value.contains(target)) return true
+        val targetFile = onlineStreamManager.getTargetStorageFileForTrack(track)
+        if (targetFile.exists() && targetFile.length() > 50_000L) return true
+        val f = File(track.uri)
+        return !track.uri.contains("veyl_online_stream_") && f.exists()
+    }
+
+    fun downloadCurrentTrack(
+        onCompleted: ((File) -> Unit)? = null,
+        onError: ((Throwable) -> Unit)? = null
+    ) {
+        val current = _status.value?.currentTrack ?: return
+        downloadTrack(current, onCompleted, onError)
+    }
+
+    fun downloadTrack(
+        track: TrackInfo,
+        onCompleted: ((File) -> Unit)? = null,
+        onError: ((Throwable) -> Unit)? = null
+    ) {
+        val targetFile = onlineStreamManager.getTargetStorageFileForTrack(track)
+        if (targetFile.exists() && targetFile.length() > 50_000L) {
+            _downloadedUris.value = _downloadedUris.value + track.uri + targetFile.absolutePath
+            playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
+            onCompleted?.invoke(targetFile)
+            return
+        }
+
+        if (isTrackDownloading(track)) return
+
+        _downloadingUris.value = _downloadingUris.value + track.uri + targetFile.absolutePath
+
+        scope.launch(Dispatchers.IO) {
+            val cacheFile = File(track.uri)
+            if (cacheFile.exists() && cacheFile.length() > 50_000L) {
+                try {
+                    cacheFile.copyTo(targetFile, overwrite = true)
+                    android.media.MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(targetFile.absolutePath),
+                        arrayOf("audio/mp4")
+                    ) { _, _ -> }
+                    _downloadedUris.value = _downloadedUris.value + track.uri + targetFile.absolutePath
+                    _downloadingUris.value = _downloadingUris.value - track.uri - targetFile.absolutePath
+                    playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
+                    val root = _selectedRootPath.value
+                    if (root != null) scanDirectory(root) else scanMediaStore()
+                    withContext(Dispatchers.Main) {
+                        onCompleted?.invoke(targetFile)
+                    }
+                    return@launch
+                } catch (e: Exception) {
+                    Log.w("AudioEngineController", "Fast copy failed, downloading via stream manager", e)
+                }
+            }
+
+            val songItem = _currentOnlineSong.value?.takeIf { it.title.equals(track.title, ignoreCase = true) }
+                ?: OnlineSongItem(
+                    id = track.uri,
+                    title = track.title,
+                    artist = track.artist ?: "Unknown Artist",
+                    album = track.album ?: "",
+                    durationSeconds = track.durationSeconds,
+                    thumbnailUrl = ArtworkCache.getOnlineArtwork(track.uri) ?: "",
+                    streamUrl = ""
+                )
+
+            onlineStreamManager.downloadSongToStorage(
+                song = songItem,
+                onProgress = {},
+                onCompleted = { file ->
+                    _downloadedUris.value = _downloadedUris.value + track.uri + file.absolutePath
+                    _downloadingUris.value = _downloadingUris.value - track.uri - targetFile.absolutePath
+                    playlistManager.updateTrackUri(track.uri, file.absolutePath)
+                    val root = _selectedRootPath.value
+                    if (root != null) scanDirectory(root) else scanMediaStore()
+                    onCompleted?.invoke(file)
+                },
+                onError = { err ->
+                    _downloadingUris.value = _downloadingUris.value - track.uri - targetFile.absolutePath
+                    onError?.invoke(err)
+                }
+            )
+        }
+    }
+
+    fun resolveTrackInfo(uri: String): TrackInfo? {
+        val fromLib = _libraryTracks.value.find { it.uri == uri }
+        if (fromLib != null) return fromLib
+
+        val meta = playlistManager.getTrackMeta(uri)
+        if (meta != null) {
+            val targetFile = onlineStreamManager.getTargetStorageFileForTrack(meta)
+            if (targetFile.exists() && targetFile.length() > 50_000L) {
+                return meta.copy(uri = targetFile.absolutePath)
+            }
+            return meta
+        }
+
+        val current = _status.value?.currentTrack
+        if (current?.uri == uri) return current
+
+        val f = File(uri)
+        if (f.exists()) {
+            return TrackInfo(
+                uri = f.absolutePath,
+                title = f.nameWithoutExtension,
+                artist = "Unknown Artist",
+                album = "",
+                albumArtist = null,
+                genre = "Audio",
+                year = null,
+                trackNumber = null,
+                discNumber = null,
+                durationSeconds = 0.0,
+                sampleRate = 44100u,
+                bitDepth = 16u.toUByte(),
+                bitrate = 320000u,
+                channels = 2u.toUByte(),
+                formatName = f.extension.uppercase(),
+                hasArtwork = false
+            )
+        }
+        return null
+    }
+
     fun downloadOnlineSong(
         song: OnlineSongItem,
         onProgress: (Float) -> Unit = {},
         onCompleted: (File) -> Unit = {},
         onError: (Throwable) -> Unit = {}
     ) {
+        val targetFile = onlineStreamManager.getTargetStorageFile(song)
+        _downloadingUris.value = _downloadingUris.value + targetFile.absolutePath
         scope.launch(Dispatchers.IO) {
             onlineStreamManager.downloadSongToStorage(
                 song = song,
                 onProgress = onProgress,
                 onCompleted = { file ->
+                    _downloadedUris.value = _downloadedUris.value + file.absolutePath
+                    _downloadingUris.value = _downloadingUris.value - targetFile.absolutePath
                     val root = _selectedRootPath.value
                     if (root != null) scanDirectory(root) else scanMediaStore()
                     onCompleted(file)
                 },
-                onError = onError
+                onError = { err ->
+                    _downloadingUris.value = _downloadingUris.value - targetFile.absolutePath
+                    onError(err)
+                }
             )
         }
     }
 
     fun playTrack(track: TrackInfo) {
+        var actualTrack = track
+        val f = File(actualTrack.uri)
+        if (!f.exists()) {
+            val targetFile = onlineStreamManager.getTargetStorageFileForTrack(actualTrack)
+            if (targetFile.exists() && targetFile.length() > 50_000L) {
+                actualTrack = actualTrack.copy(uri = targetFile.absolutePath)
+                playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
+            } else if (actualTrack.genre == "Online Stream" || actualTrack.uri.contains("veyl_online_stream_")) {
+                val songItem = _currentOnlineSong.value?.takeIf { it.title.equals(actualTrack.title, ignoreCase = true) }
+                    ?: OnlineSongItem(
+                        id = actualTrack.uri,
+                        title = actualTrack.title,
+                        artist = actualTrack.artist ?: "Unknown Artist",
+                        album = actualTrack.album ?: "",
+                        durationSeconds = actualTrack.durationSeconds,
+                        thumbnailUrl = ArtworkCache.getOnlineArtwork(actualTrack.uri) ?: "",
+                        streamUrl = ""
+                    )
+                playOnlineSong(songItem)
+                return
+            }
+        }
+
         ensurePlaybackServiceStarted()
-        val isOnline = track.uri.contains("veyl_online_stream_") || track.genre == "Online Stream"
+        val isOnline = actualTrack.uri.contains("veyl_online_stream_") || actualTrack.genre == "Online Stream"
         if (!isOnline && _isOnlineStreaming.value) {
             onlineStreamManager.stopCurrentStream()
             _isOnlineStreaming.value = false
@@ -1178,18 +1370,18 @@ class AudioEngineController private constructor(private val context: Context) {
             // Internal phone speakers, 3.5mm jack, and Bluetooth must remain on standard shared 48kHz output.
             val dac = connectedDac.value
             if (_bitPerfectEnabled.value && dac != null) {
-                val isDsd = track.formatName.contains("DSD", ignoreCase = true) ||
-                            track.uri.endsWith(".dsf", ignoreCase = true) ||
-                            track.uri.endsWith(".dff", ignoreCase = true)
+                val isDsd = actualTrack.formatName.contains("DSD", ignoreCase = true) ||
+                            actualTrack.uri.endsWith(".dsf", ignoreCase = true) ||
+                            actualTrack.uri.endsWith(".dff", ignoreCase = true)
 
                 val targetRate = if (isDsd) {
                     if (_dsdMode.value == DsdModeEnum.DO_P) {
-                        if (track.sampleRate > 2822400u) 352800 else 176400
+                        if (actualTrack.sampleRate > 2822400u) 352800 else 176400
                     } else {
-                        if (track.sampleRate > 2822400u) 176400 else 88200
+                        if (actualTrack.sampleRate > 2822400u) 176400 else 88200
                     }
                 } else {
-                    track.sampleRate.toInt()
+                    actualTrack.sampleRate.toInt()
                 }
 
                 val optimalRate = usbDacManager.getOptimalSampleRate(targetRate).toUInt()
@@ -1209,10 +1401,10 @@ class AudioEngineController private constructor(private val context: Context) {
             _currentPositionMs.value = 0L
 
             withNativeEngine { engine -> engine.playTrack(
-                uri = track.uri,
-                title = track.title,
-                artist = track.artist,
-                album = track.album
+                uri = actualTrack.uri,
+                title = actualTrack.title,
+                artist = actualTrack.artist,
+                album = actualTrack.album
             ) }
 
             // Re-apply user's persistent equalizer state on track transition
@@ -1221,15 +1413,15 @@ class AudioEngineController private constructor(private val context: Context) {
             // Ensure queue always contains all tracks if queue was empty or single
             val currentQ = _queue.value
             if (isOnline) {
-                _queue.value = listOf(track)
-                _originalQueue.value = listOf(track)
+                _queue.value = listOf(actualTrack)
+                _originalQueue.value = listOf(actualTrack)
             } else if (currentQ.isEmpty() || currentQ.size <= 1) {
                 val lib = _libraryTracks.value
                 if (lib.isNotEmpty()) {
                     _queue.value = lib
                     _originalQueue.value = lib
                 } else {
-                    _queue.value = listOf(track)
+                    _queue.value = listOf(actualTrack)
                 }
             } else if (!currentQ.any { it.uri == track.uri }) {
                 _queue.value = currentQ + track

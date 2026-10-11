@@ -119,7 +119,8 @@ fun VeylSongsScreen(
 
     // Filter and sort tracks by category, search query, and sort options
     val filteredTracks = remember(tracks, searchQuery, selectedTab, favoriteUris, sortOption, sortAscending) {
-        val base = tracks.filter { track ->
+        val sourceTracks = if (selectedTab == "Favorites") favoriteUris.mapNotNull { controller.resolveTrackInfo(it) } else tracks
+        val base = sourceTracks.filter { track ->
             val artistName = track.artist ?: ""
             val albumName = track.album ?: ""
             val matchesQuery = searchQuery.isBlank() ||
@@ -127,12 +128,7 @@ fun VeylSongsScreen(
                     artistName.contains(searchQuery, ignoreCase = true) ||
                     albumName.contains(searchQuery, ignoreCase = true)
 
-            val matchesTab = when (selectedTab) {
-                "Favorites" -> favoriteUris.contains(track.uri)
-                else -> true
-            }
-
-            matchesQuery && matchesTab
+            matchesQuery
         }
 
         val sorted = when (sortOption) {
