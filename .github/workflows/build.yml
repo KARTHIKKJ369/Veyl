@@ -53,12 +53,13 @@ jobs:
             ## 🎵 Veyl — Audiophile Android Music Player
 
             ### 🚀 Features & Fixes in this release:
-            - **Dedicated Full-Screen Search**: Instant multi-category search across Songs, Artists, and Albums with recent search history and zero-lag indexing.
-            - **Collapsible In-Library Quick Filter**: Fast inline filter in Songs screen to quickly isolate tracks without interrupting browsing.
+            - **High-Fidelity Online Streaming (Official Music Only)**: Instant zero-lag dynamic search and playback powered directly by YouTube Music's `WEB_REMIX` catalog with strict studio music filters (excluding vlogs, memes, and amateur clips).
+            - **Native Rust Audio Engine Stream Pipeline**: All online audio streams directly through Veyl's native Rust DSP engine with 10-band biquad parametric EQ, high-fidelity sinc resampling, and AAudio MMAP bit-perfect hardware output.
+            - **Zero Permanent Storage Footprint**: Rolling progressive stream buffer (~150ms instant start) with automatic cleanup on completion or track switch.
+            - **Dedicated Full-Screen Search with Online Filter Tabs**: Seamless search with `All`, `Local`, and `YouTube Music` filter pills.
+            - **Dedicated In-Library Quick Filter**: Fast inline filter in Songs screen to quickly isolate tracks without interrupting browsing.
             - **Lifecycle-Aware Performance**: Upgraded to `collectAsStateWithLifecycle` to halt background recompositions and drastically improve battery and CPU efficiency.
             - **Asynchronous Native Engine Execution**: Native audio commands (play, pause, seek, EQ faders, volume) are executed on a dedicated background scope for stutter-free UI smoothness.
-            - **Accurate Audio Ducking Restoration**: Audio focus ducking preserves and restores exact prior volume levels rather than resetting to 100%.
-            - **Updated Adaptive App Icons**: Polished adaptive launcher icons with multi-density mipmap support.
             - **Audiophile DSP & Pure Rust Engine**: 10-band biquad parametric EQ, high-fidelity resampling, lock-free ring-buffer, and bit-perfect hardware output.
 
             ### 📥 Download

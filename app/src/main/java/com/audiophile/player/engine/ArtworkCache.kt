@@ -46,21 +46,55 @@ object ArtworkCache {
 
     // Cache parent folder artwork lookups to prevent disk scanning per track
     private val folderArtCache = ConcurrentHashMap<String, String>()
+    // Mapping from track URI to remote thumbnail URL for streaming tracks
+    private val onlineArtMapping = ConcurrentHashMap<String, String>()
 
     private val libraryEngine = LibraryEngine()
 
+    fun registerOnlineArtwork(trackUri: String, imageUrl: String) {
+        if (trackUri.isNotBlank() && imageUrl.isNotBlank()) {
+            onlineArtMapping[trackUri] = imageUrl
+        }
+    }
+
     fun getArtwork(uri: String, targetSizePx: Int = 128): Bitmap? {
-        val cacheKey = if (targetSizePx > 256) "${uri}_lg" else "${uri}_sm"
+        val actualUri = onlineArtMapping[uri] ?: uri
+        val cacheKey = if (targetSizePx > 256) "${actualUri}_lg" else "${actualUri}_sm"
         return memoryCache.get(cacheKey)
     }
 
     suspend fun loadArtwork(uri: String, targetSizePx: Int = 128): Bitmap? = withContext(Dispatchers.IO) {
         if (uri.isBlank()) return@withContext null
-        val cacheKey = if (targetSizePx > 256) "${uri}_lg" else "${uri}_sm"
+        val actualUri = onlineArtMapping[uri] ?: uri
+        val cacheKey = if (targetSizePx > 256) "${actualUri}_lg" else "${actualUri}_sm"
         val cached = memoryCache.get(cacheKey)
         if (cached != null) return@withContext cached
 
         var bitmap: Bitmap? = null
+
+        // 0. Check if this is an HTTP/HTTPS remote URL
+        if (actualUri.startsWith("http://") || actualUri.startsWith("https://")) {
+            try {
+                val conn = java.net.URL(actualUri).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 8000
+                conn.readTimeout = 8000
+                conn.instanceFollowRedirects = true
+                conn.inputStream.use { stream ->
+                    val bytes = stream.readBytes()
+                    if (bytes.isNotEmpty()) {
+                        val options = BitmapFactory.Options().apply {
+                            inJustDecodeBounds = true
+                        }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                        options.inSampleSize = calculateInSampleSize(options, targetSizePx, targetSizePx)
+                        options.inJustDecodeBounds = false
+                        bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                    }
+                }
+            } catch (e: Throwable) {
+                Log.w("ArtworkCache", "Failed to load remote artwork from $actualUri", e)
+            }
+        }
 
         // 1. Try Rust native LibraryEngine (handles DSF, DFF, FLAC, Lofty tags)
         try {

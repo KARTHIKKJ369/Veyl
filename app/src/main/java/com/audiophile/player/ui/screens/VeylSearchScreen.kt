@@ -5,6 +5,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -31,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -61,19 +64,29 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.audiophile.player.engine.AsyncAlbumArt
 import com.audiophile.player.engine.AudioEngineController
+import com.audiophile.player.online.OnlineSongItem
+import com.audiophile.player.online.YouTubeMusicService
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylTypography
+import kotlinx.coroutines.delay
+import uniffi.audiophile_core.PlaybackStateEnum
 import uniffi.audiophile_core.TrackInfo
 
 private const val MAX_RECENT_SEARCHES = 8
 
+enum class SearchTab(val label: String) {
+    ALL("All"),
+    LOCAL("Local"),
+    ONLINE("YouTube Music")
+}
+
 /**
  * Dedicated full-screen Search experience.
  *
- * Empty state  — recent search chips + recently-played / recently-added tracks.
- * Active query — results grouped by Songs, Albums, Artists.
- * Back press   — returns to the previous destination (Home).
+ * Combines zero-latency local library searching with dynamic official
+ * YouTube Music streaming. Filters out normal user videos/vlogs so only
+ * verified music songs appear.
  */
 @Composable
 fun VeylSearchScreen(
@@ -90,14 +103,21 @@ fun VeylSearchScreen(
     val tracks by controller.tracks.collectAsStateWithLifecycle()
     val playbackHistory by controller.playbackHistory.collectAsStateWithLifecycle()
     val lastAdded by controller.lastAddedTracks.collectAsStateWithLifecycle()
-    // Pre-computed off the main thread by updateDerivedTrackLists()
     val artistGroups by controller.artistGroups.collectAsStateWithLifecycle()
     val albumGroups by controller.albumGroups.collectAsStateWithLifecycle()
+
+    val isOnlineBuffering by controller.isOnlineBuffering.collectAsStateWithLifecycle()
+    val currentOnlineSong by controller.currentOnlineSong.collectAsStateWithLifecycle()
+    val playbackState by controller.playbackState.collectAsStateWithLifecycle()
 
     val focusRequester = remember { FocusRequester() }
     var query by remember { mutableStateOf("") }
     val recentSearches = remember { mutableStateListOf<String>() }
     var showAllSongs by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf(SearchTab.ALL) }
+
+    var onlineResults by remember { mutableStateOf<List<OnlineSongItem>>(emptyList()) }
+    var isSearchingOnline by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val saved = prefs.getString("recent_searches", null)
@@ -111,7 +131,27 @@ fun VeylSearchScreen(
     }
     BackHandler(onBack = onBack)
 
-    // Derive results from query
+    // Debounced Online Search for official YouTube Music tracks
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.length >= 2) {
+            delay(300)
+            isSearchingOnline = true
+            try {
+                val results = YouTubeMusicService.searchSongs(q)
+                onlineResults = results
+            } catch (e: Exception) {
+                onlineResults = emptyList()
+            } finally {
+                isSearchingOnline = false
+            }
+        } else {
+            onlineResults = emptyList()
+            isSearchingOnline = false
+        }
+    }
+
+    // Derive local results from query
     val songResults = remember(query, tracks) {
         if (query.isBlank()) emptyList()
         else tracks.filter { t ->
@@ -136,7 +176,8 @@ fun VeylSearchScreen(
         }.take(10)
     }
 
-    val hasResults = songResults.isNotEmpty() || albumResults.isNotEmpty() || artistResults.isNotEmpty()
+    val hasLocalResults = songResults.isNotEmpty() || albumResults.isNotEmpty() || artistResults.isNotEmpty()
+    val hasOnlineResults = onlineResults.isNotEmpty()
 
     val listenNowTracks = remember(playbackHistory, lastAdded, tracks) {
         when {
@@ -156,7 +197,7 @@ fun VeylSearchScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
@@ -167,7 +208,7 @@ fun VeylSearchScreen(
                 onValueChange = { query = it },
                 placeholder = {
                     Text(
-                        "Songs, albums, artists\u2026",
+                        "Search local or stream online\u2026",
                         style = VeylTypography.BodyMedium,
                         color = colors.textMuted
                     )
@@ -214,6 +255,69 @@ fun VeylSearchScreen(
                     .weight(1f)
                     .focusRequester(focusRequester)
             )
+        }
+
+        // Tab Filter Bar when a query is present
+        if (query.isNotBlank()) {
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(SearchTab.values()) { tab ->
+                    val isSelected = selectedTab == tab
+                    val badgeCount = when (tab) {
+                        SearchTab.ALL -> songResults.size + onlineResults.size
+                        SearchTab.LOCAL -> songResults.size + albumResults.size + artistResults.size
+                        SearchTab.ONLINE -> onlineResults.size
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = if (isSelected) colors.accentSignal else colors.surfacePanel,
+                        modifier = Modifier.clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            selectedTab = tab
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = tab.label,
+                                style = VeylTypography.BodySmall,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) colors.background else colors.textPrimary
+                            )
+
+                            if (tab == SearchTab.ONLINE && isSearchingOnline) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    strokeWidth = 1.5.dp,
+                                    color = if (isSelected) colors.background else colors.accentSignal
+                                )
+                            } else if (badgeCount > 0) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isSelected) colors.background.copy(alpha = 0.2f) else colors.surfaceElevated
+                                ) {
+                                    Text(
+                                        text = "$badgeCount",
+                                        style = VeylTypography.MonoSpec,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) colors.background else colors.textMuted,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Animated switch between empty-state and results
@@ -323,7 +427,10 @@ fun VeylSearchScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (!hasResults) {
+                    val showLocal = selectedTab == SearchTab.ALL || selectedTab == SearchTab.LOCAL
+                    val showOnline = selectedTab == SearchTab.ALL || selectedTab == SearchTab.ONLINE
+
+                    if (!hasLocalResults && !hasOnlineResults && !isSearchingOnline) {
                         item {
                             Box(
                                 modifier = Modifier
@@ -331,19 +438,27 @@ fun VeylSearchScreen(
                                     .padding(vertical = 48.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    "No results for \u201c$query\u201d",
-                                    style = VeylTypography.BodyMedium,
-                                    color = colors.textMuted
-                                )
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        "No results for \u201c$query\u201d",
+                                        style = VeylTypography.BodyMedium,
+                                        color = colors.textMuted
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Check spelling or try another artist name",
+                                        style = VeylTypography.BodySmall,
+                                        color = colors.textMuted.copy(alpha = 0.6f)
+                                    )
+                                }
                             }
                         }
                     }
 
-                    // Songs
-                    if (songResults.isNotEmpty()) {
-                        item { SearchSectionHeader(label = "Songs", count = songResults.size) }
-                        val displayedSongs = if (showAllSongs) songResults else songResults.take(8)
+                    // 1. Local Songs
+                    if (showLocal && songResults.isNotEmpty()) {
+                        item { SearchSectionHeader(label = "Local Songs", count = songResults.size) }
+                        val displayedSongs = if (showAllSongs) songResults else songResults.take(6)
                         items(displayedSongs, key = { "song_${it.uri}" }) { track ->
                             SearchTrackRow(
                                 track = track,
@@ -354,55 +469,148 @@ fun VeylSearchScreen(
                                 }
                             )
                         }
-                        if (songResults.size > 8) {
+                        if (songResults.size > 6) {
                             item {
                                 Text(
-                                    if (showAllSongs) "Show fewer songs" else "Show all ${songResults.size} songs",
+                                    if (showAllSongs) "Show fewer local songs" else "Show all ${songResults.size} local songs",
                                     style = VeylTypography.BodySmall,
                                     color = colors.accentSignal,
+                                    fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier
                                         .clickable { showAllSongs = !showAllSongs }
-                                        .padding(vertical = 6.dp, horizontal = 4.dp)
+                                        .padding(vertical = 4.dp)
                                 )
                             }
                         }
                         item { Spacer(Modifier.height(8.dp)) }
                     }
 
-                    // Albums
-                    if (albumResults.isNotEmpty()) {
-                        item { SearchSectionHeader(label = "Albums", count = albumResults.size) }
-                        items(albumResults.take(6), key = { "album_${it.first}_${it.second}" }) { (album, artist, albumTracks) ->
+                    // 2. Local Albums
+                    if (showLocal && albumResults.isNotEmpty()) {
+                        item { SearchSectionHeader(label = "Local Albums", count = albumResults.size) }
+                        items(albumResults, key = { "alb_${it.first}_${it.second}" }) { (album, artist, tracks) ->
                             SearchAlbumRow(
                                 albumName = album,
                                 artist = artist,
-                                trackCount = albumTracks.size,
-                                firstTrackUri = albumTracks.firstOrNull()?.uri ?: "",
+                                trackCount = tracks.size,
+                                firstTrackUri = tracks.firstOrNull()?.uri ?: "",
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     saveRecentSearch(recentSearches, query, prefs)
-                                    if (albumTracks.isNotEmpty()) controller.playTrackList(albumTracks)
+                                    controller.playTrackList(tracks)
                                 }
                             )
                         }
                         item { Spacer(Modifier.height(8.dp)) }
                     }
 
-                    // Artists
-                    if (artistResults.isNotEmpty()) {
-                        item { SearchSectionHeader(label = "Artists", count = artistResults.size) }
-                        items(artistResults.take(6), key = { "artist_${it.first}" }) { (artist, artistTracks, albumCount) ->
+                    // 3. Local Artists
+                    if (showLocal && artistResults.isNotEmpty()) {
+                        item { SearchSectionHeader(label = "Local Artists", count = artistResults.size) }
+                        items(artistResults, key = { "art_${it.first}" }) { (artist, tracks, albumCount) ->
                             SearchArtistRow(
                                 artistName = artist,
-                                trackCount = artistTracks.size,
+                                trackCount = tracks.size,
                                 albumCount = albumCount,
-                                firstTrackUri = artistTracks.firstOrNull()?.uri ?: "",
+                                firstTrackUri = tracks.firstOrNull()?.uri ?: "",
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     saveRecentSearch(recentSearches, query, prefs)
-                                    if (artistTracks.isNotEmpty()) controller.playTrackList(artistTracks)
+                                    controller.playTrackList(tracks)
                                 }
                             )
+                        }
+                        item { Spacer(Modifier.height(8.dp)) }
+                    }
+
+                    // 4. Online Music Section (Official YouTube Music)
+                    if (showOnline) {
+                        if (onlineResults.isNotEmpty() || isSearchingOnline) {
+                            item {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp, bottom = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            "ONLINE STREAMS (YOUTUBE MUSIC)",
+                                            style = VeylTypography.MonoBadge,
+                                            color = colors.textSecondary
+                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = colors.accentSignal.copy(alpha = 0.15f)
+                                        ) {
+                                            Text(
+                                                "160k OPUS",
+                                                style = VeylTypography.MonoSpec,
+                                                color = colors.accentSignal,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+
+                                    if (isSearchingOnline) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(14.dp),
+                                            strokeWidth = 2.dp,
+                                            color = colors.accentSignal
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (onlineResults.isNotEmpty()) {
+                            items(onlineResults, key = { "yt_${it.videoId}" }) { item ->
+                                val isCurrent = currentOnlineSong?.videoId == item.videoId
+                                val isBufferingThis = isCurrent && isOnlineBuffering
+                                val isPlayingThis = isCurrent && playbackState == PlaybackStateEnum.PLAYING
+
+                                SearchOnlineSongRow(
+                                    item = item,
+                                    isBuffering = isBufferingThis,
+                                    isPlaying = isPlayingThis,
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        saveRecentSearch(recentSearches, query, prefs)
+                                        controller.playOnlineSong(item)
+                                    }
+                                )
+                            }
+                        } else if (isSearchingOnline && !hasLocalResults) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = colors.accentSignal
+                                        )
+                                        Text(
+                                            "Finding official music tracks on YouTube Music…",
+                                            style = VeylTypography.BodySmall,
+                                            color = colors.textMuted
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -414,18 +622,18 @@ fun VeylSearchScreen(
 }
 
 private fun saveRecentSearch(
-    recentSearches: MutableList<String>,
+    list: MutableList<String>,
     query: String,
-    prefs: android.content.SharedPreferences? = null
+    prefs: android.content.SharedPreferences
 ) {
-    val term = query.trim()
-    if (term.isBlank()) return
-    recentSearches.remove(term)
-    recentSearches.add(0, term)
-    while (recentSearches.size > MAX_RECENT_SEARCHES) {
-        recentSearches.removeAt(recentSearches.lastIndex)
+    val clean = query.trim()
+    if (clean.isBlank()) return
+    list.remove(clean)
+    list.add(0, clean)
+    while (list.size > MAX_RECENT_SEARCHES) {
+        list.removeAt(list.lastIndex)
     }
-    prefs?.edit()?.putString("recent_searches", recentSearches.joinToString("|||"))?.apply()
+    prefs.edit().putString("recent_searches", list.joinToString("|||")).apply()
 }
 
 @Composable
@@ -434,16 +642,15 @@ private fun SearchSectionHeader(label: String, count: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 10.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(top = 10.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            label.uppercase(),
-            style = VeylTypography.MonoBadge,
-            color = colors.accentSignal
-        )
-        Surface(shape = RoundedCornerShape(6.dp), color = colors.surfacePanel) {
+        Text(label.uppercase(), style = VeylTypography.MonoBadge, color = colors.textSecondary)
+        Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = colors.surfacePanel
+        ) {
             Text(
                 "$count",
                 style = VeylTypography.MonoSpec,
@@ -505,6 +712,107 @@ private fun SearchTrackRow(track: TrackInfo, onClick: () -> Unit) {
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold
         )
+    }
+}
+
+@Composable
+private fun SearchOnlineSongRow(
+    item: OnlineSongItem,
+    isBuffering: Boolean,
+    isPlaying: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = LocalVeylColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isPlaying) colors.surfacePanel.copy(alpha = 0.5f) else colors.surfaceElevated.copy(alpha = 0.35f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Thumbnail with rounded corners
+        AsyncAlbumArt(
+            uri = item.thumbnailUrl,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                item.title,
+                style = VeylTypography.BodyMedium,
+                color = if (isPlaying) colors.accentSignal else colors.textPrimary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "${item.artist} \u00b7 ${item.album}",
+                style = VeylTypography.BodySmall,
+                color = colors.textMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(2.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = colors.accentSignal.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        "STREAM",
+                        style = VeylTypography.MonoSpec,
+                        color = colors.accentSignal,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+                Text(
+                    item.durationText,
+                    style = VeylTypography.MonoSpec,
+                    color = colors.textMuted,
+                    fontSize = 9.sp
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+
+        if (isBuffering) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = colors.accentSignal
+            )
+        } else if (isPlaying) {
+            Icon(
+                VeylIcons.Waveform,
+                contentDescription = "Playing",
+                tint = colors.accentSignal,
+                modifier = Modifier.size(18.dp)
+            )
+        } else {
+            Surface(
+                shape = CircleShape,
+                color = colors.surfacePanel,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        VeylIcons.Play,
+                        contentDescription = "Stream song",
+                        tint = colors.textPrimary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
     }
 }
 

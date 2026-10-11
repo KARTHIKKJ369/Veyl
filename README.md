@@ -4,7 +4,7 @@
 
 ### 📥 Latest Compiled APK
 Download the compiled application directly onto your Android device:
-- **[Download Latest GitHub Release (v1.2.0)](https://github.com/KARTHIKKJ369/Veyl/releases/latest)**
+- **[Download Latest GitHub Release (v1.3.0)](https://github.com/KARTHIKKJ369/Veyl/releases/latest)**
 - **[Direct APK Download (veyl-debug.apk)](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)**
 
 ---
@@ -43,6 +43,13 @@ Download the compiled application directly onto your Android device:
 - **Now Playing Cockpit**: Format badges (`FLAC 192kHz/24bit`, sample rate, bit depth), 16-band live spectrum visualizer, millisecond precision scrubber.
 - **DSP Cockpit**: Live interactive frequency response curve, 10 parametric band controls, preamp fader, ReplayGain & Dither toggles.
 - **Playback Queue**: Gapless boundary indicators and reorderable track list.
+
+### 4. High-Fidelity Online Streaming (Powered by Rust Engine)
+- **Official Music Only**: Direct integration with YouTube Music's `WEB_REMIX` catalog with strict songs-only filtering (`EgWKAQIIAWoKEAkQBRAKEAMQBBAK`), automatically excluding all user vlogs, memes, and amateur clips.
+- **High-Bitrate Opus (~160 kbps @ 48 kHz)**: Streams transparent Opus audio (Format 251), preserving the complete 20 Hz – 20 kHz acoustic spectrum with zero MP3 cutoffs.
+- **No-Download Progressive Streaming**: Immediate playback (<200 ms) via rolling cache buffer with automatic cleanup on completion or track switch. Zero permanent storage footprint.
+- **Full Rust DSP Processing**: Streamed music is decoded natively by Symphonia, enhanced through the 10-band biquad parametric EQ, resampled with 64-point sinc interpolation, and sent directly to hardware via AAudio MMAP.
+- **Integrated Search UI**: Unified search screen with filter pills (`All`, `Local`, `Online YouTube Music`) and dynamic real-time catalog discovery.
 
 ---
 

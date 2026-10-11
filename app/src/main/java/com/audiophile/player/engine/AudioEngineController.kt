@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.audiophile.player.online.OnlineSongItem
+import com.audiophile.player.online.OnlineStreamManager
 import uniffi.audiophile_core.AudiophileEngineHandle
 import uniffi.audiophile_core.DsdModeEnum
 import uniffi.audiophile_core.EngineStatus
@@ -168,6 +170,17 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private val _lyricOffsetMs = MutableStateFlow(prefs.getLong("lyric_offset_ms", 0L))
     val lyricOffsetMs: StateFlow<Long> = _lyricOffsetMs.asStateFlow()
+
+    // Online Streaming Engine
+    val onlineStreamManager = OnlineStreamManager(context)
+    private val _isOnlineStreaming = MutableStateFlow(false)
+    val isOnlineStreaming: StateFlow<Boolean> = _isOnlineStreaming.asStateFlow()
+
+    private val _isOnlineBuffering = MutableStateFlow(false)
+    val isOnlineBuffering: StateFlow<Boolean> = _isOnlineBuffering.asStateFlow()
+
+    private val _currentOnlineSong = MutableStateFlow<OnlineSongItem?>(null)
+    val currentOnlineSong: StateFlow<OnlineSongItem?> = _currentOnlineSong.asStateFlow()
 
     private val _autoFetchLyrics = MutableStateFlow(prefs.getBoolean("auto_fetch_lyrics", true))
     val autoFetchLyrics: StateFlow<Boolean> = _autoFetchLyrics.asStateFlow()
@@ -1079,8 +1092,47 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
+    fun playOnlineSong(song: OnlineSongItem) {
+        ensurePlaybackServiceStarted()
+        _isOnlineStreaming.value = true
+        _isOnlineBuffering.value = true
+        _currentOnlineSong.value = song
+
+        scope.launch(Dispatchers.IO) {
+            val streamUrl = onlineStreamManager.resolveAudioStreamUrl(song.videoId)
+            if (streamUrl == null) {
+                Log.e("AudioEngineController", "Failed to resolve stream URL for ${song.title}")
+                _isOnlineBuffering.value = false
+                _isOnlineStreaming.value = false
+                return@launch
+            }
+
+            onlineStreamManager.startProgressiveStream(
+                streamUrl = streamUrl,
+                onPrebufferReady = { cacheFile ->
+                    _isOnlineBuffering.value = false
+                    val trackInfo = onlineStreamManager.createTrackInfo(song, cacheFile)
+                    ArtworkCache.registerOnlineArtwork(cacheFile.absolutePath, song.thumbnailUrl)
+                    ArtworkCache.registerOnlineArtwork("online://${song.videoId}", song.thumbnailUrl)
+                    playTrack(trackInfo)
+                },
+                onError = { error ->
+                    Log.e("AudioEngineController", "Error streaming ${song.title}", error)
+                    _isOnlineBuffering.value = false
+                    _isOnlineStreaming.value = false
+                }
+            )
+        }
+    }
+
     fun playTrack(track: TrackInfo) {
         ensurePlaybackServiceStarted()
+        if (track.genre != "Online Stream") {
+            onlineStreamManager.stopCurrentStream()
+            _isOnlineStreaming.value = false
+            _isOnlineBuffering.value = false
+            _currentOnlineSong.value = null
+        }
         nativeScope.launch {
             try {
             // Only switch hardware sample-rate and exclusive mode for external USB DACs!
@@ -1210,6 +1262,10 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun stop() {
+        onlineStreamManager.stopCurrentStream()
+        _isOnlineStreaming.value = false
+        _isOnlineBuffering.value = false
+        _currentOnlineSong.value = null
         nativeScope.launch { withNativeEngine { it.stop() } }
     }
 
