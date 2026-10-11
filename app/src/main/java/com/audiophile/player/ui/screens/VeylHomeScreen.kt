@@ -270,7 +270,7 @@ fun VeylHomeScreen(
                         )
                     }
 
-                    items(searchResults, key = { it.uri }) { track ->
+                    itemsIndexed(searchResults, key = { index, track -> "${track.uri}_$index" }) { _, track ->
                         val isCurrent = currentTrack?.uri == track.uri
                         Row(
                             modifier = Modifier
@@ -647,7 +647,7 @@ fun VeylHomeScreen(
         // Render Master Tracks based on selected layout (Grid vs List)
         if (masterTrackLayout == SongViewLayout.GRID) {
             // Modern 2-Column Grid
-            items(allSongsRandomized.chunked(2), key = { pair -> pair.first().uri }) { rowItems ->
+            itemsIndexed(allSongsRandomized.chunked(2), key = { index, pair -> "${pair.first().uri}_$index" }) { _, rowItems ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -750,7 +750,7 @@ fun VeylHomeScreen(
             }
         } else {
             // Sleek List View
-            itemsIndexed(allSongsRandomized, key = { _, track -> track.uri }) { index, track ->
+            itemsIndexed(allSongsRandomized, key = { index, track -> "${track.uri}_$index" }) { index, track ->
                 val isCurrent = currentTrack?.uri == track.uri
                 Row(
                     modifier = Modifier

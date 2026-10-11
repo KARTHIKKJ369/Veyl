@@ -69,7 +69,7 @@ fun VeylTrackOptionsSheet(
     val favoriteUris by controller.favoriteUris.collectAsState()
     val playlists by controller.playlists.collectAsState()
 
-    val isFav = controller.isTrackFavorite(track)
+    val isFav = remember(track, favoriteUris) { controller.isTrackFavorite(track, favoriteUris) }
     var showPlaylistDialog by remember { mutableStateOf(false) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -121,7 +122,7 @@ fun VeylHomeRedesigned(
                 item { SectionHeader("Continue listening", "See all", onNavigateToHistory) }
                 item {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        items(history.take(8), key = { it.uri }) { track ->
+                        itemsIndexed(history.take(8), key = { index, track -> "${track.uri}_$index" }) { _, track ->
                             AlbumTile(track = track, onClick = { controller.playTrack(track) })
                         }
                     }
@@ -136,13 +137,13 @@ fun VeylHomeRedesigned(
             }
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(recentTracks, key = { it.uri }) { track ->
+                    itemsIndexed(recentTracks, key = { index, track -> "${track.uri}_$index" }) { _, track ->
                         AlbumTile(track = track, onClick = { controller.playTrack(track) })
                     }
                 }
             }
             item { SectionHeader("From your library", "Shuffle", onAction = { controller.playShuffled(tracks) }) }
-            items(tracks.take(6), key = { it.uri }) { track ->
+            itemsIndexed(tracks.take(6), key = { index, track -> "${track.uri}_$index" }) { _, track ->
                 LibraryRow(track = track, isCurrent = track.uri == currentTrack?.uri, onClick = { controller.playTrack(track) })
             }
             item {

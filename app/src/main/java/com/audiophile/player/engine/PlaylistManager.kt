@@ -42,7 +42,17 @@ class PlaylistManager(context: Context) {
 
     private fun loadData() {
         val favs = prefs.getStringSet("favorites_set", emptySet()) ?: emptySet()
-        _favoriteUris.value = favs.toSet()
+        val cleanFavs = favs.filter { fav ->
+            val name = java.io.File(fav).name
+            !name.startsWith(".") &&
+            !name.contains("trashed", ignoreCase = true) &&
+            !name.startsWith("veyl_online_stream_") &&
+            !fav.contains("/cache/")
+        }.toSet()
+        _favoriteUris.value = cleanFavs
+        if (cleanFavs.size != favs.size) {
+            prefs.edit().putStringSet("favorites_set", cleanFavs).apply()
+        }
 
         val playlistsJson = prefs.getString("playlists_json", "[]") ?: "[]"
         val list = mutableListOf<UserPlaylist>()
@@ -55,7 +65,11 @@ class PlaylistManager(context: Context) {
                 val trackArr = obj.getJSONArray("tracks")
                 val tracks = mutableListOf<String>()
                 for (j in 0 until trackArr.length()) {
-                    tracks.add(trackArr.getString(j))
+                    val t = trackArr.getString(j)
+                    val tName = java.io.File(t).name
+                    if (!tName.startsWith(".") && !tName.contains("trashed", ignoreCase = true) && !tName.startsWith("veyl_online_stream_") && !t.contains("/cache/")) {
+                        tracks.add(t)
+                    }
                 }
                 list.add(UserPlaylist(id, name, tracks))
             }
@@ -69,10 +83,19 @@ class PlaylistManager(context: Context) {
         val metaMap = mutableMapOf<String, TrackInfo>()
         try {
             val arr = JSONArray(onlineJson)
+            val musicDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC)
+            val veylDir = java.io.File(musicDir, "Veyl")
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val track = jsonToTrackInfo(obj)
                 metaMap[track.uri] = track
+                val fName = java.io.File(track.uri).name
+                if (fName.isNotBlank()) metaMap[fName] = track
+
+                val sanitized = "${track.title} - ${track.artist ?: ""}".replace(Regex("[^a-zA-Z0-9.\\- ]"), "_").trim()
+                val targetPath = java.io.File(veylDir, "$sanitized.m4a").absolutePath
+                metaMap[targetPath] = track
+                metaMap[java.io.File(targetPath).name] = track
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error loading online track metadata", e)
@@ -145,28 +168,77 @@ class PlaylistManager(context: Context) {
     /**
      * Completely removes a track from Favorites, Playlists, and online metadata mapping.
      */
-    fun removeTrackEverywhere(uri: String) {
+    fun removeTrackEverywhere(uri: String, title: String? = null, artist: String? = null) {
         val fileName = java.io.File(uri).name
+        val metaMap = _onlineTrackMeta.value
 
-        // Remove from favorites
+        // Find any tracks in onlineTrackMeta matching uri, fileName, or (title + artist)
+        val matchingTracks = metaMap.values.filter { t ->
+            t.uri == uri ||
+            (fileName.isNotBlank() && java.io.File(t.uri).name == fileName) ||
+            (!title.isNullOrBlank() && t.title.equals(title, ignoreCase = true) &&
+             (artist.isNullOrBlank() || (t.artist ?: "").equals(artist, ignoreCase = true)))
+        }
+
+        val allRelatedUris = mutableSetOf(uri)
+        if (fileName.isNotBlank()) allRelatedUris.add(fileName)
+        val musicDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC)
+        val veylDir = java.io.File(musicDir, "Veyl")
+
+        for (t in matchingTracks) {
+            allRelatedUris.add(t.uri)
+            allRelatedUris.add(java.io.File(t.uri).name)
+            val sanitized = "${t.title} - ${t.artist ?: ""}".replace(Regex("[^a-zA-Z0-9.\\- ]"), "_").trim()
+            val targetPath = java.io.File(veylDir, "$sanitized.m4a").absolutePath
+            allRelatedUris.add(targetPath)
+            allRelatedUris.add(java.io.File(targetPath).name)
+        }
+
+        // 1. Remove from favorites
         val currentFavs = _favoriteUris.value.toMutableSet()
-        val toRemove = currentFavs.filter { it == uri || (fileName.isNotBlank() && java.io.File(it).name == fileName) }
-        if (toRemove.isNotEmpty()) {
-            currentFavs.removeAll(toRemove.toSet())
+        val toRemoveFavs = currentFavs.filter { fav ->
+            val favName = java.io.File(fav).name
+            allRelatedUris.contains(fav) ||
+            allRelatedUris.contains(favName) ||
+            favName.startsWith(".") ||
+            favName.contains("trashed", ignoreCase = true) ||
+            favName.startsWith("veyl_online_stream_") ||
+            fav.contains("/cache/")
+        }
+        if (toRemoveFavs.isNotEmpty()) {
+            currentFavs.removeAll(toRemoveFavs.toSet())
             _favoriteUris.value = currentFavs
             prefs.edit().putStringSet("favorites_set", currentFavs).apply()
         }
 
-        // Remove from playlists
+        // 2. Remove from playlists
         val updatedPlaylists = _playlists.value.map { pl ->
-            pl.copy(trackUris = pl.trackUris.filter { it != uri && (fileName.isBlank() || java.io.File(it).name != fileName) })
+            pl.copy(trackUris = pl.trackUris.filter { trackUri ->
+                val plName = java.io.File(trackUri).name
+                !allRelatedUris.contains(trackUri) &&
+                !allRelatedUris.contains(plName) &&
+                !plName.startsWith(".") &&
+                !plName.contains("trashed", ignoreCase = true) &&
+                !plName.startsWith("veyl_online_stream_") &&
+                !trackUri.contains("/cache/")
+            })
         }
         savePlaylists(updatedPlaylists)
 
-        // Remove from metadata mapping
+        // 3. Remove from metadata mapping
         val currentMeta = _onlineTrackMeta.value.toMutableMap()
-        currentMeta.remove(uri)
-        if (fileName.isNotBlank()) currentMeta.remove(fileName)
+        for (k in allRelatedUris) {
+            currentMeta.remove(k)
+        }
+        if (!title.isNullOrBlank()) {
+            val toRemoveKeys = currentMeta.filter { (_, v) ->
+                v.title.equals(title, ignoreCase = true) &&
+                (artist.isNullOrBlank() || (v.artist ?: "").equals(artist, ignoreCase = true))
+            }.keys
+            for (k in toRemoveKeys) {
+                currentMeta.remove(k)
+            }
+        }
         _onlineTrackMeta.value = currentMeta
         persistOnlineTracks(currentMeta.values.toList())
     }
@@ -178,11 +250,11 @@ class PlaylistManager(context: Context) {
     fun updateTrackUri(oldUri: String, newUri: String) {
         if (oldUri == newUri) return
 
-        // Update favorites: ensure newUri is present and keep oldUri so ongoing playback stays favorited
+        // Update favorites: replace oldUri with newUri
         val currentFavs = _favoriteUris.value.toMutableSet()
         if (currentFavs.contains(oldUri) || currentFavs.contains(newUri)) {
+            currentFavs.remove(oldUri)
             currentFavs.add(newUri)
-            currentFavs.add(oldUri)
             _favoriteUris.value = currentFavs
             prefs.edit().putStringSet("favorites_set", currentFavs).apply()
         }
@@ -198,6 +270,8 @@ class PlaylistManager(context: Context) {
         // Update metadata mapping
         val currentMeta = _onlineTrackMeta.value.toMutableMap()
         val oldTrack = currentMeta[oldUri] ?: currentMeta[java.io.File(oldUri).name]
+        currentMeta.remove(oldUri)
+        currentMeta.remove(java.io.File(oldUri).name)
         if (oldTrack != null) {
             val updatedTrack = oldTrack.copy(uri = newUri)
             currentMeta[newUri] = updatedTrack
@@ -218,6 +292,13 @@ class PlaylistManager(context: Context) {
         if (fileName.isNotBlank()) {
             current[fileName] = track
         }
+        val musicDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC)
+        val veylDir = java.io.File(musicDir, "Veyl")
+        val sanitized = "${track.title} - ${track.artist ?: ""}".replace(Regex("[^a-zA-Z0-9.\\- ]"), "_").trim()
+        val targetPath = java.io.File(veylDir, "$sanitized.m4a").absolutePath
+        current[targetPath] = track
+        current[java.io.File(targetPath).name] = track
+
         song?.let {
             if (it.streamUrl.isNotBlank()) current[it.streamUrl] = track
             if (it.id.isNotBlank()) current[it.id] = track
@@ -234,8 +315,11 @@ class PlaylistManager(context: Context) {
 
     private fun persistOnlineTracks(tracks: List<TrackInfo>) {
         try {
+            val distinctTracks = tracks.distinctBy {
+                "${it.title.lowercase()}_${(it.artist ?: "").lowercase()}"
+            }
             val arr = JSONArray()
-            tracks.forEach { arr.put(trackInfoToJson(it)) }
+            distinctTracks.forEach { arr.put(trackInfoToJson(it)) }
             prefs.edit().putString("online_tracks_json", arr.toString()).apply()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to persist online track metadata", e)

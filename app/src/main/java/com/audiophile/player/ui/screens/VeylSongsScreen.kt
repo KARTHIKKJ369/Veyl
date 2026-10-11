@@ -116,11 +116,22 @@ fun VeylSongsScreen(
     var expandedArtist by remember { mutableStateOf<String?>(null) }
     var expandedAlbum by remember { mutableStateOf<String?>(null) }
 
-    val tabs = listOf("All", "Artists", "Albums", "Playlists")
+    val tabs = listOf("All", "Favorites", "Artists", "Albums", "Playlists")
 
     // Filter and sort tracks by category, search query, and sort options
     val filteredTracks = remember(tracks, searchQuery, selectedTab, favoriteUris, sortOption, sortAscending) {
-        val sourceTracks = if (selectedTab == "Favorites") favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.distinctBy { it.uri } else tracks
+        val sourceTracks = if (selectedTab == "Favorites") {
+            favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+                val fName = File(it.uri).name
+                !fName.startsWith(".") &&
+                !fName.contains("trashed", ignoreCase = true) &&
+                !it.title.contains("trashed", ignoreCase = true) &&
+                !fName.startsWith("veyl_online_stream_") &&
+                !it.uri.contains("/cache/")
+            }.distinctBy {
+                controller.onlineStreamManager.getTargetStorageFileForTrack(it).absolutePath
+            }
+        } else tracks
         val base = sourceTracks.filter { track ->
             val artistName = track.artist ?: ""
             val albumName = track.album ?: ""
@@ -814,7 +825,7 @@ fun VeylSongsScreen(
                         when (viewLayout) {
                             SongViewLayout.GRID -> {
                                 // 2-Column Modern Grid matching the reference audiophile design
-                                items(filteredTracks.chunked(2), key = { pair -> pair.first().uri }) { rowItems ->
+                                itemsIndexed(filteredTracks.chunked(2), key = { index, pair -> "${pair.first().uri}_$index" }) { _, rowItems ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -873,7 +884,7 @@ fun VeylSongsScreen(
                             }
                             SongViewLayout.COMPACT -> {
                                 // Compact Engineering Row
-                                itemsIndexed(filteredTracks, key = { _, track -> track.uri }) { index, track ->
+                                itemsIndexed(filteredTracks, key = { index, track -> "${track.uri}_$index" }) { index, track ->
                                     val isPlayingThis = currentUri == track.uri
                                     Row(
                                         modifier = Modifier
@@ -937,9 +948,9 @@ fun VeylSongsScreen(
                             }
                             SongViewLayout.LIST -> {
                                 // Detailed Modern Audio List (Stitch Resonate List Row)
-                                itemsIndexed(filteredTracks, key = { _, track -> track.uri }) { index, track ->
+                                itemsIndexed(filteredTracks, key = { index, track -> "${track.uri}_$index" }) { index, track ->
                                     val isPlayingThis = currentUri == track.uri
-                                    val isFav = controller.isTrackFavorite(track)
+                                    val isFav = remember(track, favoriteUris) { controller.isTrackFavorite(track, favoriteUris) }
 
                                     Row(
                                         modifier = Modifier

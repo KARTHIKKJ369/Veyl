@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -410,7 +411,7 @@ fun VeylSearchScreen(
                                 modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
                             )
                         }
-                        items(listenNowTracks, key = { it.uri }) { track ->
+                        itemsIndexed(listenNowTracks, key = { index, track -> "${track.uri}_$index" }) { _, track ->
                             SearchTrackRow(
                                 track = track,
                                 onClick = {
@@ -466,7 +467,7 @@ fun VeylSearchScreen(
                     if (showLocal && songResults.isNotEmpty()) {
                         item { SearchSectionHeader(label = "Local Songs", count = songResults.size) }
                         val displayedSongs = if (showAllSongs) songResults else songResults.take(6)
-                        items(displayedSongs, key = { "song_${it.uri}" }) { track ->
+                        itemsIndexed(displayedSongs, key = { index, track -> "song_${track.uri}_$index" }) { _, track ->
                             SearchTrackRow(
                                 track = track,
                                 onClick = {
@@ -581,7 +582,7 @@ fun VeylSearchScreen(
                         }
 
                         if (onlineResults.isNotEmpty()) {
-                            items(onlineResults, key = { "saavn_${it.id}" }) { item ->
+                            itemsIndexed(onlineResults, key = { index, item -> "saavn_${item.id}_$index" }) { _, item ->
                                 val isCurrent = currentOnlineSong?.id == item.id
                                 val isBufferingThis = isCurrent && isOnlineBuffering
                                 val isPlayingThis = isCurrent && playbackState == PlaybackStateEnum.PLAYING

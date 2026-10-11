@@ -649,8 +649,12 @@ class AudioEngineController private constructor(private val context: Context) {
         }
 
         // 2. Remove from Queue & Original Queue
-        _queue.value = _queue.value.filter { it.uri != uri && it.uri != targetFile.absolutePath && File(it.uri).name != fileName }
-        _originalQueue.value = _originalQueue.value.filter { it.uri != uri && it.uri != targetFile.absolutePath && File(it.uri).name != fileName }
+        _queue.value = _queue.value.filter {
+            it.uri != uri && it.uri != targetFile.absolutePath && File(it.uri).name != fileName && !it.title.equals(track.title, ignoreCase = true)
+        }
+        _originalQueue.value = _originalQueue.value.filter {
+            it.uri != uri && it.uri != targetFile.absolutePath && File(it.uri).name != fileName && !it.title.equals(track.title, ignoreCase = true)
+        }
 
         // 3. Remove from Recently Played / Playback History
         val filteredHistory = _playbackHistory.value.filter {
@@ -662,14 +666,14 @@ class AudioEngineController private constructor(private val context: Context) {
         }
         _playbackHistory.value = filteredHistory
         persistPlaybackHistory(filteredHistory)
-        playHistory.removeAll { it.uri == uri || it.uri == targetFile.absolutePath || File(it.uri).name == fileName }
+        playHistory.removeAll { it.uri == uri || it.uri == targetFile.absolutePath || File(it.uri).name == fileName || it.title.equals(track.title, ignoreCase = true) }
 
         // 4. Remove Play Count
         playCountPrefs.edit().remove(uri).remove(targetFile.absolutePath).remove(fileName).apply()
 
-        // 5. Remove from Favorites, Playlists & onlineTrackMeta
-        playlistManager.removeTrackEverywhere(uri)
-        playlistManager.removeTrackEverywhere(targetFile.absolutePath)
+        // 5. Remove from Favorites, Playlists & onlineTrackMeta across all representations
+        playlistManager.removeTrackEverywhere(uri, track.title, track.artist)
+        playlistManager.removeTrackEverywhere(targetFile.absolutePath, track.title, track.artist)
 
         // 6. Remove from downloaded / downloading URIs
         _downloadedUris.value = _downloadedUris.value - uri - targetFile.absolutePath - fileName - targetFile.name
@@ -680,7 +684,8 @@ class AudioEngineController private constructor(private val context: Context) {
             it.uri != uri &&
             it.uri != targetFile.absolutePath &&
             File(it.uri).name != fileName &&
-            File(it.uri).name != targetFile.name
+            File(it.uri).name != targetFile.name &&
+            !it.title.equals(track.title, ignoreCase = true)
         }
         _libraryTracks.value = filteredLibrary
         updateDerivedTrackLists(filteredLibrary)
@@ -699,6 +704,31 @@ class AudioEngineController private constructor(private val context: Context) {
                 if (companionJpg.exists()) filesToDelete.add(companionJpg)
             }
 
+            // Remove any associated stream cache files in app cache directory
+            try {
+                context.cacheDir.listFiles { _, name ->
+                    name.startsWith("veyl_online_stream_")
+                }?.forEach { cacheF ->
+                    val len1 = if (f1.exists()) f1.length() else 0L
+                    val len2 = if (f2.exists()) f2.length() else 0L
+                    if (cacheF.absolutePath == uri ||
+                        cacheF.absolutePath == currentUri ||
+                        (len1 > 0L && Math.abs(cacheF.length() - len1) < 300_000L) ||
+                        (len2 > 0L && Math.abs(cacheF.length() - len2) < 300_000L)) {
+                        filesToDelete.add(cacheF)
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // Remove any .trashed files matching this track or in the Veyl directory
+            try {
+                targetFile.parentFile?.listFiles { _, name ->
+                    name.contains("trashed", ignoreCase = true)
+                }?.forEach { trashedF ->
+                    filesToDelete.add(trashedF)
+                }
+            } catch (_: Exception) {}
+
             // Remove from Android MediaStore ContentResolver
             try {
                 for (f in filesToDelete) {
@@ -708,6 +738,11 @@ class AudioEngineController private constructor(private val context: Context) {
                         arrayOf(f.absolutePath)
                     )
                 }
+                context.contentResolver.delete(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    "${MediaStore.Audio.Media.DATA} = ? OR ${MediaStore.Audio.Media.TITLE} = ?",
+                    arrayOf(targetFile.absolutePath, track.title)
+                )
             } catch (e: Exception) {
                 Log.w("AudioEngineController", "MediaStore delete error", e)
             }
@@ -914,27 +949,18 @@ class AudioEngineController private constructor(private val context: Context) {
         prevTrack?.let { playTrack(it) }
     }
 
-    fun isTrackFavorite(track: TrackInfo?): Boolean {
+    fun isTrackFavorite(track: TrackInfo?, favs: Set<String> = favoriteUris.value): Boolean {
         if (track == null) return false
-        val favs = favoriteUris.value
         if (favs.contains(track.uri)) return true
 
-        val targetFile = onlineStreamManager.getTargetStorageFileForTrack(track)
-        if (favs.contains(targetFile.absolutePath)) return true
+        val targetPath = onlineStreamManager.getTargetStorageFileForTrack(track).absolutePath
+        if (favs.contains(targetPath)) return true
 
-        val meta = playlistManager.getTrackMeta(track.uri)
+        val meta = playlistManager.getTrackMeta(track.uri) ?: playlistManager.getTrackMeta(targetPath)
         if (meta != null) {
             if (favs.contains(meta.uri)) return true
-            val metaTarget = onlineStreamManager.getTargetStorageFileForTrack(meta)
-            if (favs.contains(metaTarget.absolutePath)) return true
-        }
-
-        val fName = File(track.uri).name
-        val match = playlistManager.onlineTrackMeta.value[fName]
-        if (match != null) {
-            if (favs.contains(match.uri)) return true
-            val matchTarget = onlineStreamManager.getTargetStorageFileForTrack(match)
-            if (favs.contains(matchTarget.absolutePath)) return true
+            val metaTarget = onlineStreamManager.getTargetStorageFileForTrack(meta).absolutePath
+            if (favs.contains(metaTarget)) return true
         }
 
         return false
@@ -943,25 +969,27 @@ class AudioEngineController private constructor(private val context: Context) {
     fun toggleFavorite(uri: String, trackInfo: TrackInfo? = null) {
         val resolved = trackInfo ?: resolveTrackInfo(uri) ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
         val targetPath = resolved?.let { onlineStreamManager.getTargetStorageFileForTrack(it).absolutePath }
-        val meta = resolved?.let { playlistManager.getTrackMeta(it.uri) }
-        val metaUri = meta?.uri
 
         val isCurrentlyFav = isTrackFavorite(resolved) || playlistManager.isFavorite(uri) ||
-                (targetPath != null && playlistManager.isFavorite(targetPath)) ||
-                (metaUri != null && playlistManager.isFavorite(metaUri))
+                (targetPath != null && playlistManager.isFavorite(targetPath))
+
+        Log.d("AudioEngineController", "toggleFavorite: uri=$uri, targetPath=$targetPath, isCurrentlyFav=$isCurrentlyFav")
 
         if (isCurrentlyFav) {
             // Remove from favorites: remove all associated URIs
             val toRemove = mutableSetOf(uri)
             if (targetPath != null) toRemove.add(targetPath)
-            if (metaUri != null) toRemove.add(metaUri)
             if (resolved != null) toRemove.add(resolved.uri)
+            val meta = resolved?.let { playlistManager.getTrackMeta(it.uri) }
+            if (meta != null) {
+                toRemove.add(meta.uri)
+                toRemove.add(onlineStreamManager.getTargetStorageFileForTrack(meta).absolutePath)
+            }
             playlistManager.removeFavorites(toRemove)
         } else {
             // Add to favorites: immediately add all associated URIs so UI turns red instantly
             val toAdd = mutableSetOf(uri)
             if (targetPath != null) toAdd.add(targetPath)
-            if (metaUri != null) toAdd.add(metaUri)
             if (resolved != null) toAdd.add(resolved.uri)
             playlistManager.addFavorites(toAdd)
 
@@ -1097,7 +1125,16 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private fun enrichTracksWithKnownMetadata(tracks: List<TrackInfo>): List<TrackInfo> {
         val knownMap = playlistManager.onlineTrackMeta.value
-        return tracks.map { track ->
+        return tracks
+            .filter { track ->
+                val fName = File(track.uri).name
+                !fName.startsWith(".") &&
+                !fName.contains("trashed", ignoreCase = true) &&
+                !track.title.contains("trashed", ignoreCase = true) &&
+                !fName.startsWith("veyl_online_stream_") &&
+                !track.uri.contains("/cache/")
+            }
+            .map { track ->
             val file = File(track.uri)
             val fName = file.name
             val match = knownMap[track.uri] ?: knownMap[fName] ?: knownMap.values.find { File(it.uri).name == fName }
@@ -1249,8 +1286,11 @@ class AudioEngineController private constructor(private val context: Context) {
                         val path = cursor.getString(dataCol) ?: continue
                         val file = File(path)
                         if (!file.exists() || file.length() == 0L) continue
+                        val fName = file.name
+                        if (fName.startsWith(".") || fName.contains("trashed", ignoreCase = true) || fName.startsWith("veyl_online_stream_") || path.contains("/cache/")) continue
 
                         val title = cursor.getString(titleCol) ?: file.nameWithoutExtension
+                        if (title.contains("trashed", ignoreCase = true)) continue
                         val artist = cursor.getString(artistCol) ?: "Unknown Artist"
                         val album = cursor.getString(albumCol) ?: "Unknown Album"
                         val durationMs = cursor.getLong(durationCol)
@@ -1563,9 +1603,21 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun resolveTrackInfo(uri: String): TrackInfo? {
-        val fromLib = _libraryTracks.value.find { it.uri == uri }
+        val fName = File(uri).name
+        if (fName.startsWith(".") || fName.contains("trashed", ignoreCase = true) || fName.startsWith("veyl_online_stream_") || uri.contains("/cache/")) {
+            // It's a trashed or temp cache file. Purge from favorites and reject immediately.
+            playlistManager.removeFavorites(setOf(uri))
+            return null
+        }
+
+        val fromLib = _libraryTracks.value.find { it.uri == uri || File(it.uri).name == fName }
         if (fromLib != null) {
-            return enrichTracksWithKnownMetadata(listOf(fromLib)).first()
+            val file = File(fromLib.uri)
+            if (!file.exists() && (fromLib.uri.startsWith("/") || fromLib.uri.startsWith("file:"))) {
+                playlistManager.removeFavorites(setOf(uri, fromLib.uri))
+                return null
+            }
+            return enrichTracksWithKnownMetadata(listOf(fromLib)).firstOrNull()
         }
 
         val meta = playlistManager.getTrackMeta(uri)
@@ -1574,19 +1626,47 @@ class AudioEngineController private constructor(private val context: Context) {
             if (targetFile.exists() && targetFile.length() > 50_000L) {
                 return meta.copy(uri = targetFile.absolutePath, hasArtwork = true)
             }
+            val isDownloading = _downloadingUris.value.contains(targetFile.absolutePath) || _downloadingUris.value.contains(uri)
+            if (!isDownloading && (meta.uri.startsWith("/") || meta.uri.startsWith("file:"))) {
+                val origFile = File(meta.uri)
+                if (!origFile.exists()) {
+                    // Song was deleted from storage!
+                    playlistManager.removeTrackEverywhere(uri, meta.title, meta.artist)
+                    return null
+                }
+            }
+            if (meta.title.contains("trashed", ignoreCase = true)) {
+                playlistManager.removeTrackEverywhere(uri, meta.title, meta.artist)
+                return null
+            }
             return meta
         }
 
         val current = _status.value?.currentTrack
-        if (current?.uri == uri) return current
+        if (current?.uri == uri) {
+            val cName = File(current.uri).name
+            if (!cName.startsWith(".") && !cName.contains("trashed", ignoreCase = true) && !cName.startsWith("veyl_online_stream_")) {
+                return current
+            }
+        }
 
         val f = File(uri)
         if (f.exists()) {
+            if (f.name.startsWith(".") || f.name.contains("trashed", ignoreCase = true) || f.name.startsWith("veyl_online_stream_") || f.nameWithoutExtension.contains("trashed", ignoreCase = true)) {
+                playlistManager.removeFavorites(setOf(uri, f.name))
+                return null
+            }
             val match = playlistManager.onlineTrackMeta.value.values.find { File(it.uri).name == f.name }
             if (match != null) {
                 return match.copy(uri = f.absolutePath, hasArtwork = true)
             }
-            val companionJpg = File(f.parentFile, "${f.nameWithoutExtension}.jpg")
+            // Only create fallback TrackInfo for recognized audio file extensions
+            val ext = f.extension.lowercase()
+            val validAudioExts = setOf("flac", "wav", "mp3", "m4a", "aac", "ogg", "opus", "dsf", "dff")
+            if (!validAudioExts.contains(ext)) {
+                return null
+            }
+            val companionJpg = File(f.parentFile ?: File(""), "${f.nameWithoutExtension}.jpg")
             return TrackInfo(
                 uri = f.absolutePath,
                 title = f.nameWithoutExtension,
@@ -1602,9 +1682,13 @@ class AudioEngineController private constructor(private val context: Context) {
                 bitDepth = 16u.toUByte(),
                 bitrate = 320000u,
                 channels = 2u.toUByte(),
-                formatName = f.extension.uppercase(),
+                formatName = ext.uppercase(),
                 hasArtwork = companionJpg.exists()
             )
+        } else {
+            if (uri.startsWith("/") || uri.startsWith("file:")) {
+                playlistManager.removeFavorites(setOf(uri))
+            }
         }
         return null
     }

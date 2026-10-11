@@ -118,7 +118,16 @@ fun VeylLibraryScreen(
                 it.sampleRate >= 88200u ||
                 (it.bitDepth ?: 16u) > 16u
             }
-            LibrarySourceTab.FAVORITES -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.distinctBy { it.uri }
+            LibrarySourceTab.FAVORITES -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+                val fName = File(it.uri).name
+                !fName.startsWith(".") &&
+                !fName.contains("trashed", ignoreCase = true) &&
+                !it.title.contains("trashed", ignoreCase = true) &&
+                !fName.startsWith("veyl_online_stream_") &&
+                !it.uri.contains("/cache/")
+            }.distinctBy {
+                controller.onlineStreamManager.getTargetStorageFileForTrack(it).absolutePath
+            }
         }
 
         // Apply secondary tag filter
@@ -433,10 +442,10 @@ fun VeylLibraryScreen(
                 } else {
                     itemsIndexed(
                         items = filteredTracks,
-                        key = { _, track -> track.uri }
+                        key = { index, track -> "${track.uri}_$index" }
                     ) { index, track ->
                         val isCurrent = currentTrack?.uri == track.uri
-                        val isFavorite = controller.isTrackFavorite(track)
+                        val isFavorite = remember(track, favoriteUris) { controller.isTrackFavorite(track, favoriteUris) }
 
                         VeylTrackRow(
                             track = track,

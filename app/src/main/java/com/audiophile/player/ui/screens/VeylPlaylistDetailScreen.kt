@@ -52,6 +52,7 @@ import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylTypography
 import uniffi.audiophile_core.TrackInfo
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,14 +76,30 @@ fun VeylPlaylistDetailScreen(
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
 
     val playlistTracks = when (title) {
-        "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.distinctBy { it.uri }
+        "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+            val fName = File(it.uri).name
+            !fName.startsWith(".") &&
+            !fName.contains("trashed", ignoreCase = true) &&
+            !it.title.contains("trashed", ignoreCase = true) &&
+            !fName.startsWith("veyl_online_stream_") &&
+            !it.uri.contains("/cache/")
+        }.distinctBy {
+            controller.onlineStreamManager.getTargetStorageFileForTrack(it).absolutePath
+        }
         "Top Tracks" -> if (topTracks.isNotEmpty()) topTracks else allTracks
         "Last added" -> if (lastAddedTracks.isNotEmpty()) lastAddedTracks else allTracks
         "History" -> historyTracks
         else -> {
             val custom = playlists.find { it.name.equals(title, ignoreCase = true) }
             if (custom != null) {
-                custom.trackUris.mapNotNull { controller.resolveTrackInfo(it) }
+                custom.trackUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+                    val fName = File(it.uri).name
+                    !fName.startsWith(".") &&
+                    !fName.contains("trashed", ignoreCase = true) &&
+                    !it.title.contains("trashed", ignoreCase = true) &&
+                    !fName.startsWith("veyl_online_stream_") &&
+                    !it.uri.contains("/cache/")
+                }
             } else {
                 allTracks
             }
@@ -304,7 +321,7 @@ fun VeylPlaylistDetailScreen(
                 }
             }
         } else {
-            itemsIndexed(playlistTracks, key = { _, track -> track.uri }) { index, track ->
+            itemsIndexed(playlistTracks, key = { index, track -> "${track.uri}_$index" }) { index, track ->
                 val isPlayingThis = currentUri == track.uri
 
                 Row(
