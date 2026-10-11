@@ -79,6 +79,7 @@ import java.io.File
 @Composable
 fun VeylLibraryScreen(
     controller: AudioEngineController,
+    onNavigateToSearch: () -> Unit = {},
     onSelectRootFolder: () -> Unit,
     onTrackSelected: (TrackInfo) -> Unit,
     onNavigateToSettings: () -> Unit,
@@ -190,23 +191,22 @@ fun VeylLibraryScreen(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(VeylSpacing.xs)) {
-                        // Search Button
+                        // Search Button -> Direct 1-click full search
                         IconButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                isSearchExpanded = !isSearchExpanded
-                                if (!isSearchExpanded) searchQuery = ""
+                                onNavigateToSearch()
                             },
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(if (isSearchExpanded) colors.surfaceElevated else colors.glassButtonBg)
-                                .border(1.dp, if (isSearchExpanded) colors.borderActive else colors.borderHairline, CircleShape)
+                                .background(colors.glassButtonBg)
+                                .border(1.dp, colors.borderHairline, CircleShape)
                         ) {
                             Icon(
-                                imageVector = if (isSearchExpanded) VeylIcons.Close else VeylIcons.Search,
-                                contentDescription = if (isSearchExpanded) "Close Search" else "Search Library",
-                                tint = if (isSearchExpanded) colors.accentSignal else colors.textPrimary,
+                                imageVector = VeylIcons.Search,
+                                contentDescription = "Search Library",
+                                tint = colors.textPrimary,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -229,114 +229,6 @@ fun VeylLibraryScreen(
                                 tint = colors.textPrimary,
                                 modifier = Modifier.size(20.dp)
                             )
-                        }
-                    }
-                }
-            }
-
-            // 2. Smarter Expandable Telemetry Search Bar (With Trending Suggestions)
-            item {
-                AnimatedVisibility(
-                    visible = isSearchExpanded,
-                    enter = fadeIn() + slideInVertically(),
-                    exit = fadeOut() + slideOutVertically()
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(VeylSpacing.xs)) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-                                .background(colors.surfaceElevated)
-                                .border(1.dp, colors.borderActive, RoundedCornerShape(VeylSpacing.RadiusMd))
-                                .padding(horizontal = VeylSpacing.md, vertical = VeylSpacing.sm)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(VeylSpacing.xs)
-                            ) {
-                                Icon(
-                                    imageVector = VeylIcons.Search,
-                                    contentDescription = null,
-                                    tint = colors.accentSignal,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                BasicTextField(
-                                    value = searchQuery,
-                                    onValueChange = { searchQuery = it },
-                                    singleLine = true,
-                                    textStyle = TextStyle(
-                                        fontFamily = FontFamily.SansSerif,
-                                        fontSize = 14.sp,
-                                        color = colors.textPrimary
-                                    ),
-                                    cursorBrush = SolidColor(colors.accentSignal),
-                                    modifier = Modifier.weight(1f),
-                                    decorationBox = { innerTextField ->
-                                        if (searchQuery.isEmpty()) {
-                                            Text(
-                                                text = "Search by title, artist, or format (e.g. DSD, FLAC)...",
-                                                style = VeylTypography.Body,
-                                                color = colors.textMuted
-                                            )
-                                        }
-                                        innerTextField()
-                                    }
-                                )
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(
-                                        onClick = { searchQuery = "" },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = VeylIcons.Close,
-                                            contentDescription = "Clear search",
-                                            tint = colors.textSecondary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // Trending Audiophile Search Chips (Smarter Search Pattern)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = "SUGGESTIONS:",
-                                style = VeylTypography.MonoBadge,
-                                color = colors.textMuted,
-                                fontSize = 9.sp,
-                                modifier = Modifier.align(Alignment.CenterVertically).padding(end = 4.dp)
-                            )
-                            searchSuggestions.forEach { tag ->
-                                val isSelected = searchQuery.equals(tag, ignoreCase = true)
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                                        .background(if (isSelected) colors.accentSignal.copy(alpha = 0.2f) else colors.surfacePill)
-                                        .border(
-                                            1.dp,
-                                            if (isSelected) colors.accentSignal else colors.borderHairline,
-                                            RoundedCornerShape(VeylSpacing.RadiusSm)
-                                        )
-                                        .clickable {
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            searchQuery = if (isSelected) "" else tag
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = tag,
-                                        style = VeylTypography.MonoSpec,
-                                        color = if (isSelected) colors.accentSignal else colors.textSecondary,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                            }
                         }
                     }
                 }

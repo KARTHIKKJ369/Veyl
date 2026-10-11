@@ -89,6 +89,7 @@ enum class SongSortOption(val label: String) {
 @Composable
 fun VeylSongsScreen(
     controller: AudioEngineController,
+    onNavigateToSearch: () -> Unit = {},
     onPickFolder: () -> Unit,
     onNavigateToPlaylist: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -202,23 +203,22 @@ fun VeylSongsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Quick Search / Filter Toggle Button
+                        // Search Button (1 click to open full search & keyboard)
                         Box(
                             modifier = Modifier
                                 .size(38.dp)
                                 .clip(CircleShape)
-                                .background(if (isSearchExpanded || searchQuery.isNotEmpty()) colors.accentSignal.copy(alpha = 0.2f) else colors.surfacePanel)
+                                .background(colors.surfacePanel)
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    isSearchExpanded = !isSearchExpanded
-                                    if (!isSearchExpanded) searchQuery = ""
+                                    onNavigateToSearch()
                                 },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (isSearchExpanded || searchQuery.isNotEmpty()) VeylIcons.Close else VeylIcons.Search,
-                                contentDescription = if (isSearchExpanded || searchQuery.isNotEmpty()) "Close Filter" else "Filter Library",
-                                tint = if (isSearchExpanded || searchQuery.isNotEmpty()) colors.accentSignal else colors.textPrimary,
+                                imageVector = VeylIcons.Search,
+                                contentDescription = "Search Library",
+                                tint = colors.textPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -242,68 +242,6 @@ fun VeylSongsScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                    }
-                }
-            }
-
-            // 2. Search Field (Collapsible inline filter for library browsing)
-            if (isSearchExpanded || searchQuery.isNotEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = {
-                                Text(
-                                    text = "Filter songs, albums, artists, genres...",
-                                    style = VeylTypography.Body,
-                                    color = colors.textMuted,
-                                    fontSize = 14.sp
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = VeylIcons.Search,
-                                    contentDescription = "Search",
-                                    tint = colors.textMuted,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            },
-                            trailingIcon = {
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(
-                                            imageVector = VeylIcons.Close,
-                                            contentDescription = "Clear",
-                                            tint = colors.textMuted,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                } else {
-                                    Icon(
-                                        imageVector = VeylIcons.Waveform,
-                                        contentDescription = "Audio Waveform",
-                                        tint = colors.textMuted.copy(alpha = 0.55f),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            },
-                            shape = RoundedCornerShape(24.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = colors.surfacePanel,
-                                unfocusedContainerColor = colors.surfacePanel,
-                                focusedBorderColor = colors.accentSignal,
-                                unfocusedBorderColor = colors.borderHairline.copy(alpha = 0.4f),
-                                focusedTextColor = colors.textPrimary,
-                                unfocusedTextColor = colors.textPrimary
-                            ),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
                     }
                 }
             }

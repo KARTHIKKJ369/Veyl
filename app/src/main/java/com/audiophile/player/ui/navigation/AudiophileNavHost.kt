@@ -230,6 +230,9 @@ fun AudiophileNavHost(
                 ) {
                     VeylSongsScreen(
                         controller = controller,
+                        onNavigateToSearch = {
+                            navController.navigate(VeylScreen.Search.route)
+                        },
                         onPickFolder = onSelectRootFolder,
                         onNavigateToPlaylist = { playlistName ->
                             navController.navigate("playlist/$playlistName")
