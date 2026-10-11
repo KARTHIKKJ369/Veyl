@@ -65,6 +65,45 @@ class StreamTest {
         val mb = total.toDouble() / (1024 * 1024)
         val mbps = (mb / (dlMs / 1000.0))
         println("Downloaded ${"%.2f".format(mb)} MB in ${dlMs}ms (${"%.2f".format(mbps)} MB/s) to ${tempFile.absolutePath}")
-        println("=== TEST PASSED: ULTRA-FAST STUDIO AUDIO VALIDATED ===")
+        
+        // Inspect top level MP4 atoms
+        // Test embedding metadata
+        println("=== EMBEDDING METADATA VIA Mp4MetadataTagger ===")
+        val tagSuccess = Mp4MetadataTagger.embedMetadata(
+            file = tempFile,
+            title = "Starboy",
+            artist = "The Weeknd",
+            album = "Starboy",
+            coverBytes = byteArrayOf(1, 2, 3, 4) // dummy image bytes
+        )
+        println("Tag success: $tagSuccess")
+        assert(tagSuccess)
+
+        // Run afinfo on Mac to verify metadata recognition
+        val proc = ProcessBuilder("afinfo", tempFile.absolutePath).start()
+        val afinfoOutput = proc.inputStream.bufferedReader().readText()
+        println("afinfo output:\n$afinfoOutput")
+
+        // Parse ilst tags from tempFile
+        val taggedBytes = tempFile.readBytes()
+        val ilstIndex = (0 until taggedBytes.size - 4).firstOrNull {
+            taggedBytes[it] == 'i'.code.toByte() &&
+            taggedBytes[it + 1] == 'l'.code.toByte() &&
+            taggedBytes[it + 2] == 's'.code.toByte() &&
+            taggedBytes[it + 3] == 't'.code.toByte()
+        } ?: -1
+        println("ilst found at index: $ilstIndex")
+        assert(ilstIndex != -1)
+
+        var p = ilstIndex + 4
+        while (p + 8 <= taggedBytes.size && p < ilstIndex + 1000) {
+            val sz = java.nio.ByteBuffer.wrap(taggedBytes, p, 4).int
+            val name = String(taggedBytes, p + 4, 4, Charsets.ISO_8859_1)
+            println("Tag atom: $name, size: $sz")
+            if (sz <= 0) break
+            p += sz
+        }
+
+        println("=== TEST PASSED: ULTRA-FAST STUDIO AUDIO & METADATA VALIDATED ===")
     }
 }

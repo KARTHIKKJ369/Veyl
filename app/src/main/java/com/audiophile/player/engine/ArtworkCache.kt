@@ -54,29 +54,61 @@ object ArtworkCache {
     fun registerOnlineArtwork(trackUri: String, imageUrl: String) {
         if (trackUri.isNotBlank() && imageUrl.isNotBlank()) {
             onlineArtMapping[trackUri] = imageUrl
+            val clean = trackUri.removePrefix("file://")
+            onlineArtMapping[clean] = imageUrl
+            onlineArtMapping["file://$clean"] = imageUrl
+            val name = File(clean).name
+            if (name.isNotBlank()) {
+                onlineArtMapping[name] = imageUrl
+            }
         }
     }
 
     fun getOnlineArtwork(trackUri: String): String? {
-        return onlineArtMapping[trackUri]
+        val clean = trackUri.removePrefix("file://")
+        return onlineArtMapping[trackUri] ?: onlineArtMapping[clean] ?: onlineArtMapping["file://$clean"] ?: onlineArtMapping[File(clean).name]
     }
 
     fun getArtwork(uri: String, targetSizePx: Int = 128): Bitmap? {
-        val actualUri = onlineArtMapping[uri] ?: uri
+        val clean = uri.removePrefix("file://")
+        val actualUri = onlineArtMapping[uri] ?: onlineArtMapping[clean] ?: onlineArtMapping["file://$clean"] ?: onlineArtMapping[File(clean).name] ?: uri
         val cacheKey = if (targetSizePx > 256) "${actualUri}_lg" else "${actualUri}_sm"
         return memoryCache.get(cacheKey)
     }
 
     suspend fun loadArtwork(uri: String, targetSizePx: Int = 128): Bitmap? = withContext(Dispatchers.IO) {
         if (uri.isBlank()) return@withContext null
-        val actualUri = onlineArtMapping[uri] ?: uri
+        val clean = uri.removePrefix("file://")
+        val actualUri = onlineArtMapping[uri] ?: onlineArtMapping[clean] ?: onlineArtMapping["file://$clean"] ?: onlineArtMapping[File(clean).name] ?: uri
         val cacheKey = if (targetSizePx > 256) "${actualUri}_lg" else "${actualUri}_sm"
         val cached = memoryCache.get(cacheKey)
         if (cached != null) return@withContext cached
 
         var bitmap: Bitmap? = null
 
-        // 0. Check if this is an HTTP/HTTPS remote URL
+        // 0. Check if actualUri points to an image file directly (e.g. companion .jpg or .png)
+        val candidateFilePath = when {
+            actualUri.startsWith("file://") -> actualUri.removePrefix("file://")
+            else -> actualUri
+        }
+        val candidateImgFile = File(candidateFilePath)
+        if (candidateImgFile.exists() && (candidateImgFile.extension.equals("jpg", ignoreCase = true) || candidateImgFile.extension.equals("jpeg", ignoreCase = true) || candidateImgFile.extension.equals("png", ignoreCase = true))) {
+            try {
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(candidateImgFile.absolutePath, options)
+                options.inSampleSize = calculateInSampleSize(options, targetSizePx, targetSizePx)
+                options.inJustDecodeBounds = false
+                bitmap = BitmapFactory.decodeFile(candidateImgFile.absolutePath, options)
+            } catch (e: Throwable) {
+                Log.w("ArtworkCache", "Failed to decode companion image file $candidateFilePath", e)
+            }
+            if (bitmap != null) {
+                memoryCache.put(cacheKey, bitmap)
+                return@withContext bitmap
+            }
+        }
+
+        // 0b. Check if this is an HTTP/HTTPS remote URL
         if (actualUri.startsWith("http://") || actualUri.startsWith("https://")) {
             try {
                 val conn = java.net.URL(actualUri).openConnection() as java.net.HttpURLConnection
@@ -147,18 +179,25 @@ object ArtworkCache {
             }
         }
 
-        // 3. Fallback to folder artwork (cached lookup)
+        // 3. Fallback to track companion artwork or folder artwork
         if (bitmap == null) {
             try {
-                val parentFile = File(uri).parentFile
+                val currentFile = File(uri)
+                val parentFile = currentFile.parentFile
                 val parentPath = parentFile?.absolutePath
                 if (parentPath != null && parentFile.exists()) {
-                    val artFilePath = folderArtCache.computeIfAbsent(parentPath) {
-                        parentFile.listFiles { _, name ->
-                            val n = name.lowercase()
-                            n.startsWith("cover.") || n.startsWith("folder.") ||
-                            n.startsWith("album.") || n.endsWith(".jpg") || n.endsWith(".png")
-                        }?.firstOrNull()?.absolutePath ?: ""
+                    // Check direct companion image with matching track title
+                    val companionArt = File(parentFile, "${currentFile.nameWithoutExtension}.jpg")
+                    val artFilePath = if (companionArt.exists()) {
+                        companionArt.absolutePath
+                    } else {
+                        folderArtCache.computeIfAbsent(parentPath) {
+                            parentFile.listFiles { _, name ->
+                                val n = name.lowercase()
+                                n.startsWith("cover.") || n.startsWith("folder.") ||
+                                n.startsWith("album.") || n.endsWith(".jpg") || n.endsWith(".png")
+                            }?.firstOrNull()?.absolutePath ?: ""
+                        }
                     }
 
                     if (artFilePath.isNotBlank() && File(artFilePath).exists()) {

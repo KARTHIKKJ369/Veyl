@@ -899,6 +899,48 @@ class AudioEngineController private constructor(private val context: Context) {
         scanDirectory(path)
     }
 
+    private fun enrichTracksWithKnownMetadata(tracks: List<TrackInfo>): List<TrackInfo> {
+        val knownMap = playlistManager.onlineTrackMeta.value
+        return tracks.map { track ->
+            val file = File(track.uri)
+            val fName = file.name
+            val match = knownMap[track.uri] ?: knownMap[fName] ?: knownMap.values.find { File(it.uri).name == fName }
+
+            val companionJpg = File(file.parentFile ?: File(""), "${file.nameWithoutExtension}.jpg")
+            val hasArt = track.hasArtwork || companionJpg.exists() || ArtworkCache.getOnlineArtwork(track.uri) != null
+
+            if (match != null) {
+                val needArtist = track.artist.isNullOrBlank() || track.artist == "Unknown Artist" || track.artist == "<unknown>"
+                val needAlbum = track.album.isNullOrBlank() || track.album == "Unknown Album" || track.album == "<unknown>"
+                val needTitle = track.title.isBlank() || track.title == file.nameWithoutExtension
+
+                track.copy(
+                    title = if (needTitle && match.title.isNotBlank()) match.title else track.title,
+                    artist = if (needArtist && !match.artist.isNullOrBlank()) match.artist else track.artist,
+                    album = if (needAlbum && !match.album.isNullOrBlank()) match.album else track.album,
+                    albumArtist = if (track.albumArtist.isNullOrBlank() && !match.albumArtist.isNullOrBlank()) match.albumArtist else track.albumArtist,
+                    hasArtwork = hasArt || match.hasArtwork
+                )
+            } else if (hasArt && !track.hasArtwork) {
+                track.copy(hasArtwork = true)
+            } else {
+                track
+            }
+        }
+    }
+
+    private fun addTrackToLibrary(track: TrackInfo) {
+        val current = _libraryTracks.value.toMutableList()
+        val existingIndex = current.indexOfFirst { it.uri == track.uri || File(it.uri).name == File(track.uri).name }
+        if (existingIndex != -1) {
+            current[existingIndex] = track
+        } else {
+            current.add(0, track)
+        }
+        _libraryTracks.value = current
+        updateDerivedTrackLists(current)
+    }
+
     fun scanDirectory(path: String) {
         scope.launch(Dispatchers.IO) {
             _isScanning.value = true
@@ -906,7 +948,8 @@ class AudioEngineController private constructor(private val context: Context) {
             try {
                 val dir = File(path)
                 if (dir.exists()) {
-                    val tracks = libraryEngine.scanDirectory(dir.absolutePath)
+                    val rawTracks = libraryEngine.scanDirectory(dir.absolutePath)
+                    val tracks = enrichTracksWithKnownMetadata(rawTracks)
                     Log.i("AudioEngineController", "Scanned ${tracks.size} tracks from $path")
                     withContext(Dispatchers.Main) {
                         _libraryTracks.value = tracks
@@ -1015,15 +1058,14 @@ class AudioEngineController private constructor(private val context: Context) {
                 }
 
                 if (tracks.isNotEmpty()) {
-                    Log.i("AudioEngineController", "Discovered ${tracks.size} tracks from MediaStore")
+                    val enrichedTracks = enrichTracksWithKnownMetadata(tracks)
+                    Log.i("AudioEngineController", "Discovered ${enrichedTracks.size} tracks from MediaStore")
                     withContext(Dispatchers.Main) {
-                        if (_libraryTracks.value.isEmpty()) {
-                            _libraryTracks.value = tracks
-                            updateDerivedTrackLists(tracks)
-                            if (_originalQueue.value.isEmpty()) {
-                                _originalQueue.value = tracks
-                                _queue.value = tracks
-                            }
+                        _libraryTracks.value = enrichedTracks
+                        updateDerivedTrackLists(enrichedTracks)
+                        if (_originalQueue.value.isEmpty()) {
+                            _originalQueue.value = enrichedTracks
+                            _queue.value = enrichedTracks
                         }
                     }
                 }
@@ -1050,7 +1092,8 @@ class AudioEngineController private constructor(private val context: Context) {
                 prefs.edit().putString("root_audio_dir", targetPath).apply()
                 _selectedRootPath.value = targetPath
 
-                val tracks = libraryEngine.scanDirectory(targetPath)
+                val rawTracks = libraryEngine.scanDirectory(targetPath)
+                val tracks = enrichTracksWithKnownMetadata(rawTracks)
                 Log.i("AudioEngineController", "Scanned ${tracks.size} tracks from resolved path: $targetPath")
                 withContext(Dispatchers.Main) {
                     _libraryTracks.value = tracks
@@ -1200,10 +1243,33 @@ class AudioEngineController private constructor(private val context: Context) {
         onError: ((Throwable) -> Unit)? = null
     ) {
         val targetFile = onlineStreamManager.getTargetStorageFileForTrack(track)
+        val songItem = _currentOnlineSong.value?.takeIf { it.title.equals(track.title, ignoreCase = true) }
+            ?: OnlineSongItem(
+                id = track.uri,
+                title = track.title,
+                artist = track.artist ?: "Unknown Artist",
+                album = track.album ?: "",
+                durationSeconds = track.durationSeconds,
+                thumbnailUrl = ArtworkCache.getOnlineArtwork(track.uri) ?: ArtworkCache.getOnlineArtwork(targetFile.absolutePath) ?: "",
+                streamUrl = ""
+            )
+
         if (targetFile.exists() && targetFile.length() > 50_000L) {
-            _downloadedUris.value = _downloadedUris.value + track.uri + targetFile.absolutePath
-            playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
-            onCompleted?.invoke(targetFile)
+            scope.launch(Dispatchers.IO) {
+                onlineStreamManager.finalizeDownloadedFile(songItem, targetFile)
+                val downloadedTrack = track.copy(
+                    uri = targetFile.absolutePath,
+                    album = if (track.album.isNullOrBlank()) track.title else track.album,
+                    hasArtwork = true
+                )
+                playlistManager.registerOnlineTrack(downloadedTrack)
+                playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
+                _downloadedUris.value = _downloadedUris.value + track.uri + targetFile.absolutePath
+                withContext(Dispatchers.Main) {
+                    addTrackToLibrary(downloadedTrack)
+                    onCompleted?.invoke(targetFile)
+                }
+            }
             return
         }
 
@@ -1216,17 +1282,20 @@ class AudioEngineController private constructor(private val context: Context) {
             if (cacheFile.exists() && cacheFile.length() > 50_000L) {
                 try {
                     cacheFile.copyTo(targetFile, overwrite = true)
-                    android.media.MediaScannerConnection.scanFile(
-                        context,
-                        arrayOf(targetFile.absolutePath),
-                        arrayOf("audio/mp4")
-                    ) { _, _ -> }
+                    onlineStreamManager.finalizeDownloadedFile(songItem, targetFile)
+                    val downloadedTrack = track.copy(
+                        uri = targetFile.absolutePath,
+                        album = if (track.album.isNullOrBlank()) track.title else track.album,
+                        hasArtwork = true
+                    )
+                    playlistManager.registerOnlineTrack(downloadedTrack)
+                    playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
                     _downloadedUris.value = _downloadedUris.value + track.uri + targetFile.absolutePath
                     _downloadingUris.value = _downloadingUris.value - track.uri - targetFile.absolutePath
-                    playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
-                    val root = _selectedRootPath.value
-                    if (root != null) scanDirectory(root) else scanMediaStore()
                     withContext(Dispatchers.Main) {
+                        addTrackToLibrary(downloadedTrack)
+                        val root = _selectedRootPath.value
+                        if (root != null) scanDirectory(root) else scanMediaStore()
                         onCompleted?.invoke(targetFile)
                     }
                     return@launch
@@ -1235,24 +1304,20 @@ class AudioEngineController private constructor(private val context: Context) {
                 }
             }
 
-            val songItem = _currentOnlineSong.value?.takeIf { it.title.equals(track.title, ignoreCase = true) }
-                ?: OnlineSongItem(
-                    id = track.uri,
-                    title = track.title,
-                    artist = track.artist ?: "Unknown Artist",
-                    album = track.album ?: "",
-                    durationSeconds = track.durationSeconds,
-                    thumbnailUrl = ArtworkCache.getOnlineArtwork(track.uri) ?: "",
-                    streamUrl = ""
-                )
-
             onlineStreamManager.downloadSongToStorage(
                 song = songItem,
                 onProgress = {},
                 onCompleted = { file ->
+                    val downloadedTrack = track.copy(
+                        uri = file.absolutePath,
+                        album = if (track.album.isNullOrBlank()) track.title else track.album,
+                        hasArtwork = true
+                    )
+                    playlistManager.registerOnlineTrack(downloadedTrack)
+                    playlistManager.updateTrackUri(track.uri, file.absolutePath)
                     _downloadedUris.value = _downloadedUris.value + track.uri + file.absolutePath
                     _downloadingUris.value = _downloadingUris.value - track.uri - targetFile.absolutePath
-                    playlistManager.updateTrackUri(track.uri, file.absolutePath)
+                    addTrackToLibrary(downloadedTrack)
                     val root = _selectedRootPath.value
                     if (root != null) scanDirectory(root) else scanMediaStore()
                     onCompleted?.invoke(file)
@@ -1267,13 +1332,15 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun resolveTrackInfo(uri: String): TrackInfo? {
         val fromLib = _libraryTracks.value.find { it.uri == uri }
-        if (fromLib != null) return fromLib
+        if (fromLib != null) {
+            return enrichTracksWithKnownMetadata(listOf(fromLib)).first()
+        }
 
         val meta = playlistManager.getTrackMeta(uri)
         if (meta != null) {
             val targetFile = onlineStreamManager.getTargetStorageFileForTrack(meta)
             if (targetFile.exists() && targetFile.length() > 50_000L) {
-                return meta.copy(uri = targetFile.absolutePath)
+                return meta.copy(uri = targetFile.absolutePath, hasArtwork = true)
             }
             return meta
         }
@@ -1283,6 +1350,11 @@ class AudioEngineController private constructor(private val context: Context) {
 
         val f = File(uri)
         if (f.exists()) {
+            val match = playlistManager.onlineTrackMeta.value.values.find { File(it.uri).name == f.name }
+            if (match != null) {
+                return match.copy(uri = f.absolutePath, hasArtwork = true)
+            }
+            val companionJpg = File(f.parentFile, "${f.nameWithoutExtension}.jpg")
             return TrackInfo(
                 uri = f.absolutePath,
                 title = f.nameWithoutExtension,
@@ -1299,7 +1371,7 @@ class AudioEngineController private constructor(private val context: Context) {
                 bitrate = 320000u,
                 channels = 2u.toUByte(),
                 formatName = f.extension.uppercase(),
-                hasArtwork = false
+                hasArtwork = companionJpg.exists()
             )
         }
         return null
@@ -1318,8 +1390,33 @@ class AudioEngineController private constructor(private val context: Context) {
                 song = song,
                 onProgress = onProgress,
                 onCompleted = { file ->
-                    _downloadedUris.value = _downloadedUris.value + file.absolutePath
+                    val downloadedTrack = TrackInfo(
+                        uri = file.absolutePath,
+                        title = song.title,
+                        artist = song.artist,
+                        album = song.album.ifBlank { song.title },
+                        albumArtist = song.artist,
+                        genre = "Music",
+                        year = null,
+                        trackNumber = null,
+                        discNumber = null,
+                        durationSeconds = song.durationSeconds,
+                        sampleRate = 44100u,
+                        bitDepth = 16u.toUByte(),
+                        bitrate = 320000u,
+                        channels = 2u.toUByte(),
+                        formatName = "AAC",
+                        hasArtwork = true
+                    )
+                    playlistManager.registerOnlineTrack(downloadedTrack, song)
+                    if (song.thumbnailUrl.isNotBlank()) {
+                        ArtworkCache.registerOnlineArtwork(file.absolutePath, song.thumbnailUrl)
+                        ArtworkCache.registerOnlineArtwork("file://${file.absolutePath}", song.thumbnailUrl)
+                        ArtworkCache.registerOnlineArtwork(file.name, song.thumbnailUrl)
+                    }
+                    _downloadedUris.value = _downloadedUris.value + file.absolutePath + song.id
                     _downloadingUris.value = _downloadingUris.value - targetFile.absolutePath
+                    addTrackToLibrary(downloadedTrack)
                     val root = _selectedRootPath.value
                     if (root != null) scanDirectory(root) else scanMediaStore()
                     onCompleted(file)

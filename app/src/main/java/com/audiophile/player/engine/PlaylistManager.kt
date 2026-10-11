@@ -151,10 +151,11 @@ class PlaylistManager(context: Context) {
 
         // Update metadata mapping
         val currentMeta = _onlineTrackMeta.value.toMutableMap()
-        val oldTrack = currentMeta[oldUri]
+        val oldTrack = currentMeta[oldUri] ?: currentMeta[java.io.File(oldUri).name]
         if (oldTrack != null) {
             val updatedTrack = oldTrack.copy(uri = newUri)
             currentMeta[newUri] = updatedTrack
+            currentMeta[java.io.File(newUri).name] = updatedTrack
             _onlineTrackMeta.value = currentMeta
             persistOnlineTracks(currentMeta.values.toList())
         }
@@ -167,15 +168,22 @@ class PlaylistManager(context: Context) {
     fun registerOnlineTrack(track: TrackInfo, song: OnlineSongItem? = null) {
         val current = _onlineTrackMeta.value.toMutableMap()
         current[track.uri] = track
+        val fileName = java.io.File(track.uri).name
+        if (fileName.isNotBlank()) {
+            current[fileName] = track
+        }
         song?.let {
             if (it.streamUrl.isNotBlank()) current[it.streamUrl] = track
+            if (it.id.isNotBlank()) current[it.id] = track
+            if (it.videoId.isNotBlank()) current[it.videoId] = track
         }
         _onlineTrackMeta.value = current
         persistOnlineTracks(current.values.toList())
     }
 
     fun getTrackMeta(uri: String): TrackInfo? {
-        return _onlineTrackMeta.value[uri]
+        val map = _onlineTrackMeta.value
+        return map[uri] ?: map[java.io.File(uri).name]
     }
 
     private fun persistOnlineTracks(tracks: List<TrackInfo>) {

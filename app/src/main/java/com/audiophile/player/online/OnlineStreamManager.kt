@@ -187,6 +187,7 @@ class OnlineStreamManager(private val context: Context) {
         try {
             val targetFile = getTargetStorageFile(song)
             if (targetFile.exists() && targetFile.length() > 50_000L) {
+                finalizeDownloadedFile(song, targetFile)
                 withContext(Dispatchers.Main) {
                     onCompleted(targetFile)
                 }
@@ -197,11 +198,7 @@ class OnlineStreamManager(private val context: Context) {
             val activeCache = currentStreamFile
             if (activeCache != null && activeCache.exists() && activeCache.length() > 50_000L) {
                 activeCache.copyTo(targetFile, overwrite = true)
-                android.media.MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(targetFile.absolutePath),
-                    arrayOf("audio/mp4")
-                ) { _, _ -> }
+                finalizeDownloadedFile(song, targetFile)
                 withContext(Dispatchers.Main) {
                     onProgress(1f)
                     onCompleted(targetFile)
@@ -248,12 +245,7 @@ class OnlineStreamManager(private val context: Context) {
                 try { inputStream.close() } catch (_: Exception) {}
             }
 
-            // Register in MediaScanner so Veyl and Android instantly discover the new track
-            android.media.MediaScannerConnection.scanFile(
-                context,
-                arrayOf(targetFile.absolutePath),
-                arrayOf("audio/mp4")
-            ) { _, _ -> }
+            finalizeDownloadedFile(song, targetFile)
 
             withContext(Dispatchers.Main) {
                 onCompleted(targetFile)
@@ -263,6 +255,73 @@ class OnlineStreamManager(private val context: Context) {
                 onError(e)
             }
         }
+    }
+
+    fun finalizeDownloadedFile(song: OnlineSongItem, targetFile: File) {
+        var coverBytes: ByteArray? = null
+        if (song.thumbnailUrl.isNotBlank()) {
+            try {
+                val imgReq = okhttp3.Request.Builder()
+                    .url(song.thumbnailUrl)
+                    .build()
+                val imgResp = okHttpClient.newCall(imgReq).execute()
+                if (imgResp.isSuccessful) {
+                    coverBytes = imgResp.body?.bytes()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to download album art image for embedding", e)
+            }
+        }
+
+        val coverFile = File(targetFile.parentFile, "${targetFile.nameWithoutExtension}.jpg")
+
+        // If downloading image failed, check if companion cover already exists on disk
+        if ((coverBytes == null || coverBytes.isEmpty()) && coverFile.exists()) {
+            try {
+                coverBytes = coverFile.readBytes()
+            } catch (_: Exception) {}
+        }
+
+        // Save .jpg cover art beside audio file in Music/Veyl
+        if (coverBytes != null && coverBytes.isNotEmpty() && !coverFile.exists()) {
+            try {
+                coverFile.writeBytes(coverBytes)
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(coverFile.absolutePath),
+                    arrayOf("image/jpeg")
+                ) { _, _ -> }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to save companion cover.jpg", e)
+            }
+        }
+
+        // Embed MP4/iTunes tags (Title, Artist, Album, and Cover Art) directly into the .m4a file
+        Mp4MetadataTagger.embedMetadata(
+            file = targetFile,
+            title = song.title,
+            artist = song.artist,
+            album = song.album.ifBlank { song.title },
+            coverBytes = coverBytes
+        )
+
+        // Register in ArtworkCache
+        if (coverFile.exists()) {
+            com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork(targetFile.absolutePath, "file://${coverFile.absolutePath}")
+            com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork(targetFile.name, "file://${coverFile.absolutePath}")
+        }
+        if (song.thumbnailUrl.isNotBlank()) {
+            com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork(targetFile.absolutePath, song.thumbnailUrl)
+            com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork("file://${targetFile.absolutePath}", song.thumbnailUrl)
+            com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork(targetFile.name, song.thumbnailUrl)
+        }
+
+        // Register in Android MediaScanner
+        android.media.MediaScannerConnection.scanFile(
+            context,
+            arrayOf(targetFile.absolutePath),
+            arrayOf("audio/mp4")
+        ) { _, _ -> }
     }
 
     fun stopCurrentStream() {
