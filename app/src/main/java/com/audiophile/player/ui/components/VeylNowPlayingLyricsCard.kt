@@ -143,6 +143,7 @@ fun VeylNowPlayingLyricsCard(
                 ) {
                     AsyncAlbumArt(
                         uri = track?.uri ?: "",
+                        hasArtwork = track?.hasArtwork,
                         modifier = Modifier.fillMaxSize(),
                         targetSizePx = 256
                     )

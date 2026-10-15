@@ -591,6 +591,7 @@ private fun QueueTrackRow(
         ) {
             AsyncAlbumArt(
                 uri = track.uri,
+                hasArtwork = track.hasArtwork,
                 modifier = Modifier.fillMaxSize(),
                 shape = RoundedCornerShape(VeylSpacing.RadiusSm)
             )

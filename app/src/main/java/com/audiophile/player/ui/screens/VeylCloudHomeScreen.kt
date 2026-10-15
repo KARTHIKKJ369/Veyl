@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,6 +51,7 @@ import com.audiophile.player.engine.AudioEngineController
 import com.audiophile.player.online.CloudRecommendationService
 import com.audiophile.player.online.OnlineSongItem
 import com.audiophile.player.online.RecommendationSection
+import com.audiophile.player.ui.components.VeylStreamingTasteDialog
 import com.audiophile.player.ui.components.VeylTrackOptionsSheet
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
@@ -71,12 +74,20 @@ fun VeylCloudHomeScreen(
 
     val selectedLanguages by controller.selectedLanguages.collectAsStateWithLifecycle()
     val selectedArtists by controller.selectedArtists.collectAsStateWithLifecycle()
+    val hasConfiguredCloudPreferences by controller.hasConfiguredCloudPreferences.collectAsStateWithLifecycle()
     val playbackHistory by controller.playbackHistory.collectAsStateWithLifecycle()
     val libraryTracks by controller.libraryTracks.collectAsStateWithLifecycle()
     val currentTrack by controller.currentTrack.collectAsStateWithLifecycle()
     val isStreaming by controller.isOnlineStreaming.collectAsStateWithLifecycle()
 
-    var activeLanguageFilter by remember { mutableStateOf("All") }
+    var showOneTimeTasteDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(hasConfiguredCloudPreferences) {
+        if (!hasConfiguredCloudPreferences) {
+            showOneTimeTasteDialog = true
+        }
+    }
+
     var sections by remember { mutableStateOf<List<RecommendationSection>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
@@ -91,6 +102,15 @@ fun VeylCloudHomeScreen(
         }
     }
 
+    val jumpBackInState = rememberLazyListState()
+
+    // Snap to the newly added track at index 0 when history changes
+    LaunchedEffect(playbackHistory.firstOrNull()?.uri) {
+        if (playbackHistory.isNotEmpty()) {
+            jumpBackInState.scrollToItem(0)
+        }
+    }
+
     suspend fun loadFeed(forceRefresh: Boolean = false) {
         isLoading = true
         if (forceRefresh) CloudRecommendationService.clearCache()
@@ -98,13 +118,13 @@ fun VeylCloudHomeScreen(
             selectedLanguages = selectedLanguages,
             selectedArtists = selectedArtists,
             recentTracks = playbackHistory,
-            activeLanguageFilter = if (activeLanguageFilter == "All") null else activeLanguageFilter
+            activeLanguageFilter = null
         )
         sections = result
         isLoading = false
     }
 
-    LaunchedEffect(selectedLanguages, selectedArtists, activeLanguageFilter) {
+    LaunchedEffect(selectedLanguages, selectedArtists) {
         loadFeed(forceRefresh = false)
     }
 
@@ -171,110 +191,10 @@ fun VeylCloudHomeScreen(
                         }
                     }
                 }
-
-                Spacer(Modifier.height(16.dp))
-
-                // Language Filter Pills
-                val languagePills = remember(selectedLanguages) {
-                    listOf("All") + selectedLanguages.toList()
-                }
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(languagePills) { pill ->
-                        val isSelected = activeLanguageFilter == pill
-                        Surface(
-                            modifier = Modifier
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    activeLanguageFilter = pill
-                                }
-                                .clip(RoundedCornerShape(16.dp)),
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (isSelected) colors.accentSignal else colors.surfaceElevated,
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (isSelected) colors.accentSignal else colors.borderSubtle
-                            )
-                        ) {
-                            Text(
-                                text = pill,
-                                style = VeylTypography.BodySmall,
-                                color = if (isSelected) Color.Black else colors.textPrimary,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-                }
             }
         }
 
-        // 2. Offline Library Banner Card
-        item {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onNavigateToLibrary()
-                    },
-                shape = RoundedCornerShape(18.dp),
-                color = colors.surfacePanel,
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderSubtle)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(colors.accentSignal.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                VeylIcons.Folder,
-                                contentDescription = null,
-                                tint = colors.accentSignal,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "Local Offline Library",
-                                style = VeylTypography.TitleMedium,
-                                color = colors.textPrimary,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "${libraryTracks.size} tracks stored on device • Bit-perfect DSP",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textMuted
-                            )
-                        }
-                    }
-
-                    Icon(
-                        VeylIcons.ChevronRight,
-                        contentDescription = "View",
-                        tint = colors.textMuted,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-
-        // 3. Jump Back In (Recently Played History)
+        // 2. Jump Back In (Recently Played History)
         if (playbackHistory.isNotEmpty()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -287,10 +207,11 @@ fun VeylCloudHomeScreen(
                     )
 
                     LazyRow(
+                        state = jumpBackInState,
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        items(playbackHistory.take(8)) { track ->
+                        itemsIndexed(playbackHistory.take(8), key = { index, track -> "${track.uri}_$index" }) { _, track ->
                             RecentTrackCard(
                                 track = track,
                                 isPlaying = currentTrack?.uri == track.uri,
@@ -337,7 +258,7 @@ fun VeylCloudHomeScreen(
         }
 
         // 5. Dynamic Streaming Sections (Trending, Hits, Artists, Mood)
-        items(sections) { section ->
+        items(sections, key = { section -> section.title }) { section ->
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier
@@ -406,7 +327,7 @@ fun VeylCloudHomeScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(section.items) { song ->
+                    items(section.items, key = { song -> song.id }) { song ->
                         CloudSongCard(
                             song = song,
                             isPlaying = currentTrack?.title.equals(song.title, ignoreCase = true) && isStreaming,
@@ -452,6 +373,23 @@ fun VeylCloudHomeScreen(
             track = selectedTrackForOptions,
             controller = controller,
             onDismiss = { selectedTrackForOptions = null }
+        )
+    }
+
+    if (showOneTimeTasteDialog) {
+        VeylStreamingTasteDialog(
+            initialLanguages = selectedLanguages,
+            initialArtists = selectedArtists,
+            onDismiss = {
+                showOneTimeTasteDialog = false
+                controller.markCloudPreferencesConfigured()
+            },
+            onSave = { langs, artists ->
+                showOneTimeTasteDialog = false
+                controller.updateMusicPreferences(langs, artists)
+                CloudRecommendationService.clearCache()
+                coroutineScope.launch { loadFeed(forceRefresh = true) }
+            }
         )
     }
 }
@@ -563,6 +501,7 @@ private fun RecentTrackCard(
         ) {
             AsyncAlbumArt(
                 uri = track.uri,
+                hasArtwork = track.hasArtwork,
                 contentDescription = "${track.title} - ${track.artist}",
                 modifier = Modifier.fillMaxSize()
             )

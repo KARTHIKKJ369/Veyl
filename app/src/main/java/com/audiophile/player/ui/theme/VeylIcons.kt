@@ -1212,6 +1212,52 @@ object VeylIcons {
         }.build()
     }
 
+    val MusicNote: ImageVector by lazy {
+        ImageVector.Builder("VeylMusicNote", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(12f, 3f)
+                verticalLineToRelative(10.55f)
+                curveToRelative(-0.59f, -0.34f, -1.27f, -0.55f, -2f, -0.55f)
+                curveToRelative(-2.21f, 0f, -4f, 1.79f, -4f, 4f)
+                reflectiveCurveToRelative(1.79f, 4f, 4f, 4f)
+                reflectiveCurveToRelative(4f, -1.79f, 4f, -4f)
+                verticalLineTo(7f)
+                horizontalLineToRelative(4f)
+                verticalLineTo(3f)
+                horizontalLineToRelative(-6f)
+                close()
+            }
+        }.build()
+    }
+
+    val VolumeUp: ImageVector by lazy {
+        ImageVector.Builder("VeylVolumeUp", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(3f, 9f)
+                verticalLineToRelative(6f)
+                horizontalLineToRelative(4f)
+                lineToRelative(5f, 5f)
+                verticalLineTo(4f)
+                lineTo(7f, 9f)
+                horizontalLineTo(3f)
+                close()
+                moveTo(16.5f, 12f)
+                curveToRelative(0f, -1.77f, -1.02f, -3.29f, -2.5f, -4.03f)
+                verticalLineToRelative(8.05f)
+                curveToRelative(1.48f, -0.73f, 2.5f, -2.25f, 2.5f, -4.02f)
+                close()
+                moveTo(14f, 3.23f)
+                verticalLineToRelative(2.06f)
+                curveToRelative(2.89f, 0.86f, 5f, 3.54f, 5f, 6.71f)
+                reflectiveCurveToRelative(-2.11f, 5.85f, -5f, 6.71f)
+                verticalLineToRelative(2.06f)
+                curveToRelative(4.01f, -0.91f, 7f, -4.49f, 7f, -8.77f)
+                reflectiveCurveToRelative(-2.99f, -7.86f, -7f, -8.77f)
+                close()
+            }
+        }.build()
+    }
+
     val Equalizer: ImageVector get() = ParametricEq
     val FavoriteFilled: ImageVector get() = HeartFilled
     val FavoriteBorder: ImageVector get() = Heart
@@ -1220,6 +1266,71 @@ object VeylIcons {
     val RepeatOne: ImageVector get() = Repeat
     val Playlist: ImageVector get() = QueueList
     val Disc: ImageVector get() = StorageLocal
+
+    val Upload: ImageVector by lazy {
+        ImageVector.Builder("VeylUpload", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(5f, 20f)
+                horizontalLineToRelative(14f)
+                verticalLineToRelative(-2f)
+                horizontalLineTo(5f)
+                verticalLineToRelative(2f)
+                close()
+                moveTo(5f, 10f)
+                horizontalLineToRelative(4f)
+                verticalLineToRelative(6f)
+                horizontalLineToRelative(6f)
+                verticalLineToRelative(-6f)
+                horizontalLineToRelative(4f)
+                lineToRelative(-7f, -7f)
+                lineToRelative(-7f, 7f)
+                close()
+            }
+        }.build()
+    }
+
+    val Edit: ImageVector by lazy {
+        ImageVector.Builder("VeylEdit", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(3f, 17.25f)
+                verticalLineTo(21f)
+                horizontalLineToRelative(3.75f)
+                lineTo(17.81f, 9.94f)
+                lineToRelative(-3.75f, -3.75f)
+                lineTo(3f, 17.25f)
+                close()
+                moveTo(20.71f, 7.04f)
+                curveToRelative(0.39f, -0.39f, 0.39f, -1.02f, 0f, -1.41f)
+                lineToRelative(-2.34f, -2.34f)
+                curveToRelative(-0.39f, -0.39f, -1.02f, -0.39f, -1.41f, 0f)
+                lineToRelative(-1.83f, 1.83f)
+                lineToRelative(3.75f, 3.75f)
+                lineToRelative(1.83f, -1.83f)
+                close()
+            }
+        }.build()
+    }
+
+    val Plus: ImageVector by lazy {
+        ImageVector.Builder("VeylPlus", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(19f, 13f)
+                horizontalLineToRelative(-6f)
+                verticalLineToRelative(6f)
+                horizontalLineToRelative(-2f)
+                verticalLineToRelative(-6f)
+                horizontalLineTo(5f)
+                verticalLineToRelative(-2f)
+                horizontalLineToRelative(6f)
+                verticalLineTo(5f)
+                horizontalLineToRelative(2f)
+                verticalLineToRelative(6f)
+                horizontalLineToRelative(6f)
+                verticalLineToRelative(2f)
+                close()
+            }
+        }.build()
+    }
 }
 
 

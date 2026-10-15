@@ -225,6 +225,16 @@ class AudioEngineController private constructor(private val context: Context) {
     )
     val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
 
+    private val _hasConfiguredCloudPreferences = MutableStateFlow(
+        prefs.getBoolean("has_configured_cloud_preferences", prefs.getString("app_experience_mode", null) == AppExperienceMode.CLOUD_FIRST.name && !prefs.getStringSet("selected_languages", emptySet()).isNullOrEmpty())
+    )
+    val hasConfiguredCloudPreferences: StateFlow<Boolean> = _hasConfiguredCloudPreferences.asStateFlow()
+
+    fun markCloudPreferencesConfigured() {
+        _hasConfiguredCloudPreferences.value = true
+        prefs.edit().putBoolean("has_configured_cloud_preferences", true).apply()
+    }
+
     private val _selectedLanguages = MutableStateFlow<Set<String>>(
         prefs.getStringSet("selected_languages", setOf("English", "Malayalam", "Tamil", "Hindi")) ?: setOf("English", "Malayalam", "Tamil", "Hindi")
     )
@@ -256,9 +266,12 @@ class AudioEngineController private constructor(private val context: Context) {
         _hasCompletedOnboarding.value = true
         _selectedLanguages.value = languages
         _selectedArtists.value = artists
+        val configuredCloud = mode == AppExperienceMode.CLOUD_FIRST && languages.isNotEmpty()
+        _hasConfiguredCloudPreferences.value = configuredCloud
         prefs.edit()
             .putString("app_experience_mode", mode.name)
             .putBoolean("has_completed_onboarding", true)
+            .putBoolean("has_configured_cloud_preferences", configuredCloud)
             .putStringSet("selected_languages", languages)
             .putStringSet("selected_artists", artists)
             .apply()
@@ -267,15 +280,21 @@ class AudioEngineController private constructor(private val context: Context) {
     fun updateMusicPreferences(languages: Set<String>, artists: Set<String>) {
         _selectedLanguages.value = languages
         _selectedArtists.value = artists
+        _hasConfiguredCloudPreferences.value = true
         prefs.edit()
             .putStringSet("selected_languages", languages)
             .putStringSet("selected_artists", artists)
+            .putBoolean("has_configured_cloud_preferences", true)
             .apply()
     }
 
     fun resetOnboarding() {
         _hasCompletedOnboarding.value = false
-        prefs.edit().putBoolean("has_completed_onboarding", false).apply()
+        _hasConfiguredCloudPreferences.value = false
+        prefs.edit()
+            .putBoolean("has_completed_onboarding", false)
+            .putBoolean("has_configured_cloud_preferences", false)
+            .apply()
     }
 
     // -------------------------------------------------------------------------
@@ -493,6 +512,14 @@ class AudioEngineController private constructor(private val context: Context) {
     val bitPerfectEnabled: StateFlow<Boolean> = _bitPerfectEnabled.asStateFlow()
     val isExclusiveMode: StateFlow<Boolean> = _bitPerfectEnabled.asStateFlow()
 
+    private val _playDuringCalls = MutableStateFlow(prefs.getBoolean("play_during_calls", false))
+    val playDuringCalls: StateFlow<Boolean> = _playDuringCalls.asStateFlow()
+
+    fun setPlayDuringCalls(enabled: Boolean) {
+        _playDuringCalls.value = enabled
+        prefs.edit().putBoolean("play_during_calls", enabled).apply()
+    }
+
     fun toggleExclusiveMode(enabled: Boolean) {
         setBitPerfectEnabled(enabled)
     }
@@ -505,6 +532,7 @@ class AudioEngineController private constructor(private val context: Context) {
 
     init {
         LyricsManager.init(context)
+        loadCachedLibraryTracks()
         initEngine()
         startPolling()
         loadPlaybackHistory()
@@ -588,11 +616,11 @@ class AudioEngineController private constructor(private val context: Context) {
                             _currentPositionSec.value = 0.0
                             _currentPositionMs.value = 0L
 
-                            // Record play count and history
-                            recordTrackPlayed(currentUri)
+                            // Record play count and history with active track info
+                            val curTrack = currentStatus.currentTrack
+                            recordTrackPlayed(currentUri, curTrack)
 
                             // Load lyrics asynchronously on track change (with online LRCLIB fallback)
-                            val curTrack = currentStatus.currentTrack
                             scope.launch {
                                 val lyrics = LyricsManager.loadLyricsForTrack(
                                     trackUri = currentUri,
@@ -630,8 +658,7 @@ class AudioEngineController private constructor(private val context: Context) {
                             isTransitioning = false
                         }
 
-                        val isEnded = currentStatus.state == PlaybackStateEnum.ENDED ||
-                                (dur > 2.0 && pos >= dur - 0.45 && isPlaying)
+                        val isEnded = currentStatus.state == PlaybackStateEnum.ENDED
 
                         if (isEnded && !isTransitioning && (now - lastTransitionTimestamp > 1500L)) {
                             isTransitioning = true
@@ -653,7 +680,63 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
+    private fun trackToJson(t: TrackInfo): org.json.JSONObject {
+        return org.json.JSONObject().apply {
+            put("uri", t.uri)
+            put("title", t.title)
+            put("artist", t.artist ?: "")
+            put("album", t.album ?: "")
+            put("albumArtist", t.albumArtist ?: "")
+            put("genre", t.genre ?: "")
+            put("durationSeconds", t.durationSeconds)
+            put("sampleRate", t.sampleRate.toInt())
+            put("bitDepth", t.bitDepth?.toInt() ?: 16)
+            put("bitrate", t.bitrate?.toInt() ?: 320000)
+            put("channels", t.channels.toInt())
+            put("formatName", t.formatName)
+            put("hasArtwork", t.hasArtwork)
+        }
+    }
+
+    private fun jsonToTrack(obj: org.json.JSONObject): TrackInfo {
+        return TrackInfo(
+            uri = obj.getString("uri"),
+            title = obj.getString("title"),
+            artist = obj.optString("artist", "Unknown Artist"),
+            album = obj.optString("album", ""),
+            albumArtist = obj.optString("albumArtist").takeIf { it.isNotBlank() },
+            genre = obj.optString("genre").takeIf { it.isNotBlank() },
+            year = null,
+            trackNumber = null,
+            discNumber = null,
+            durationSeconds = obj.optDouble("durationSeconds", 0.0),
+            sampleRate = obj.optInt("sampleRate", 44100).toUInt(),
+            bitDepth = obj.optInt("bitDepth", 16).toUByte(),
+            bitrate = obj.optInt("bitrate", 320000).toUInt(),
+            channels = obj.optInt("channels", 2).toUByte(),
+            formatName = obj.optString("formatName", "FLAC"),
+            hasArtwork = obj.optBoolean("hasArtwork", true)
+        )
+    }
+
     private fun loadPlaybackHistory() {
+        val tracksJson = playCountPrefs.getString("playback_history_tracks_json", null)
+        if (!tracksJson.isNullOrBlank()) {
+            try {
+                val arr = org.json.JSONArray(tracksJson)
+                val list = mutableListOf<TrackInfo>()
+                for (i in 0 until arr.length()) {
+                    list.add(jsonToTrack(arr.getJSONObject(i)))
+                }
+                if (list.isNotEmpty()) {
+                    _playbackHistory.value = list
+                    return
+                }
+            } catch (e: Exception) {
+                Log.w("AudioEngineController", "Error parsing playback_history_tracks_json", e)
+            }
+        }
+
         val json = playCountPrefs.getString("playback_history_uris", "[]") ?: "[]"
         try {
             val arr = org.json.JSONArray(json)
@@ -673,23 +756,76 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private fun persistPlaybackHistory(history: List<TrackInfo>) {
         try {
-            val arr = org.json.JSONArray()
-            history.forEach { arr.put(it.uri) }
-            playCountPrefs.edit().putString("playback_history_uris", arr.toString()).apply()
+            val arrUris = org.json.JSONArray()
+            val arrTracks = org.json.JSONArray()
+            history.forEach {
+                arrUris.put(it.uri)
+                arrTracks.put(trackToJson(it))
+            }
+            playCountPrefs.edit()
+                .putString("playback_history_uris", arrUris.toString())
+                .putString("playback_history_tracks_json", arrTracks.toString())
+                .apply()
         } catch (e: Exception) {
             Log.w("AudioEngineController", "Error persisting playback history", e)
         }
     }
 
-    private fun recordTrackPlayed(uri: String) {
+    private fun getLibraryCacheFile(): File = File(context.filesDir, "veyl_library_cache.json")
+
+    private fun loadCachedLibraryTracks() {
+        try {
+            val cacheFile = getLibraryCacheFile()
+            if (!cacheFile.exists()) return
+            val content = cacheFile.readText()
+            if (content.isBlank()) return
+            val arr = org.json.JSONArray(content)
+            val list = ArrayList<TrackInfo>(arr.length())
+            for (i in 0 until arr.length()) {
+                list.add(jsonToTrack(arr.getJSONObject(i)))
+            }
+            if (list.isNotEmpty()) {
+                _libraryTracks.value = list
+                _isScanning.value = false
+                updateDerivedTrackLists(list)
+                if (_originalQueue.value.isEmpty()) {
+                    _originalQueue.value = list
+                    _queue.value = list
+                }
+                Log.i("AudioEngineController", "Instantly loaded ${list.size} tracks from warm cache in <5ms")
+            }
+        } catch (e: Exception) {
+            Log.w("AudioEngineController", "Error loading library tracks cache", e)
+        }
+    }
+
+    private fun persistLibraryTracksCache(tracks: List<TrackInfo>) {
+        if (tracks.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val arr = org.json.JSONArray()
+                tracks.forEach { arr.put(trackToJson(it)) }
+                getLibraryCacheFile().writeText(arr.toString())
+            } catch (e: Exception) {
+                Log.w("AudioEngineController", "Error persisting library tracks cache", e)
+            }
+        }
+    }
+
+    fun recordTrackPlayed(uri: String, directTrack: TrackInfo? = null) {
         val currentCount = playCountPrefs.getInt(uri, 0)
         playCountPrefs.edit().putInt(uri, currentCount + 1).apply()
 
         val all = _libraryTracks.value
-        val track = all.firstOrNull { it.uri == uri } ?: resolveTrackInfo(uri) ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
+        val track = all.firstOrNull { it.uri == uri }
+            ?: directTrack
+            ?: resolveTrackInfo(uri)
+            ?: _queue.value.firstOrNull { it.uri == uri }
+            ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
+
         if (track != null) {
             val updatedHistory = (listOf(track) + _playbackHistory.value.filter {
-                it.uri != uri && !it.title.equals(track.title, ignoreCase = true)
+                it.uri != track.uri && (track.title.isBlank() || !it.title.equals(track.title, ignoreCase = true) || !it.artist.equals(track.artist, ignoreCase = true))
             }).take(50)
             _playbackHistory.value = updatedHistory
             persistPlaybackHistory(updatedHistory)
@@ -970,6 +1106,7 @@ class AudioEngineController private constructor(private val context: Context) {
         setGaplessEnabled(true)
         setCrossfadeSeconds(0f)
         setAutoFetchLyrics(true)
+        setPlayDuringCalls(false)
     }
 
     fun setRepeatMode(mode: RepeatMode) {
@@ -1101,6 +1238,11 @@ class AudioEngineController private constructor(private val context: Context) {
         if (track == null) return false
         if (favs.contains(track.uri)) return true
 
+        // Fast-path for local files: no need to invoke disk-based online stream path resolution
+        if (track.uri.startsWith("/") || track.uri.startsWith("content://") || track.uri.startsWith("file://")) {
+            return false
+        }
+
         val targetPath = onlineStreamManager.getTargetStorageFileForTrack(track).absolutePath
         if (favs.contains(targetPath)) return true
 
@@ -1160,6 +1302,24 @@ class AudioEngineController private constructor(private val context: Context) {
             }
         }
     }
+
+    fun createPlaylist(name: String): UserPlaylist = playlistManager.createPlaylist(name)
+
+    fun renamePlaylist(playlistId: String, newName: String) = playlistManager.renamePlaylist(playlistId, newName)
+
+    fun deletePlaylist(playlistId: String) = playlistManager.deletePlaylist(playlistId)
+
+    fun removeTrackFromPlaylist(playlistId: String, uri: String) = playlistManager.removeTrackFromPlaylist(playlistId, uri)
+
+    fun exportPlaylist(name: String, tracks: List<TrackInfo>, outputStream: java.io.OutputStream): Result<Int> =
+        playlistManager.exportPlaylist(name, tracks, outputStream)
+
+    fun importPlaylist(
+        inputStream: java.io.InputStream,
+        defaultName: String = "Imported Playlist",
+        libraryTracks: List<TrackInfo> = tracks.value
+    ): Result<UserPlaylist> =
+        playlistManager.importPlaylist(inputStream, defaultName, libraryTracks)
 
     fun removeFromQueue(index: Int) {
         val currentQueue = _queue.value.toMutableList()
@@ -1237,10 +1397,13 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     private fun loadSavedRootDirectory() {
+        val hasCached = _libraryTracks.value.isNotEmpty()
         val savedPath = prefs.getString("root_audio_dir", null)
         if (savedPath != null && File(savedPath).exists()) {
             _selectedRootPath.value = savedPath
-            scanDirectory(savedPath)
+            if (!hasCached) {
+                scanMediaStore()
+            }
         } else {
             val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
             val sdcardMusic = File("/storage/emulated/0/Music")
@@ -1256,8 +1419,10 @@ class AudioEngineController private constructor(private val context: Context) {
             if (detectedPath != null) {
                 _selectedRootPath.value = detectedPath
                 prefs.edit().putString("root_audio_dir", detectedPath).apply()
-                scanDirectory(detectedPath)
-            } else {
+                if (!hasCached) {
+                    scanMediaStore()
+                }
+            } else if (!hasCached) {
                 scanMediaStore()
             }
         }
@@ -1347,8 +1512,11 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
+    private var activeScanJob: Job? = null
+
     fun scanDirectory(path: String) {
-        scope.launch(Dispatchers.IO) {
+        if (activeScanJob?.isActive == true) return
+        activeScanJob = scope.launch(Dispatchers.IO) {
             _isScanning.value = true
             var delegatedToMediaStore = false
             try {
@@ -1370,6 +1538,7 @@ class AudioEngineController private constructor(private val context: Context) {
                     Log.i("AudioEngineController", "Scanned ${tracks.size} tracks from $path")
                     withContext(Dispatchers.Main) {
                         _libraryTracks.value = tracks
+                        persistLibraryTracksCache(tracks)
                         updateDerivedTrackLists(tracks)
                         if (_originalQueue.value.isEmpty() && tracks.isNotEmpty()) {
                             _originalQueue.value = tracks
@@ -1395,7 +1564,8 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun scanMediaStore() {
-        scope.launch(Dispatchers.IO) {
+        if (activeScanJob?.isActive == true) return
+        activeScanJob = scope.launch(Dispatchers.IO) {
             _isScanning.value = true
             try {
                 val tracks = mutableListOf<TrackInfo>()
@@ -1482,6 +1652,7 @@ class AudioEngineController private constructor(private val context: Context) {
                     Log.i("AudioEngineController", "Discovered ${enrichedTracks.size} tracks from MediaStore")
                     withContext(Dispatchers.Main) {
                         _libraryTracks.value = enrichedTracks
+                        persistLibraryTracksCache(enrichedTracks)
                         updateDerivedTrackLists(enrichedTracks)
                         if (_originalQueue.value.isEmpty()) {
                             _originalQueue.value = enrichedTracks
@@ -1498,7 +1669,8 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun scanFromTreeUri(treeUri: Uri) {
-        scope.launch(Dispatchers.IO) {
+        if (activeScanJob?.isActive == true) return
+        activeScanJob = scope.launch(Dispatchers.IO) {
             _isScanning.value = true
             try {
                 val resolvedPath = resolveTreeUriToPath(treeUri)
@@ -1517,6 +1689,7 @@ class AudioEngineController private constructor(private val context: Context) {
                 Log.i("AudioEngineController", "Scanned ${tracks.size} tracks from resolved path: $targetPath")
                 withContext(Dispatchers.Main) {
                     _libraryTracks.value = tracks
+                    persistLibraryTracksCache(tracks)
                     updateDerivedTrackLists(tracks)
                     if (_originalQueue.value.isEmpty() && tracks.isNotEmpty()) {
                         _originalQueue.value = tracks
@@ -1571,7 +1744,9 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun ensurePlaybackServiceStarted() {
         try {
-            val serviceIntent = Intent(context, com.audiophile.player.service.PlaybackService::class.java)
+            val serviceIntent = Intent(context, com.audiophile.player.service.PlaybackService::class.java).apply {
+                action = com.audiophile.player.service.PlaybackService.ACTION_START_SERVICE
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(serviceIntent)
             } else {
@@ -1925,7 +2100,7 @@ class AudioEngineController private constructor(private val context: Context) {
                 bitrate = 320000u,
                 channels = 2u.toUByte(),
                 formatName = ext.uppercase(),
-                hasArtwork = companionJpg.exists()
+                hasArtwork = true
             )
         } else {
             if (uri.startsWith("/") || uri.startsWith("file:")) {
@@ -2020,6 +2195,10 @@ class AudioEngineController private constructor(private val context: Context) {
             _isOnlineBuffering.value = false
             _currentOnlineSong.value = null
         }
+
+        // Immediately record play count and update playback history in real time
+        recordTrackPlayed(actualTrack.uri, actualTrack)
+
         nativeScope.launch {
             try {
             // Only switch hardware sample-rate and exclusive mode for external USB DACs!
@@ -2110,6 +2289,26 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
+    /**
+     * Refreshes and reopens the native audio output stream (e.g. after phone call ends or audio route change).
+     * Guarantees that the hardware sample rate matches the native mixer and clears any pitch distortion.
+     */
+    fun refreshHardwareOutput() {
+        try {
+            val dac = connectedDac.value
+            val targetRate = if (_bitPerfectEnabled.value && dac != null) {
+                usbDacManager.getOptimalSampleRate(currentOutputSampleRate.toInt()).toUInt()
+            } else {
+                48000u
+            }
+            val exclusive = _bitPerfectEnabled.value && dac != null
+            Log.i("AudioEngineController", "Refreshing hardware output stream: rate=$targetRate Hz, deviceId=${dac?.id}, exclusive=$exclusive")
+            reconfigureHardwareOutput(targetRate, dac?.id, exclusive)
+        } catch (e: Exception) {
+            Log.e("AudioEngineController", "Error refreshing hardware output stream", e)
+        }
+    }
+
     fun setDsdMode(mode: DsdModeEnum) {
         _dsdMode.value = mode
         prefs.edit().putString("dsd_mode", if (mode == DsdModeEnum.DO_P) "dop" else "pcm").apply()
@@ -2193,9 +2392,11 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun setEqBandGain(index: Int, gainDb: Float) {
-        prefs.edit().putFloat("eq_band_$index", gainDb).apply()
+        prefs.edit()
+            .putFloat("eq_band_$index", gainDb)
+            .putString("eq_preset", "Custom")
+            .apply()
         _currentEqPreset.value = "Custom"
-        prefs.edit().putString("eq_preset", "Custom").apply()
         val bands = _eqBands.value
         if (index in bands.indices) {
             val b = bands[index]
@@ -2207,10 +2408,13 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun setEqPreset(name: String, gains: List<Float>) {
         _currentEqPreset.value = name
-        prefs.edit().putString("eq_preset", name).apply()
+        val editor = prefs.edit().putString("eq_preset", name)
+        for (i in gains.indices) {
+            editor.putFloat("eq_band_$i", gains[i])
+        }
+        editor.apply()
         val bands = _eqBands.value
         for (i in gains.indices) {
-            prefs.edit().putFloat("eq_band_$i", gains[i]).apply()
             if (i in bands.indices) {
                 val b = bands[i]
                 nativeScope.launch { withNativeEngine { it.setEqBand(i.toUInt(), gains[i], b.frequency, b.q) } }
@@ -2295,6 +2499,7 @@ class AudioEngineController private constructor(private val context: Context) {
         private var INSTANCE: AudioEngineController? = null
 
         fun getInstance(context: Context): AudioEngineController {
+            ArtworkCache.init(context.applicationContext)
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: AudioEngineController(context.applicationContext).also { INSTANCE = it }
             }

@@ -128,10 +128,6 @@ fun VeylNowPlayingScreen(
     val coroutineScope = rememberCoroutineScope()
     val dragOffsetY = remember { Animatable(0f) }
 
-    BackHandler {
-        onNavigateBack()
-    }
-
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -233,6 +229,7 @@ fun VeylNowPlayingScreen(
                     ) {
                         AsyncAlbumArt(
                             uri = track?.uri ?: "",
+                            hasArtwork = track?.hasArtwork,
                             shape = RoundedCornerShape(24.dp),
                             modifier = Modifier.fillMaxSize(),
                             targetSizePx = 512

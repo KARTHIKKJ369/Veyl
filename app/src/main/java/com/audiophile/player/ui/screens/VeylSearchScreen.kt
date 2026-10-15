@@ -411,7 +411,7 @@ fun VeylSearchScreen(
                                 modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
                             )
                         }
-                        itemsIndexed(listenNowTracks, key = { index, track -> "${track.uri}_$index" }) { _, track ->
+                        items(listenNowTracks, key = { track -> track.uri }) { track ->
                             SearchTrackRow(
                                 track = track,
                                 onClick = {
@@ -467,7 +467,7 @@ fun VeylSearchScreen(
                     if (showLocal && songResults.isNotEmpty()) {
                         item { SearchSectionHeader(label = "Local Songs", count = songResults.size) }
                         val displayedSongs = if (showAllSongs) songResults else songResults.take(6)
-                        itemsIndexed(displayedSongs, key = { index, track -> "song_${track.uri}_$index" }) { _, track ->
+                        items(displayedSongs, key = { track -> track.uri }) { track ->
                             SearchTrackRow(
                                 track = track,
                                 onClick = {
@@ -501,11 +501,13 @@ fun VeylSearchScreen(
                     if (showLocal && albumResults.isNotEmpty()) {
                         item { SearchSectionHeader(label = "Local Albums", count = albumResults.size) }
                         items(albumResults, key = { "alb_${it.first}_${it.second}" }) { (album, artist, tracks) ->
+                            val firstTrack = tracks.firstOrNull()
                             SearchAlbumRow(
                                 albumName = album,
                                 artist = artist,
                                 trackCount = tracks.size,
-                                firstTrackUri = tracks.firstOrNull()?.uri ?: "",
+                                firstTrackUri = firstTrack?.uri ?: "",
+                                firstTrackHasArtwork = firstTrack?.hasArtwork,
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     saveRecentSearch(recentSearches, query, prefs)
@@ -520,11 +522,13 @@ fun VeylSearchScreen(
                     if (showLocal && artistResults.isNotEmpty()) {
                         item { SearchSectionHeader(label = "Local Artists", count = artistResults.size) }
                         items(artistResults, key = { "art_${it.first}" }) { (artist, tracks, albumCount) ->
+                            val firstTrack = tracks.firstOrNull()
                             SearchArtistRow(
                                 artistName = artist,
                                 trackCount = tracks.size,
                                 albumCount = albumCount,
-                                firstTrackUri = tracks.firstOrNull()?.uri ?: "",
+                                firstTrackUri = firstTrack?.uri ?: "",
+                                firstTrackHasArtwork = firstTrack?.hasArtwork,
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     saveRecentSearch(recentSearches, query, prefs)
@@ -626,7 +630,7 @@ fun VeylSearchScreen(
                         }
 
                         if (onlineResults.isNotEmpty()) {
-                            itemsIndexed(onlineResults, key = { index, item -> "saavn_${item.id}_$index" }) { _, item ->
+                            items(onlineResults, key = { item -> "saavn_${item.id}" }) { item ->
                                 val isCurrent = currentOnlineSong?.id == item.id
                                 val isBufferingThis = isCurrent && isOnlineBuffering
                                 val isPlayingThis = isCurrent && playbackState == PlaybackStateEnum.PLAYING
@@ -761,6 +765,7 @@ private fun SearchTrackRow(
     ) {
         AsyncAlbumArt(
             uri = track.uri,
+            hasArtwork = track.hasArtwork,
             modifier = Modifier
                 .size(52.dp)
                 .clip(RoundedCornerShape(8.dp))
@@ -937,6 +942,7 @@ private fun SearchAlbumRow(
     artist: String,
     trackCount: Int,
     firstTrackUri: String,
+    firstTrackHasArtwork: Boolean? = null,
     onClick: () -> Unit
 ) {
     val colors = LocalVeylColors.current
@@ -950,6 +956,7 @@ private fun SearchAlbumRow(
     ) {
         AsyncAlbumArt(
             uri = firstTrackUri,
+            hasArtwork = firstTrackHasArtwork,
             modifier = Modifier
                 .size(52.dp)
                 .clip(RoundedCornerShape(8.dp))
@@ -987,6 +994,7 @@ private fun SearchArtistRow(
     trackCount: Int,
     albumCount: Int,
     firstTrackUri: String,
+    firstTrackHasArtwork: Boolean? = null,
     onClick: () -> Unit
 ) {
     val colors = LocalVeylColors.current
@@ -1000,6 +1008,7 @@ private fun SearchArtistRow(
     ) {
         AsyncAlbumArt(
             uri = firstTrackUri,
+            hasArtwork = firstTrackHasArtwork,
             modifier = Modifier
                 .size(52.dp)
                 .clip(CircleShape)

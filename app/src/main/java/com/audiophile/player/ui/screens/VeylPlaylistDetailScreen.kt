@@ -1,5 +1,9 @@
 package com.audiophile.player.ui.screens
 
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,13 +23,21 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -38,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -63,6 +76,7 @@ fun VeylPlaylistDetailScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
     val allTracks by controller.tracks.collectAsStateWithLifecycle()
@@ -73,9 +87,17 @@ fun VeylPlaylistDetailScreen(
     val playlists by controller.playlists.collectAsStateWithLifecycle()
     val currentUri by controller.currentUri.collectAsStateWithLifecycle()
 
+    var currentPlaylistTitle by remember(title) { mutableStateOf(title) }
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
+    var showMenu by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var renameInput by remember { mutableStateOf("") }
 
-    val playlistTracks = when (title) {
+    val customPlaylist = playlists.find { it.name.equals(currentPlaylistTitle, ignoreCase = true) }
+    val isCustomPlaylist = customPlaylist != null && currentPlaylistTitle !in listOf("Favorites", "Top Tracks", "Last added", "History")
+
+    val playlistTracks = when (currentPlaylistTitle) {
         "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
             val fName = File(it.uri).name
             !fName.startsWith(".") &&
@@ -90,9 +112,8 @@ fun VeylPlaylistDetailScreen(
         "Last added" -> if (lastAddedTracks.isNotEmpty()) lastAddedTracks else allTracks
         "History" -> historyTracks
         else -> {
-            val custom = playlists.find { it.name.equals(title, ignoreCase = true) }
-            if (custom != null) {
-                custom.trackUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+            if (customPlaylist != null) {
+                customPlaylist.trackUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
                     val fName = File(it.uri).name
                     !fName.startsWith(".") &&
                     !fName.contains("trashed", ignoreCase = true) &&
@@ -102,6 +123,21 @@ fun VeylPlaylistDetailScreen(
                 }
             } else {
                 allTracks
+            }
+        }
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("audio/x-mpegurl")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    controller.exportPlaylist(currentPlaylistTitle, playlistTracks, os)
+                }
+                Toast.makeText(context, "Exported \"$currentPlaylistTitle\" (${playlistTracks.size} tracks)", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to export playlist: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -142,25 +178,85 @@ fun VeylPlaylistDetailScreen(
                 }
 
                 Text(
-                    text = title,
+                    text = currentPlaylistTitle,
                     style = VeylTypography.TitleMedium,
                     color = colors.textPrimary,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false).padding(horizontal = 12.dp)
                 )
 
-                IconButton(
-                    onClick = {
-                        if (playlistTracks.isNotEmpty()) {
-                            selectedTrackForOptions = playlistTracks.first()
+                Box {
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = VeylIcons.MoreVert,
+                            contentDescription = "Options",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.background(colors.surfacePanel)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Export Playlist (.m3u8)", color = colors.textPrimary) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = VeylIcons.Download,
+                                    contentDescription = null,
+                                    tint = colors.accentSignal,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            onClick = {
+                                showMenu = false
+                                val safeFilename = "${currentPlaylistTitle.replace(Regex("[^a-zA-Z0-9._ -]"), "_")}.m3u8"
+                                exportLauncher.launch(safeFilename)
+                            }
+                        )
+
+                        if (isCustomPlaylist) {
+                            DropdownMenuItem(
+                                text = { Text("Rename Playlist", color = colors.textPrimary) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = VeylIcons.Edit,
+                                        contentDescription = null,
+                                        tint = colors.textMuted,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    renameInput = currentPlaylistTitle
+                                    showRenameDialog = true
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Delete Playlist", color = colors.accentPeak) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = VeylIcons.Trash,
+                                        contentDescription = null,
+                                        tint = colors.accentPeak,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    showDeleteDialog = true
+                                }
+                            )
                         }
                     }
-                ) {
-                    Icon(
-                        imageVector = VeylIcons.MoreVert,
-                        contentDescription = "Options",
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(22.dp)
-                    )
                 }
             }
         }
@@ -188,7 +284,7 @@ fun VeylPlaylistDetailScreen(
 
                 // Playlist Name
                 Text(
-                    text = title,
+                    text = currentPlaylistTitle,
                     style = VeylTypography.DisplayLarge,
                     color = colors.textPrimary,
                     fontWeight = FontWeight.ExtraBold,
@@ -232,7 +328,7 @@ fun VeylPlaylistDetailScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Play / Shuffle Buttons
+                // Play / Shuffle / Export Buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -293,6 +389,31 @@ fun VeylPlaylistDetailScreen(
                             Icon(
                                 imageVector = VeylIcons.Shuffle,
                                 contentDescription = "Shuffle",
+                                tint = colors.textPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    // Export Button
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = colors.surfaceElevated,
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                val safeFilename = "${currentPlaylistTitle.replace(Regex("[^a-zA-Z0-9._ -]"), "_")}.m3u8"
+                                exportLauncher.launch(safeFilename)
+                            }
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.Download,
+                                contentDescription = "Export Playlist",
                                 tint = colors.textPrimary,
                                 modifier = Modifier.size(22.dp)
                             )
@@ -364,6 +485,7 @@ fun VeylPlaylistDetailScreen(
                     ) {
                         AsyncAlbumArt(
                             uri = track.uri,
+                            hasArtwork = track.hasArtwork,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -424,6 +546,94 @@ fun VeylPlaylistDetailScreen(
             track = track,
             controller = controller,
             onDismiss = { selectedTrackForOptions = null }
+        )
+    }
+
+    // Rename Playlist Dialog
+    if (showRenameDialog && customPlaylist != null) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            containerColor = colors.surfacePanel,
+            title = {
+                Text(
+                    text = "Rename Playlist",
+                    style = VeylTypography.SectionHeader,
+                    color = colors.textPrimary
+                )
+            },
+            text = {
+                OutlinedTextField(
+                    value = renameInput,
+                    onValueChange = { renameInput = it },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = colors.textPrimary,
+                        unfocusedTextColor = colors.textPrimary,
+                        focusedBorderColor = colors.accentSignal,
+                        unfocusedBorderColor = colors.borderHairline
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = renameInput.trim()
+                        if (trimmed.isNotBlank()) {
+                            controller.renamePlaylist(customPlaylist.id, trimmed)
+                            currentPlaylistTitle = trimmed
+                            showRenameDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accentSignal)
+                ) {
+                    Text("Rename", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Cancel", color = colors.textMuted)
+                }
+            }
+        )
+    }
+
+    // Delete Playlist Dialog
+    if (showDeleteDialog && customPlaylist != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            containerColor = colors.surfacePanel,
+            title = {
+                Text(
+                    text = "Delete Playlist",
+                    style = VeylTypography.SectionHeader,
+                    color = colors.textPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to delete \"$currentPlaylistTitle\"? The audio files will remain on your device.",
+                    style = VeylTypography.Body,
+                    color = colors.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        controller.deletePlaylist(customPlaylist.id)
+                        showDeleteDialog = false
+                        onNavigateBack()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accentPeak)
+                ) {
+                    Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel", color = colors.textMuted)
+                }
+            }
         )
     }
 }

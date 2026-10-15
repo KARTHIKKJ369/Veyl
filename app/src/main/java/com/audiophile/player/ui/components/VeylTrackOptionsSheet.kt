@@ -102,6 +102,7 @@ fun VeylTrackOptionsSheet(
                 ) {
                     AsyncAlbumArt(
                         uri = track.uri,
+                        hasArtwork = track.hasArtwork,
                         modifier = Modifier.fillMaxSize()
                     )
                 }

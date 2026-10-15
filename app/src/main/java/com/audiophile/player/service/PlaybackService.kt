@@ -19,6 +19,7 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.media.AudioAttributesCompat
@@ -34,6 +35,7 @@ import com.audiophile.player.engine.AudioEngineController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,11 +68,29 @@ class PlaybackService : MediaBrowserServiceCompat() {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 hasAudioFocus = true
-                // Restore exactly the volume that was set before we ducked (not a hard-coded 1.0).
-                engineController.setVolume(preDuckVolume)
                 if (resumeOnFocusGain) {
                     resumeOnFocusGain = false
-                    engineController.play()
+                    serviceScope.launch {
+                        // Allow Android audio HAL to settle back to MODE_NORMAL after call termination
+                        var attempts = 0
+                        while (audioManager.mode != AudioManager.MODE_NORMAL && attempts < 10) {
+                            delay(50)
+                            attempts++
+                        }
+                        delay(120) // Settling window for audio routing switch
+                        engineController.refreshHardwareOutput()
+                        engineController.setVolume(preDuckVolume)
+                        engineController.play()
+                    }
+                } else {
+                    engineController.setVolume(preDuckVolume)
+                    // If music was continuously playing during a phone call, refresh hardware output upon focus gain
+                    if (engineController.playbackState.value == PlaybackStateEnum.PLAYING) {
+                        serviceScope.launch {
+                            delay(120)
+                            engineController.refreshHardwareOutput()
+                        }
+                    }
                 }
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
@@ -78,18 +98,26 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 resumeOnFocusGain = false
                 engineController.pause()
             }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 hasAudioFocus = false
                 val isCurrentlyPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
-                if (isCurrentlyPlaying) {
-                    resumeOnFocusGain = true
-                    engineController.pause()
+                val isCallActive = audioManager.mode != AudioManager.MODE_NORMAL
+
+                if (engineController.playDuringCalls.value && isCallActive) {
+                    // User explicitly chose to keep playing music during calls!
+                    Log.i("PlaybackService", "Call active but playDuringCalls is enabled; continuing playback.")
+                } else if (isCallActive || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                    // Default behavior: Pause playback during calls or transient audio focus loss
+                    if (isCurrentlyPlaying) {
+                        resumeOnFocusGain = true
+                        engineController.pause()
+                    }
+                } else {
+                    // For short notifications (e.g. SMS chime, GPS alert) outside calls: duck volume
+                    preDuckVolume = engineController.volume
+                    engineController.setVolume(0.2f)
                 }
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                // Save current volume so we can restore it on AUDIOFOCUS_GAIN.
-                preDuckVolume = engineController.volume
-                engineController.setVolume(0.2f)
             }
         }
     }
@@ -109,6 +137,10 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
         val result = AudioManagerCompat.requestAudioFocus(audioManager, request)
         hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+        if (!hasAudioFocus && engineController.playDuringCalls.value) {
+            // User requested to listen during calls / focus conflicts
+            return true
+        }
         return hasAudioFocus
     }
 
@@ -189,6 +221,45 @@ class PlaybackService : MediaBrowserServiceCompat() {
             }
 
             observePlaybackState()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    audioManager.addOnModeChangedListener(mainExecutor) { mode ->
+                        val isCall = mode != AudioManager.MODE_NORMAL
+                        val isPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
+                        if (isCall && isPlaying) {
+                            if (engineController.playDuringCalls.value) {
+                                Log.i("PlaybackService", "Audio mode changed to call mode ($mode), but playDuringCalls is enabled; continuing playback.")
+                            } else {
+                                Log.i("PlaybackService", "Audio mode changed to call mode ($mode). Pausing playback.")
+                                resumeOnFocusGain = true
+                                engineController.pause()
+                            }
+                        } else if (!isCall) {
+                            if (resumeOnFocusGain) {
+                                Log.i("PlaybackService", "Audio mode returned to MODE_NORMAL. Restoring playback.")
+                                resumeOnFocusGain = false
+                                serviceScope.launch {
+                                    delay(120)
+                                    engineController.refreshHardwareOutput()
+                                    engineController.setVolume(preDuckVolume)
+                                    engineController.play()
+                                }
+                            } else if (isPlaying) {
+                                // Music was playing during call! Now that call ended, immediately refresh hardware output
+                                // so the sample rate returns to 48kHz with ZERO cartoonish pitch distortion!
+                                Log.i("PlaybackService", "Call ended while music was playing. Refreshing hardware output to restore 48kHz route.")
+                                serviceScope.launch {
+                                    delay(150)
+                                    engineController.refreshHardwareOutput()
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("PlaybackService", "Unable to register mode changed listener", e)
+                }
+            }
         } catch (e: Throwable) {
             Log.e("PlaybackService", "Error during service onCreate", e)
             stopSelf()
@@ -273,11 +344,17 @@ class PlaybackService : MediaBrowserServiceCompat() {
             try {
                 notificationManager?.deleteNotificationChannel("veyl_playback_channel")
                 notificationManager?.deleteNotificationChannel("veyl_playback_channel_v2")
+                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v3")
+                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v4")
+                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v5")
+                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v6")
+                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v7")
+                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v8")
             } catch (_: Exception) {}
 
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Veyl Audio Playback",
+                "Veyl Music Player",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Active music playback controls and media notifications"
@@ -306,7 +383,13 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
                 // Manage audio focus and noisy receiver
                 if (isStateChange) {
-                if (isPlaying) {
+                    if (isPlaying) {
+                        if (audioManager.mode != AudioManager.MODE_NORMAL && !engineController.playDuringCalls.value) {
+                            Log.w("PlaybackService", "Playback attempted while call mode active (${audioManager.mode}). Pausing.")
+                            resumeOnFocusGain = true
+                            engineController.pause()
+                            return@collect
+                        }
                         if (requestAudioFocus()) {
                             registerNoisyReceiver()
                         } else {
@@ -356,9 +439,29 @@ class PlaybackService : MediaBrowserServiceCompat() {
         durationSec: Double,
         artwork: Bitmap?
     ) {
-        val notification = buildNotification(track, isPlaying, positionSec, durationSec, artwork)
-        if (isPlaying) {
+        if (track == null && !isPlaying) {
+            // If the service just started and hasn't loaded a track yet, do not cancel immediately
+            if (lastTrackUri == null) {
+                return
+            }
             try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+                val notificationManager = getSystemService(NotificationManager::class.java)
+                notificationManager?.cancel(NOTIFICATION_ID)
+            } catch (e: Exception) {
+                Log.w("PlaybackService", "Error stopping foreground for null track", e)
+            }
+            return
+        }
+
+        val notification = buildNotification(track, isPlaying, positionSec, durationSec, artwork)
+        try {
+            if (isPlaying) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     ServiceCompat.startForeground(
                         this,
@@ -369,22 +472,20 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
-            } catch (e: Exception) {
-                Log.e("PlaybackService", "Error calling startForeground", e)
-                val notificationManager = getSystemService(NotificationManager::class.java)
-                notificationManager?.notify(NOTIFICATION_ID, notification)
-            }
-        } else {
-            try {
+            } else {
+                // When paused: detach from ongoing foreground requirement so notification is dismissible/swipeable,
+                // but keep media controls visible in the notification shade & lockscreen
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     stopForeground(STOP_FOREGROUND_DETACH)
                 } else {
                     @Suppress("DEPRECATION")
                     stopForeground(false)
                 }
-            } catch (e: Exception) {
-                Log.w("PlaybackService", "Error calling stopForeground", e)
+                val notificationManager = getSystemService(NotificationManager::class.java)
+                notificationManager?.notify(NOTIFICATION_ID, notification)
             }
+        } catch (e: Exception) {
+            Log.e("PlaybackService", "Error posting notification", e)
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager?.notify(NOTIFICATION_ID, notification)
         }
@@ -456,6 +557,18 @@ class PlaybackService : MediaBrowserServiceCompat() {
         mediaSession.isActive = true
     }
 
+    private fun getServicePendingIntent(actionStr: String, requestCode: Int): PendingIntent {
+        val intent = Intent(this, PlaybackService::class.java).apply {
+            action = actionStr
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(this, requestCode, intent, flags)
+        } else {
+            PendingIntent.getService(this, requestCode, intent, flags)
+        }
+    }
+
     private fun buildNotification(
         track: TrackInfo?,
         isPlaying: Boolean,
@@ -472,16 +585,30 @@ class PlaybackService : MediaBrowserServiceCompat() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        val prevIntent = MediaButtonReceiver.buildMediaButtonPendingIntent(
-            this, PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
-        )
-        val playPauseAction = if (isPlaying) PlaybackStateCompat.ACTION_PAUSE else PlaybackStateCompat.ACTION_PLAY
-        val playPauseIntent = MediaButtonReceiver.buildMediaButtonPendingIntent(
-            this, playPauseAction
-        )
-        val nextIntent = MediaButtonReceiver.buildMediaButtonPendingIntent(
-            this, PlaybackStateCompat.ACTION_SKIP_TO_NEXT
-        )
+        val prevIntent = getServicePendingIntent(ACTION_PREV, 101)
+        val playPauseIntent = getServicePendingIntent(if (isPlaying) ACTION_PAUSE else ACTION_PLAY, 102)
+        val nextIntent = getServicePendingIntent(ACTION_NEXT, 103)
+        val stopIntent = getServicePendingIntent(ACTION_STOP, 104)
+
+        val title = track?.title?.takeIf { it.isNotBlank() } ?: "Veyl"
+        val cleanFormat = when {
+            track?.formatName?.contains("8192") == true -> "FLAC Lossless"
+            track?.formatName?.startsWith("CodecType") == true -> "Hi-Res Master"
+            !track?.formatName.isNullOrBlank() -> track.formatName
+            else -> "Lossless"
+        }
+        val artistStr = track?.artist?.takeIf { it.isNotBlank() } ?: "Veyl Lossless Audio"
+        val formatDesc = if (!track?.artist.isNullOrBlank()) {
+            "$artistStr • $cleanFormat"
+        } else {
+            cleanFormat
+        }
+
+        val mediaStyle = MediaStyle()
+            .setMediaSession(mediaSession.sessionToken)
+            .setShowActionsInCompactView(0, 1, 2)
+            .setShowCancelButton(true)
+            .setCancelButtonIntent(stopIntent)
 
         val prevAction = NotificationCompat.Action(
             android.R.drawable.ic_media_previous,
@@ -499,16 +626,6 @@ class PlaybackService : MediaBrowserServiceCompat() {
             nextIntent
         )
 
-        val title = track?.title?.takeIf { it.isNotBlank() } ?: "Veyl"
-        val formatDesc = track?.let {
-            "${it.artist} • ${it.formatName} ${it.sampleRate / 1000u}kHz"
-        } ?: "Bit-Perfect Audio Engine"
-
-        val oemExtras = Bundle().apply {
-            putString("android.media.session.tag", "VeylMediaSession")
-            putBoolean("android.support.action.showsUserInterface", true)
-        }
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(formatDesc)
@@ -516,31 +633,66 @@ class PlaybackService : MediaBrowserServiceCompat() {
             .setSmallIcon(R.drawable.ic_veyl_notification)
             .setLargeIcon(artwork)
             .setContentIntent(openAppIntent)
-            .setDeleteIntent(
-                MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_STOP)
-            )
-            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setDeleteIntent(stopIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setShowWhen(false)
             .setOngoing(isPlaying)
-            .setColorized(true)
-            .addExtras(oemExtras)
+            .setStyle(mediaStyle)
             .addAction(prevAction)
             .addAction(playAction)
             .addAction(nextAction)
-            .setStyle(
-                MediaStyle()
-                    .setMediaSession(mediaSession.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
-                    .setShowCancelButton(true)
-                    .setCancelButtonIntent(
-                        MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_STOP)
-                    )
-            )
             .build()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val action = intent?.action
+        when (action) {
+            ACTION_START_SERVICE -> {
+                // Keep foreground service active and sync notification
+            }
+            ACTION_PLAY -> {
+                if (requestAudioFocus()) {
+                    engineController.play()
+                }
+            }
+            ACTION_PAUSE -> {
+                engineController.pause()
+            }
+            ACTION_TOGGLE_PAUSE -> {
+                engineController.togglePlayPause()
+            }
+            ACTION_NEXT -> {
+                engineController.skipNext()
+            }
+            ACTION_PREV -> {
+                engineController.skipPrevious()
+            }
+            ACTION_STOP -> {
+                engineController.stop()
+                try {
+                    abandonAudioFocus()
+                    unregisterNoisyReceiver()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(true)
+                    }
+                    val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                    notificationManager?.cancel(NOTIFICATION_ID)
+                    stopSelf()
+                } catch (e: Exception) {
+                    Log.e("PlaybackService", "Error stopping service via ACTION_STOP", e)
+                }
+                return START_NOT_STICKY
+            }
+            Intent.ACTION_MEDIA_BUTTON -> {
+                if (::mediaSession.isInitialized) {
+                    MediaButtonReceiver.handleIntent(mediaSession, intent)
+                }
+            }
+        }
+
         try {
             val curTrack = if (::engineController.isInitialized) engineController.currentTrack.value else null
             val isPlaying = if (::engineController.isInitialized) engineController.playbackState.value == PlaybackStateEnum.PLAYING else false
@@ -568,13 +720,6 @@ class PlaybackService : MediaBrowserServiceCompat() {
             Log.e("PlaybackService", "Error calling startForeground in onStartCommand", e)
         }
 
-        if (::mediaSession.isInitialized) {
-            MediaButtonReceiver.handleIntent(mediaSession, intent)
-        } else {
-            Log.w("PlaybackService", "Ignoring command because media session initialization failed")
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
         return START_STICKY
     }
 
@@ -650,7 +795,15 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     companion object {
-        const val CHANNEL_ID = "veyl_playback_channel_v4"
+        const val CHANNEL_ID = "veyl_media_playback_channel_v9"
         const val NOTIFICATION_ID = 1001
+
+        const val ACTION_START_SERVICE = "com.audiophile.player.ACTION_START_SERVICE"
+        const val ACTION_PLAY = "com.audiophile.player.ACTION_PLAY"
+        const val ACTION_PAUSE = "com.audiophile.player.ACTION_PAUSE"
+        const val ACTION_TOGGLE_PAUSE = "com.audiophile.player.ACTION_TOGGLE_PAUSE"
+        const val ACTION_NEXT = "com.audiophile.player.ACTION_NEXT"
+        const val ACTION_PREV = "com.audiophile.player.ACTION_PREV"
+        const val ACTION_STOP = "com.audiophile.player.ACTION_STOP"
     }
 }

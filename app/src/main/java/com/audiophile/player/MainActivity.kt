@@ -84,7 +84,9 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (!hasInitialScanRun) {
             hasInitialScanRun = true
-            checkStorageAccessAndScan()
+            if (controller.libraryTracks.value.isEmpty()) {
+                checkStorageAccessAndScan()
+            }
         }
     }
 

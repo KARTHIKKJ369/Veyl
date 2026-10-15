@@ -47,6 +47,7 @@ import com.audiophile.player.engine.AppExperienceMode
 import com.audiophile.player.engine.AudioEngineController
 import com.audiophile.player.online.CloudRecommendationService
 import androidx.compose.runtime.LaunchedEffect
+import com.audiophile.player.ui.components.VeylStreamingTasteDialog
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylTypography
@@ -64,6 +65,7 @@ fun VeylSettingsRedesigned(
     val appExperienceMode by controller.appExperienceMode.collectAsState()
     val selectedLanguages by controller.selectedLanguages.collectAsState()
     val selectedArtists by controller.selectedArtists.collectAsState()
+    val hasConfiguredCloudPreferences by controller.hasConfiguredCloudPreferences.collectAsState()
     val rootPath by controller.selectedRootPath.collectAsState()
     val isScanning by controller.isScanning.collectAsState()
     val trackCount by controller.libraryTracks.collectAsState()
@@ -74,6 +76,7 @@ fun VeylSettingsRedesigned(
     val dsdMode by controller.dsdMode.collectAsState()
     val dac by controller.connectedDac.collectAsState()
     val isAutoplay by controller.isAutoplayEnabled.collectAsState()
+    val playDuringCalls by controller.playDuringCalls.collectAsState()
     var showAdvanced by remember { mutableStateOf(false) }
     var showTasteDialog by remember { mutableStateOf(false) }
 
@@ -101,6 +104,9 @@ fun VeylSettingsRedesigned(
                         else
                             AppExperienceMode.CLOUD_FIRST
                         controller.setAppExperienceMode(newMode)
+                        if (newMode == AppExperienceMode.CLOUD_FIRST && !controller.hasConfiguredCloudPreferences.value) {
+                            showTasteDialog = true
+                        }
                     },
                     trailing = {
                         Text(
@@ -170,6 +176,12 @@ fun VeylSettingsRedesigned(
             SettingsSection("Listening") {
                 SettingsSwitch("Gapless playback", "Move between tracks without a pause", gapless, controller::setGaplessEnabled)
                 SettingsSwitch("Find synced lyrics", "Fetch lyrics when available", lyrics, controller::setAutoFetchLyrics)
+                SettingsSwitch(
+                    "Play during phone calls",
+                    "Keep playing music when in a phone or VoIP call",
+                    playDuringCalls,
+                    controller::setPlayDuringCalls
+                )
             }
         }
         item {
@@ -209,219 +221,15 @@ fun VeylSettingsRedesigned(
     }
 
     if (showTasteDialog) {
-        val tempLangs = remember(selectedLanguages) { mutableStateListOf(*selectedLanguages.toTypedArray()) }
-        val tempArtists = remember(selectedArtists) { mutableStateListOf(*selectedArtists.toTypedArray()) }
-        var newArtistText by remember { mutableStateOf("") }
-        var artistSuggestions by remember { mutableStateOf<List<com.audiophile.player.online.OnlineArtistItem>>(emptyList()) }
-
-        LaunchedEffect(newArtistText) {
-            val q = newArtistText.trim()
-            if (q.length < 2) {
-                artistSuggestions = emptyList()
-            } else {
-                kotlinx.coroutines.delay(200)
-                artistSuggestions = com.audiophile.player.online.JioSaavnService.searchArtists(q)
+        VeylStreamingTasteDialog(
+            initialLanguages = selectedLanguages,
+            initialArtists = selectedArtists,
+            onDismiss = { showTasteDialog = false },
+            onSave = { langs, artists ->
+                controller.updateMusicPreferences(langs, artists)
+                CloudRecommendationService.clearCache()
+                showTasteDialog = false
             }
-        }
-
-        AlertDialog(
-            onDismissRequest = { showTasteDialog = false },
-            title = {
-                Text(
-                    "Streaming Preferences",
-                    style = VeylTypography.HeadlineMedium,
-                    color = colors.textPrimary,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    item {
-                        Text("Languages", style = VeylTypography.TitleMedium, color = colors.accentSignal, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(8.dp))
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            CloudRecommendationService.defaultLanguages.forEach { lang ->
-                                val isSelected = tempLangs.contains(lang)
-                                Surface(
-                                    modifier = Modifier
-                                        .clickable {
-                                            if (isSelected) {
-                                                if (tempLangs.size > 1) tempLangs.remove(lang)
-                                            } else {
-                                                tempLangs.add(lang)
-                                            }
-                                        }
-                                        .clip(RoundedCornerShape(16.dp)),
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = if (isSelected) colors.accentSignal.copy(alpha = 0.2f) else colors.surfaceElevated,
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) colors.accentSignal else colors.borderSubtle)
-                                ) {
-                                    Text(
-                                        text = lang,
-                                        style = VeylTypography.BodySmall,
-                                        color = if (isSelected) colors.accentSignal else colors.textPrimary,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    item {
-                        Text("Favorite Artists", style = VeylTypography.TitleMedium, color = colors.accentSignal, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(8.dp))
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            tempArtists.forEach { artistName ->
-                                Surface(
-                                    modifier = Modifier
-                                        .clickable {
-                                            tempArtists.remove(artistName)
-                                        }
-                                        .clip(RoundedCornerShape(16.dp)),
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = colors.accentSignal.copy(alpha = 0.2f),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                    ) {
-                                        Text(
-                                            text = artistName,
-                                            style = VeylTypography.BodySmall,
-                                            color = colors.accentSignal,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Spacer(Modifier.width(4.dp))
-                                        Text(
-                                            text = "✕",
-                                            style = VeylTypography.BodySmall,
-                                            color = colors.accentSignal,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(10.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            OutlinedTextField(
-                                value = newArtistText,
-                                onValueChange = { newArtistText = it },
-                                placeholder = { Text("Search or add artist…", style = VeylTypography.BodySmall, color = colors.textMuted) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = colors.accentSignal,
-                                    unfocusedBorderColor = colors.borderSubtle,
-                                    focusedTextColor = colors.textPrimary,
-                                    unfocusedTextColor = colors.textPrimary
-                                )
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Button(
-                                onClick = {
-                                    val trimmed = newArtistText.trim()
-                                    if (trimmed.isNotBlank() && !tempArtists.contains(trimmed)) {
-                                        tempArtists.add(trimmed)
-                                        newArtistText = ""
-                                    }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = colors.surfaceElevated, contentColor = colors.textPrimary)
-                            ) {
-                                Text("Add")
-                            }
-                        }
-
-                        // Search recommendations
-                        if (artistSuggestions.isNotEmpty()) {
-                            Spacer(Modifier.height(8.dp))
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(colors.surfaceElevated)
-                                    .padding(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                artistSuggestions.take(4).forEach { sug ->
-                                    val isAdded = tempArtists.contains(sug.name)
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                if (!isAdded) {
-                                                    tempArtists.add(sug.name)
-                                                    newArtistText = ""
-                                                }
-                                            }
-                                            .padding(vertical = 4.dp, horizontal = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = sug.name,
-                                            style = VeylTypography.BodySmall,
-                                            color = colors.textPrimary,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            text = if (isAdded) "✓ Added" else "＋ Add",
-                                            style = VeylTypography.BodySmall,
-                                            color = colors.accentSignal,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                val isLight = isColorLight(colors.accentSignal)
-                val btnTextColor = if (isLight) Color(0xFF0F0F0F) else Color.White
-                Button(
-                    onClick = {
-                        controller.updateMusicPreferences(tempLangs.toSet(), tempArtists.toSet())
-                        CloudRecommendationService.clearCache()
-                        showTasteDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.accentSignal,
-                        contentColor = btnTextColor
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Save", color = btnTextColor, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showTasteDialog = false }) {
-                    Text("Cancel", color = colors.textMuted)
-                }
-            },
-            containerColor = colors.surfacePanel,
-            shape = RoundedCornerShape(20.dp)
         )
     }
 }

@@ -148,17 +148,55 @@ class OnlineStreamManager(private val context: Context) {
     }
 
     fun getTargetStorageFile(song: OnlineSongItem): File {
-        val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-        val veylDir = File(musicDir, "Veyl").apply { mkdirs() }
         val sanitized = "${song.title} - ${song.artist}".replace(Regex("[^a-zA-Z0-9.\\- ]"), "_").trim()
-        return File(veylDir, "$sanitized.m4a")
+        val fileName = "$sanitized.m4a"
+
+        val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Veyl")
+        val publicFile = File(publicDir, fileName)
+        if (publicFile.exists() && publicFile.length() > 50_000L) {
+            return publicFile
+        }
+
+        val appExtDir = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "Veyl")
+        val appExtFile = File(appExtDir, fileName)
+        if (appExtFile.exists() && appExtFile.length() > 50_000L) {
+            return appExtFile
+        }
+
+        val canWritePublic = try {
+            publicDir.exists() && publicDir.canWrite()
+        } catch (_: Exception) {
+            false
+        }
+
+        val targetDir = if (canWritePublic) publicDir else appExtDir
+        return File(targetDir, fileName)
     }
 
     fun getTargetStorageFileForTrack(track: TrackInfo): File {
-        val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-        val veylDir = File(musicDir, "Veyl").apply { mkdirs() }
         val sanitized = "${track.title} - ${track.artist ?: ""}".replace(Regex("[^a-zA-Z0-9.\\- ]"), "_").trim()
-        return File(veylDir, "$sanitized.m4a")
+        val fileName = "$sanitized.m4a"
+
+        val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Veyl")
+        val publicFile = File(publicDir, fileName)
+        if (publicFile.exists() && publicFile.length() > 50_000L) {
+            return publicFile
+        }
+
+        val appExtDir = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "Veyl")
+        val appExtFile = File(appExtDir, fileName)
+        if (appExtFile.exists() && appExtFile.length() > 50_000L) {
+            return appExtFile
+        }
+
+        val canWritePublic = try {
+            publicDir.exists() && publicDir.canWrite()
+        } catch (_: Exception) {
+            false
+        }
+
+        val targetDir = if (canWritePublic) publicDir else appExtDir
+        return File(targetDir, fileName)
     }
 
     fun isSongDownloaded(song: OnlineSongItem): Boolean {

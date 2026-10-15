@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -26,12 +27,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,12 +67,37 @@ fun VeylHomeRedesigned(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVeylColors.current
+    val haptic = LocalHapticFeedback.current
     val tracks by controller.tracks.collectAsStateWithLifecycle()
     val recent by controller.lastAddedTracks.collectAsStateWithLifecycle()
     val history by controller.playbackHistory.collectAsStateWithLifecycle()
     val currentTrack by controller.currentTrack.collectAsStateWithLifecycle()
     val isScanning by controller.isScanning.collectAsStateWithLifecycle()
     val recentTracks = recent.ifEmpty { tracks }.take(8)
+    val continueListeningState = rememberLazyListState()
+
+    // Automatically snap Continue Listening to the newly played track at index 0
+    LaunchedEffect(history.firstOrNull()?.uri) {
+        if (history.isNotEmpty()) {
+            continueListeningState.scrollToItem(0)
+        }
+    }
+
+    var randomSeed by remember { mutableIntStateOf(0) }
+    val randomLibraryTracks = remember(tracks, randomSeed) {
+        if (tracks.isEmpty()) {
+            emptyList()
+        } else if (tracks.size <= 6) {
+            tracks.shuffled()
+        } else {
+            val random = java.util.Random()
+            val indices = mutableSetOf<Int>()
+            while (indices.size < 6) {
+                indices.add(random.nextInt(tracks.size))
+            }
+            indices.map { tracks[it] }
+        }
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize().background(colors.background),
@@ -125,7 +157,10 @@ fun VeylHomeRedesigned(
             if (history.isNotEmpty()) {
                 item { SectionHeader("Continue listening", "See all", onNavigateToHistory) }
                 item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    LazyRow(
+                        state = continueListeningState,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
                         itemsIndexed(history.take(8), key = { index, track -> "${track.uri}_$index" }) { _, track ->
                             AlbumTile(track = track, onClick = { controller.playTrack(track) })
                         }
@@ -146,9 +181,34 @@ fun VeylHomeRedesigned(
                     }
                 }
             }
-            item { SectionHeader("From your library", "Shuffle", onAction = { controller.playShuffled(tracks) }) }
-            itemsIndexed(tracks.take(6), key = { index, track -> "${track.uri}_$index" }) { _, track ->
-                LibraryRow(track = track, isCurrent = track.uri == currentTrack?.uri, onClick = { controller.playTrack(track) })
+            item {
+                SectionHeader(
+                    title = "From your library",
+                    action = "Shuffle",
+                    onAction = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        randomSeed++
+                        controller.playShuffled(tracks)
+                    },
+                    onRefresh = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        randomSeed++
+                    }
+                )
+            }
+            items(randomLibraryTracks, key = { track -> track.uri }) { track ->
+                LibraryRow(
+                    track = track,
+                    isCurrent = track.uri == currentTrack?.uri,
+                    onClick = {
+                        val trackIdx = tracks.indexOfFirst { it.uri == track.uri }
+                        if (trackIdx != -1) {
+                            controller.playTrackList(tracks, startIndex = trackIdx)
+                        } else {
+                            controller.playTrack(track)
+                        }
+                    }
+                )
             }
             item {
                 Text(
@@ -163,11 +223,34 @@ fun VeylHomeRedesigned(
 }
 
 @Composable
-private fun SectionHeader(title: String, action: String, onAction: () -> Unit) {
+private fun SectionHeader(
+    title: String,
+    action: String,
+    onAction: () -> Unit,
+    onRefresh: (() -> Unit)? = null
+) {
     val colors = LocalVeylColors.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = VeylTypography.HeadlineMedium, color = colors.textPrimary)
-        Text(action, style = VeylTypography.BodySmall, color = colors.accentSignal, modifier = Modifier.clickable(onClick = onAction))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (onRefresh != null) {
+                IconButton(
+                    onClick = onRefresh,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.Refresh,
+                        contentDescription = "Randomize",
+                        tint = colors.textMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Text(action, style = VeylTypography.BodySmall, color = colors.accentSignal, modifier = Modifier.clickable(onClick = onAction))
+        }
     }
 }
 
@@ -175,7 +258,7 @@ private fun SectionHeader(title: String, action: String, onAction: () -> Unit) {
 private fun AlbumTile(track: TrackInfo, onClick: () -> Unit) {
     val colors = LocalVeylColors.current
     Column(modifier = Modifier.width(142.dp).clickable(onClick = onClick)) {
-        AsyncAlbumArt(uri = track.uri, modifier = Modifier.size(142.dp).clip(RoundedCornerShape(14.dp)))
+        AsyncAlbumArt(uri = track.uri, hasArtwork = track.hasArtwork, modifier = Modifier.size(142.dp).clip(RoundedCornerShape(14.dp)))
         Spacer(Modifier.height(9.dp))
         Text(track.title, style = VeylTypography.BodyMedium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(track.artist ?: "Unknown artist", style = VeylTypography.BodySmall, color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -189,8 +272,7 @@ private fun LibraryRow(track: TrackInfo, isCurrent: Boolean, onClick: () -> Unit
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AsyncAlbumArt(uri = track.uri, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+        Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
             Text(track.title, style = VeylTypography.BodyMedium, color = if (isCurrent) colors.accentSignal else colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(track.artist ?: "Unknown artist", style = VeylTypography.BodySmall, color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

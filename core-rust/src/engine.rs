@@ -50,6 +50,7 @@ pub enum PlaybackState {
     Error,
 }
 
+#[derive(Clone, Debug)]
 pub struct TrackQueueItem {
     pub uri: String,
     pub title: String,
@@ -58,6 +59,7 @@ pub struct TrackQueueItem {
     pub duration_seconds: f64,
 }
 
+#[derive(Clone, Debug)]
 pub struct PlaybackEngineState {
     pub playback_state: PlaybackState,
     pub current_track: Option<TrackQueueItem>,
@@ -68,6 +70,7 @@ pub struct PlaybackEngineState {
     pub volume: f32,
     pub is_bit_perfect: bool,
     pub is_exclusive_mmap: bool,
+    pub is_dop: bool,
     pub crossfade_duration_seconds: f32,
     pub gapless_enabled: bool,
     pub levels: LevelMetrics,
@@ -129,6 +132,7 @@ impl PlaybackEngine {
             volume: 1.0,
             is_bit_perfect: true,
             is_exclusive_mmap: true,
+            is_dop: false,
             crossfade_duration_seconds: 0.0,
             gapless_enabled: true,
             levels: LevelMetrics::default(),
@@ -189,6 +193,26 @@ impl PlaybackEngine {
                 }
             }
         }
+        // Immediately configure resampler for new hardware output rate to prevent pitch distortion
+        {
+            let active = self.active_decoder.lock();
+            if let Some(ref dec) = *active {
+                let info = dec.info();
+                let output_rate = new_rate as u32;
+                let mut res_guard = self.resampler.lock();
+                if !info.is_dop && info.sample_rate != output_rate {
+                    *res_guard = Some(StreamResampler::new(info.sample_rate, output_rate, self.output_channels));
+                } else {
+                    *res_guard = None;
+                }
+            }
+        }
+        // Drain ring buffer so stale rate samples aren't played out at the new rate
+        {
+            let mut consumer = self.ring_buffer_consumer.lock();
+            let mut discard = [0.0f32; 1024];
+            while consumer.pop_slice(&mut discard) > 0 {}
+        }
         // Signal flush so resamplers and buffers adjust to new hardware rate
         self.flush_requested.store(true, Ordering::SeqCst);
     }
@@ -236,7 +260,16 @@ impl PlaybackEngine {
                     // Check if a flush was requested (new track loaded or rate change)
                     if flush_req.swap(false, Ordering::SeqCst) {
                         residual.clear();
-                        if let Some(ref mut r) = *resampler.lock() {
+                        let dec_guard = active_decoder.lock();
+                        if let Some(ref dec) = *dec_guard {
+                            let info = dec.info();
+                            let mut res_guard = resampler.lock();
+                            if !info.is_dop && info.sample_rate != output_rate {
+                                *res_guard = Some(StreamResampler::new(info.sample_rate, output_rate, 2));
+                            } else {
+                                *res_guard = None;
+                            }
+                        } else if let Some(ref mut r) = *resampler.lock() {
                             r.reset();
                         }
                     }
@@ -363,7 +396,7 @@ impl PlaybackEngine {
 
                         if let Some(next_dec) = next_dec_guard.take() {
                             let next_info = next_dec.info().clone();
-                            if next_info.sample_rate != output_rate {
+                            if !next_info.is_dop && next_info.sample_rate != output_rate {
                                 *resampler.lock() = Some(StreamResampler::new(next_info.sample_rate, output_rate, 2));
                             } else {
                                 *resampler.lock() = None;
@@ -385,39 +418,50 @@ impl PlaybackEngine {
                             }
                             s.duration_seconds = next_info.duration_seconds;
                             s.position_seconds = 0.0;
+                            s.is_dop = next_info.is_dop;
                             s.current_stream_info = Some(next_info);
                         } else {
-                            // Check if more items exist in queue
-                            let mut s = state.lock();
-                            let q = queue.lock();
-                            if s.current_track_index + 1 < q.len() {
-                                s.current_track_index += 1;
-                                let next_item = &q[s.current_track_index];
+                            // CRIT-03: Inspect queue under lock, but open new decoder WITHOUT holding state.lock()
+                            // to avoid priority inversion and underruns on the real-time audio thread!
+                            let next_track_candidate = {
+                                let s = state.lock();
+                                let q = queue.lock();
+                                if s.current_track_index + 1 < q.len() {
+                                    Some((s.current_track_index + 1, q[s.current_track_index + 1].clone()))
+                                } else {
+                                    None
+                                }
+                            };
+
+                            if let Some((next_idx, next_item)) = next_track_candidate {
                                 let source = LocalFileSource::new(&next_item.uri);
                                 let dsd_mode = *dsd_mode_arc.lock();
-                                if let Ok(new_dec) = AudioDecoder::open_with_dsd_mode(&source, dsd_mode) {
-                                    let info = new_dec.info().clone();
-                                    if info.sample_rate != output_rate {
-                                        *resampler.lock() = Some(StreamResampler::new(info.sample_rate, output_rate, 2));
-                                    } else {
-                                        *resampler.lock() = None;
+                                match AudioDecoder::open_with_dsd_mode(&source, dsd_mode) {
+                                    Ok(new_dec) => {
+                                        let info = new_dec.info().clone();
+                                        if !info.is_dop && info.sample_rate != output_rate {
+                                            *resampler.lock() = Some(StreamResampler::new(info.sample_rate, output_rate, 2));
+                                        } else {
+                                            *resampler.lock() = None;
+                                        }
+                                        *active_dec_guard = Some(new_dec);
+
+                                        let mut s = state.lock();
+                                        s.current_track_index = next_idx;
+                                        s.current_track = Some(next_item);
+                                        s.duration_seconds = info.duration_seconds;
+                                        s.position_seconds = 0.0;
+                                        s.is_dop = info.is_dop;
+                                        s.current_stream_info = Some(info);
                                     }
-                                    *active_dec_guard = Some(new_dec);
-                                    s.current_track = Some(TrackQueueItem {
-                                        uri: next_item.uri.clone(),
-                                        title: next_item.title.clone(),
-                                        artist: next_item.artist.clone(),
-                                        album: next_item.album.clone(),
-                                        duration_seconds: next_item.duration_seconds,
-                                    });
-                                    s.duration_seconds = info.duration_seconds;
-                                    s.position_seconds = 0.0;
-                                    s.current_stream_info = Some(info);
+                                    Err(e) => {
+                                        log::error!("Failed to open next queue track: {:?}", e);
+                                        let mut s = state.lock();
+                                        s.current_track_index = next_idx;
+                                    }
                                 }
                             } else {
                                 // Drop locks BEFORE waiting for audio output to drain so render_audio is not blocked!
-                                drop(s);
-                                drop(q);
                                 drop(active_dec_guard);
                                 drop(next_dec_guard);
 
@@ -463,8 +507,9 @@ impl PlaybackEngine {
         self.flush_requested.store(true, Ordering::SeqCst);
 
         // Configure dynamic resampler if native track sample rate differs from hardware stream rate
+        // CRIT-01: In DoP mode, never resample because rubato interpolation destroys DoP framing and DSD bits!
         let output_rate = *self.output_sample_rate.lock() as u32;
-        if info.sample_rate != output_rate {
+        if !info.is_dop && info.sample_rate != output_rate {
             let mut res_guard = self.resampler.lock();
             *res_guard = Some(StreamResampler::new(info.sample_rate, output_rate, self.output_channels));
         } else {
@@ -483,6 +528,7 @@ impl PlaybackEngine {
             s.position_seconds = 0.0;
             s.duration_seconds = info.duration_seconds;
             s.is_bit_perfect = info.sample_rate == output_rate;
+            s.is_dop = info.is_dop;
             s.current_track = Some(TrackQueueItem {
                 uri: uri.to_string(),
                 title: title.to_string(),
@@ -559,27 +605,7 @@ impl PlaybackEngine {
 
     pub fn get_state(&self) -> PlaybackEngineState {
         let s = self.state.lock();
-        PlaybackEngineState {
-            playback_state: s.playback_state,
-            current_track: s.current_track.as_ref().map(|t| TrackQueueItem {
-                uri: t.uri.clone(),
-                title: t.title.clone(),
-                artist: t.artist.clone(),
-                album: t.album.clone(),
-                duration_seconds: t.duration_seconds,
-            }),
-            current_track_index: s.current_track_index,
-            current_stream_info: s.current_stream_info.clone(),
-            position_seconds: s.position_seconds,
-            duration_seconds: s.duration_seconds,
-            volume: s.volume,
-            is_bit_perfect: s.is_bit_perfect,
-            is_exclusive_mmap: s.is_exclusive_mmap,
-            crossfade_duration_seconds: s.crossfade_duration_seconds,
-            gapless_enabled: s.gapless_enabled,
-            levels: s.levels.clone(),
-            spectrum: s.spectrum.clone(),
-        }
+        s.clone()
     }
 
     pub fn set_eq_enabled(&self, enabled: bool) {
@@ -622,9 +648,13 @@ impl AudioRenderCallback for PlaybackEngine {
     fn render_audio(&self, buffer: &mut [f32], frames: usize, channels: usize) {
         let total_samples = frames * channels;
 
-        let is_playing = {
+        let (is_playing, is_dop, volume) = {
             let s = self.state.lock();
-            s.playback_state == PlaybackState::Playing
+            (
+                s.playback_state == PlaybackState::Playing,
+                s.is_dop,
+                s.volume,
+            )
         };
 
         if !is_playing {
@@ -642,31 +672,34 @@ impl AudioRenderCallback for PlaybackEngine {
             buffer[read_samples..total_samples].fill(0.0);
         }
 
-        // Apply Volume with perceptual (logarithmic) curve
-        let volume = {
-            let s = self.state.lock();
-            s.volume
-        };
-        let applied_volume = perceptual_volume(volume);
+        // CRIT-01: In DoP (DSD over PCM) mode, audio data consists of bit-packed 1-bit DSD
+        // with alternating 0x05 / 0xFA marker sync bytes in the top 8 bits.
+        // Any digital scaling, volume attenuation, or biquad filtering mutates these markers,
+        // which causes the receiving USB DAC to fail DSD synchronization and output 0 dBFS deafening noise.
+        // Therefore, DSP and volume processing MUST be completely bypassed for DoP.
+        if !is_dop {
+            // Apply Volume with perceptual (logarithmic) curve
+            let applied_volume = perceptual_volume(volume);
 
-        if (applied_volume - 1.0).abs() > f32::EPSILON {
-            for sample in buffer.iter_mut() {
-                *sample *= applied_volume;
+            if (applied_volume - 1.0).abs() > f32::EPSILON {
+                for sample in buffer.iter_mut() {
+                    *sample *= applied_volume;
+                }
             }
-        }
 
-        // Process DSP Equalizer
-        {
-            let mut eq = self.equalizer.lock();
-            eq.process_interleaved(buffer);
-        }
+            // Process DSP Equalizer
+            {
+                let mut eq = self.equalizer.lock();
+                eq.process_interleaved(buffer);
+            }
 
-        // Soft-clamp and protect against NaN / denormals to guarantee speaker safety
-        for sample in buffer.iter_mut() {
-            if !sample.is_finite() {
-                *sample = 0.0;
-            } else {
-                *sample = sample.clamp(-1.0, 1.0);
+            // Soft-clamp and protect against NaN / denormals to guarantee speaker safety
+            for sample in buffer.iter_mut() {
+                if !sample.is_finite() {
+                    *sample = 0.0;
+                } else {
+                    *sample = sample.clamp(-1.0, 1.0);
+                }
             }
         }
 

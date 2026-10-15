@@ -442,7 +442,7 @@ fun VeylLibraryScreen(
                 } else {
                     itemsIndexed(
                         items = filteredTracks,
-                        key = { index, track -> "${track.uri}_$index" }
+                        key = { _, track -> track.uri }
                     ) { index, track ->
                         val isCurrent = currentTrack?.uri == track.uri
                         val isFavorite = remember(track, favoriteUris) { controller.isTrackFavorite(track, favoriteUris) }
@@ -717,44 +717,7 @@ private fun VeylTrackRow(
             },
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Squircle Album Art with active playing overlay
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                .border(
-                    1.dp,
-                    if (isCurrent) colors.accentSignal else colors.borderHairline,
-                    RoundedCornerShape(VeylSpacing.RadiusSm)
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            AsyncAlbumArt(
-                uri = track.uri,
-                modifier = Modifier.fillMaxSize(),
-                shape = RoundedCornerShape(VeylSpacing.RadiusSm)
-            )
-
-            if (isCurrent) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(colors.background.copy(alpha = 0.6f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isPlaying) VeylIcons.Pause else VeylIcons.Play,
-                        contentDescription = null,
-                        tint = colors.accentSignal,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.width(VeylSpacing.md))
-
-        // Title + Artist + Monospace Telemetry
+        // Title + Artist + Monospace Telemetry (Name-only, no leading icon/glyph)
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp)

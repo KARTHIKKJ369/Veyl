@@ -165,6 +165,212 @@ class PlaylistManager(context: Context) {
         savePlaylists(updated)
     }
 
+    fun renamePlaylist(playlistId: String, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank()) return
+        val updated = _playlists.value.map { pl ->
+            if (pl.id == playlistId) pl.copy(name = trimmed) else pl
+        }
+        savePlaylists(updated)
+    }
+
+    /**
+     * Exports a playlist's tracks to an Extended M3U8 format stream.
+     */
+    fun exportPlaylist(
+        name: String,
+        tracks: List<TrackInfo>,
+        outputStream: java.io.OutputStream
+    ): Result<Int> {
+        return runCatching {
+            outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
+                writer.write("#EXTM3U\n")
+                writer.write("#PLAYLIST:$name\n")
+                for (track in tracks) {
+                    val dur = if (track.durationSeconds > 0) track.durationSeconds.toInt() else -1
+                    val artist = if (track.artist.isNotBlank()) track.artist.replace("\n", " ").replace("\r", " ") else "Unknown Artist"
+                    val title = if (track.title.isNotBlank()) track.title.replace("\n", " ").replace("\r", " ") else "Unknown Title"
+                    writer.write("#EXTINF:$dur,$artist - $title\n")
+                    val album = track.album
+                    if (!album.isNullOrBlank()) {
+                        writer.write("#EXTALB:${album.replace("\n", " ").replace("\r", " ")}\n")
+                    }
+                    val genre = track.genre
+                    if (!genre.isNullOrBlank()) {
+                        writer.write("#EXTGENRE:${genre.replace("\n", " ").replace("\r", " ")}\n")
+                    }
+                    writer.write("${track.uri}\n")
+                }
+                writer.flush()
+            }
+            tracks.size
+        }
+    }
+
+    /**
+     * Imports a playlist from an InputStream (supports .m3u, .m3u8, and .json).
+     * Resolves track paths against the local library where possible.
+     */
+    fun importPlaylist(
+        inputStream: java.io.InputStream,
+        defaultName: String = "Imported Playlist",
+        libraryTracks: List<TrackInfo> = emptyList()
+    ): Result<UserPlaylist> {
+        return runCatching {
+            val rawContent = inputStream.bufferedReader(Charsets.UTF_8).readText().trimStart('\uFEFF')
+            val trimmed = rawContent.trim()
+            if (trimmed.isEmpty()) {
+                throw IllegalArgumentException("Playlist file is empty")
+            }
+
+            var playlistName = defaultName
+            val importedUris = mutableListOf<String>()
+
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                // JSON Playlist
+                if (trimmed.startsWith("{")) {
+                    val obj = JSONObject(trimmed)
+                    playlistName = obj.optString("name", defaultName)
+                    val tracksArr = obj.optJSONArray("tracks")
+                    if (tracksArr != null) {
+                        for (i in 0 until tracksArr.length()) {
+                            val item = tracksArr.get(i)
+                            if (item is JSONObject) {
+                                val track = jsonToTrackInfo(item)
+                                registerOnlineTrack(track)
+                                importedUris.add(track.uri)
+                            } else if (item is String) {
+                                importedUris.add(item)
+                            }
+                        }
+                    }
+                } else {
+                    val arr = JSONArray(trimmed)
+                    for (i in 0 until arr.length()) {
+                        val item = arr.get(i)
+                        if (item is JSONObject) {
+                            val track = jsonToTrackInfo(item)
+                            registerOnlineTrack(track)
+                            importedUris.add(track.uri)
+                        } else if (item is String) {
+                            importedUris.add(item)
+                        }
+                    }
+                }
+            } else {
+                // Extended M3U / M3U8 / Plain text lines
+                val lines = rawContent.lines()
+                var pendingTitle: String? = null
+                var pendingArtist: String? = null
+                var pendingAlbum: String? = null
+                var pendingDuration: Double = 0.0
+
+                val musicDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC)
+                val veylDir = java.io.File(musicDir, "Veyl")
+
+                for (rawLine in lines) {
+                    val line = rawLine.trim()
+                    if (line.isEmpty()) continue
+
+                    if (line.startsWith("#")) {
+                        if (line.startsWith("#PLAYLIST:", ignoreCase = true)) {
+                            val parsed = line.substring("#PLAYLIST:".length).trim()
+                            if (parsed.isNotEmpty()) playlistName = parsed
+                        } else if (line.startsWith("#EXTINF:", ignoreCase = true)) {
+                            val info = line.substring("#EXTINF:".length).trim()
+                            val commaIdx = info.indexOf(',')
+                            if (commaIdx != -1) {
+                                val durStr = info.substring(0, commaIdx).trim()
+                                pendingDuration = durStr.toDoubleOrNull() ?: 0.0
+                                val titleAndArtist = info.substring(commaIdx + 1).trim()
+                                val dashIdx = titleAndArtist.indexOf(" - ")
+                                if (dashIdx != -1) {
+                                    pendingArtist = titleAndArtist.substring(0, dashIdx).trim()
+                                    pendingTitle = titleAndArtist.substring(dashIdx + 3).trim()
+                                } else {
+                                    pendingTitle = titleAndArtist
+                                }
+                            }
+                        } else if (line.startsWith("#EXTALB:", ignoreCase = true)) {
+                            pendingAlbum = line.substring("#EXTALB:".length).trim()
+                        } else if (line.startsWith("#EXTART:", ignoreCase = true)) {
+                            pendingArtist = line.substring("#EXTART:".length).trim()
+                        }
+                        continue
+                    }
+
+                    val trackUri = line
+                    val fName = java.io.File(trackUri).name
+
+                    // Match against library tracks
+                    val matchedTrack = libraryTracks.find { lib ->
+                        lib.uri.equals(trackUri, ignoreCase = true) ||
+                        (fName.isNotBlank() && java.io.File(lib.uri).name.equals(fName, ignoreCase = true)) ||
+                        (!pendingTitle.isNullOrBlank() &&
+                         lib.title.equals(pendingTitle, ignoreCase = true) &&
+                         (pendingArtist.isNullOrBlank() || lib.artist.equals(pendingArtist, ignoreCase = true)))
+                    }
+
+                    val finalUri = when {
+                        matchedTrack != null -> matchedTrack.uri
+                        java.io.File(trackUri).exists() -> trackUri
+                        java.io.File(musicDir, fName).exists() -> java.io.File(musicDir, fName).absolutePath
+                        java.io.File(veylDir, fName).exists() -> java.io.File(veylDir, fName).absolutePath
+                        else -> {
+                            if (!pendingTitle.isNullOrBlank()) {
+                                val fallbackTrack = TrackInfo(
+                                    uri = trackUri,
+                                    title = pendingTitle ?: fName.substringBeforeLast("."),
+                                    artist = pendingArtist ?: "Unknown Artist",
+                                    album = pendingAlbum ?: "",
+                                    albumArtist = null,
+                                    genre = "Imported",
+                                    year = null,
+                                    trackNumber = null,
+                                    discNumber = null,
+                                    durationSeconds = if (pendingDuration > 0) pendingDuration else 0.0,
+                                    sampleRate = 44100u,
+                                    bitDepth = 16u,
+                                    bitrate = 320000u,
+                                    channels = 2u,
+                                    formatName = "Audio",
+                                    hasArtwork = false
+                                )
+                                registerOnlineTrack(fallbackTrack)
+                            }
+                            trackUri
+                        }
+                    }
+
+                    importedUris.add(finalUri)
+
+                    pendingTitle = null
+                    pendingArtist = null
+                    pendingAlbum = null
+                    pendingDuration = 0.0
+                }
+            }
+
+            var finalName = playlistName
+            var counter = 1
+            val existingNames = _playlists.value.map { it.name.lowercase() }.toSet()
+            while (existingNames.contains(finalName.lowercase())) {
+                finalName = "$playlistName ($counter)"
+                counter++
+            }
+
+            val newPlaylist = UserPlaylist(
+                id = UUID.randomUUID().toString(),
+                name = finalName,
+                trackUris = importedUris.distinct()
+            )
+
+            val updatedList = _playlists.value + newPlaylist
+            savePlaylists(updatedList)
+            newPlaylist
+        }
+    }
+
     /**
      * Completely removes a track from Favorites, Playlists, and online metadata mapping.
      */

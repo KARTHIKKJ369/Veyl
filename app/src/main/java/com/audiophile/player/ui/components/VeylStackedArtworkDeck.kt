@@ -113,6 +113,7 @@ fun VeylStackedArtworkDeck(
             ) {
                 AsyncAlbumArt(
                     uri = track2.uri,
+                    hasArtwork = track2.hasArtwork,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -133,6 +134,7 @@ fun VeylStackedArtworkDeck(
             ) {
                 AsyncAlbumArt(
                     uri = track1.uri,
+                    hasArtwork = track1.hasArtwork,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -171,6 +173,7 @@ fun VeylStackedArtworkDeck(
                 ) { uri ->
                     AsyncAlbumArt(
                         uri = uri,
+                        hasArtwork = track0.hasArtwork,
                         modifier = Modifier.fillMaxSize()
                     )
                 }

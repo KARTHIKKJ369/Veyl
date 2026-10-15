@@ -71,11 +71,18 @@
 
         <service
             android:name=".service.PlaybackService"
-            android:exported="false"
+            android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
                 <action android:name="android.media.browse.MediaBrowserService" />
+                <action android:name="com.audiophile.player.ACTION_START_SERVICE" />
+                <action android:name="com.audiophile.player.ACTION_PLAY" />
+                <action android:name="com.audiophile.player.ACTION_PAUSE" />
+                <action android:name="com.audiophile.player.ACTION_TOGGLE_PAUSE" />
+                <action android:name="com.audiophile.player.ACTION_NEXT" />
+                <action android:name="com.audiophile.player.ACTION_PREV" />
+                <action android:name="com.audiophile.player.ACTION_STOP" />
             </intent-filter>
         </service>
 

@@ -44,6 +44,8 @@ pub struct AudioStreamInfo {
     /// ReplayGain track gain in dB (e.g. -6.5 means reduce by 6.5dB)
     /// None if no ReplayGain tags were found
     pub replaygain_db: Option<f32>,
+    /// Whether this stream is currently packaged as bit-exact DoP (DSD over PCM)
+    pub is_dop: bool,
 }
 
 enum DecoderBackend {
@@ -110,7 +112,7 @@ impl AudioDecoder {
         let decimator = DsdDecimator::new(decimation_factor, 64, dsd_info.channels as usize, true);
         let dop_encoder = DopEncoder::new();
 
-        let total_frames = Some((dsd_info.total_samples_per_channel / (decimation_factor as u64 / 8)) as u64);
+        let total_frames = Some(dsd_info.total_samples_per_channel / (decimation_factor as u64));
 
         let info = AudioStreamInfo {
             sample_rate: pcm_sample_rate,
@@ -121,6 +123,7 @@ impl AudioDecoder {
             codec_name,
             container_name: "DSF".to_string(),
             replaygain_db: None,
+            is_dop: matches!(dsd_mode, DsdPlaybackMode::DoP),
         };
 
         Ok(Self {
@@ -160,7 +163,7 @@ impl AudioDecoder {
         let decimator = DsdDecimator::new(decimation_factor, 64, dsd_info.channels as usize, true);
         let dop_encoder = DopEncoder::new();
 
-        let total_frames = Some((dsd_info.total_samples_per_channel / (decimation_factor as u64 / 8)) as u64);
+        let total_frames = Some(dsd_info.total_samples_per_channel / (decimation_factor as u64));
 
         let info = AudioStreamInfo {
             sample_rate: pcm_sample_rate,
@@ -171,6 +174,7 @@ impl AudioDecoder {
             codec_name,
             container_name: "DSDIFF".to_string(),
             replaygain_db: None,
+            is_dop: matches!(dsd_mode, DsdPlaybackMode::DoP),
         };
 
         Ok(Self {
@@ -247,6 +251,7 @@ impl AudioDecoder {
             codec_name,
             container_name,
             replaygain_db: Self::extract_replaygain(&source.uri()),
+            is_dop: false,
         };
 
         Ok(Self {

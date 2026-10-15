@@ -79,7 +79,7 @@ object Mp4MetadataTagger {
 
             // Update chunk offsets (stco/co64) in trak if delta != 0
             val updatedMoovContent = if (delta != 0) {
-                adjustChunkOffsets(newMoovContent, delta)
+                adjustChunkOffsets(newMoovContent, delta, moovOffset)
             } else {
                 newMoovContent
             }
@@ -104,7 +104,7 @@ object Mp4MetadataTagger {
         }
     }
 
-    private fun adjustChunkOffsets(bytes: ByteArray, delta: Int): ByteArray {
+    private fun adjustChunkOffsets(bytes: ByteArray, delta: Int, moovOffset: Int): ByteArray {
         val result = bytes.clone()
         var offset = 0
         while (offset + 8 <= result.size) {
@@ -112,14 +112,14 @@ object Mp4MetadataTagger {
             if (size <= 0 || offset + size > result.size) break
             val type = String(result, offset + 4, 4, Charsets.ISO_8859_1)
             if (type == "trak") {
-                findAndAdjustStco(result, offset + 8, offset + size, delta)
+                findAndAdjustStco(result, offset + 8, offset + size, delta, moovOffset)
             }
             offset += size
         }
         return result
     }
 
-    private fun findAndAdjustStco(bytes: ByteArray, start: Int, end: Int, delta: Int) {
+    private fun findAndAdjustStco(bytes: ByteArray, start: Int, end: Int, delta: Int, moovOffset: Int) {
         var offset = start
         while (offset + 8 <= end) {
             val size = ByteBuffer.wrap(bytes, offset, 4).int
@@ -127,7 +127,7 @@ object Mp4MetadataTagger {
             val type = String(bytes, offset + 4, 4, Charsets.ISO_8859_1)
             when (type) {
                 "mdia", "minf", "stbl" -> {
-                    findAndAdjustStco(bytes, offset + 8, offset + size, delta)
+                    findAndAdjustStco(bytes, offset + 8, offset + size, delta, moovOffset)
                 }
                 "stco" -> {
                     if (offset + 16 <= end) {
@@ -136,8 +136,11 @@ object Mp4MetadataTagger {
                         for (i in 0 until count) {
                             if (entryOffset + 4 > end) break
                             val oldChunkOffset = ByteBuffer.wrap(bytes, entryOffset, 4).int
-                            val newChunkOffset = oldChunkOffset + delta
-                            ByteBuffer.wrap(bytes, entryOffset, 4).putInt(newChunkOffset)
+                            // Only chunks located AFTER moov are shifted when moov size changes
+                            if (oldChunkOffset > moovOffset) {
+                                val newChunkOffset = oldChunkOffset + delta
+                                ByteBuffer.wrap(bytes, entryOffset, 4).putInt(newChunkOffset)
+                            }
                             entryOffset += 4
                         }
                     }
@@ -149,8 +152,11 @@ object Mp4MetadataTagger {
                         for (i in 0 until count) {
                             if (entryOffset + 8 > end) break
                             val oldChunkOffset = ByteBuffer.wrap(bytes, entryOffset, 8).long
-                            val newChunkOffset = oldChunkOffset + delta
-                            ByteBuffer.wrap(bytes, entryOffset, 8).putLong(newChunkOffset)
+                            // Only chunks located AFTER moov are shifted when moov size changes
+                            if (oldChunkOffset > moovOffset.toLong()) {
+                                val newChunkOffset = oldChunkOffset + delta.toLong()
+                                ByteBuffer.wrap(bytes, entryOffset, 8).putLong(newChunkOffset)
+                            }
                             entryOffset += 8
                         }
                     }

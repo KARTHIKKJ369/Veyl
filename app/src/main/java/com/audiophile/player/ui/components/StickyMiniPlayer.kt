@@ -130,6 +130,7 @@ fun StickyMiniPlayer(
                             ) {
                                 AsyncAlbumArt(
                                     uri = currentTrack.uri,
+                                    hasArtwork = currentTrack.hasArtwork,
                                     modifier = Modifier.fillMaxSize(),
                                     shape = RoundedCornerShape(VeylSpacing.RadiusSm),
                                     targetSizePx = 128

@@ -154,6 +154,7 @@ fun SyncedLyricsSheet(
             ) {
                 AsyncAlbumArt(
                     uri = currentTrack.uri,
+                    hasArtwork = currentTrack.hasArtwork,
                     modifier = Modifier.fillMaxSize(),
                     targetSizePx = 256
                 )

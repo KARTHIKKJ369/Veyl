@@ -1476,11 +1476,12 @@ private fun UniffiCleaner.Companion.create(): UniffiCleaner =
         // So we check if java.lang.ref.Cleaner is there, and use that…
         java.lang.Class.forName("java.lang.ref.Cleaner")
         JavaLangRefCleaner()
-    } catch (e: ClassNotFoundException) {
+    } catch (e: Throwable) {
         // … otherwise, fallback to the JNA cleaner.
         UniffiJnaCleaner()
     }
 
+@android.annotation.TargetApi(33)
 private class JavaLangRefCleaner : UniffiCleaner {
     val cleaner = java.lang.ref.Cleaner.create()
 
@@ -1488,6 +1489,7 @@ private class JavaLangRefCleaner : UniffiCleaner {
         JavaLangRefCleanable(cleaner.register(value, cleanUpTask))
 }
 
+@android.annotation.TargetApi(33)
 private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {

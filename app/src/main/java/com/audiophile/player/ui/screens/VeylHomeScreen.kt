@@ -270,7 +270,7 @@ fun VeylHomeScreen(
                         )
                     }
 
-                    itemsIndexed(searchResults, key = { index, track -> "${track.uri}_$index" }) { _, track ->
+                    items(searchResults, key = { track -> track.uri }) { track ->
                         val isCurrent = currentTrack?.uri == track.uri
                         Row(
                             modifier = Modifier
@@ -285,17 +285,6 @@ fun VeylHomeScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(colors.surfaceElevated)
-                            ) {
-                                AsyncAlbumArt(
-                                    uri = track.uri,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = track.title,
@@ -647,7 +636,7 @@ fun VeylHomeScreen(
         // Render Master Tracks based on selected layout (Grid vs List)
         if (masterTrackLayout == SongViewLayout.GRID) {
             // Modern 2-Column Grid
-            itemsIndexed(allSongsRandomized.chunked(2), key = { index, pair -> "${pair.first().uri}_$index" }) { _, rowItems ->
+            items(allSongsRandomized.chunked(2), key = { pair -> pair.first().uri }) { rowItems ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -678,6 +667,7 @@ fun VeylHomeScreen(
                                 ) {
                                     AsyncAlbumArt(
                                         uri = track.uri,
+                                        hasArtwork = track.hasArtwork,
                                         modifier = Modifier.fillMaxSize()
                                     )
 
@@ -750,7 +740,7 @@ fun VeylHomeScreen(
             }
         } else {
             // Sleek List View
-            itemsIndexed(allSongsRandomized, key = { index, track -> "${track.uri}_$index" }) { index, track ->
+            items(allSongsRandomized, key = { track -> track.uri }) { track ->
                 val isCurrent = currentTrack?.uri == track.uri
                 Row(
                     modifier = Modifier
@@ -778,6 +768,7 @@ fun VeylHomeScreen(
                         ) {
                             AsyncAlbumArt(
                                 uri = track.uri,
+                                hasArtwork = track.hasArtwork,
                                 modifier = Modifier.fillMaxSize()
                             )
                             if (isCurrent) {

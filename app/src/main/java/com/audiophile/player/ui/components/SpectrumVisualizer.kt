@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -33,10 +34,12 @@ fun SpectrumVisualizer(
         if (spectrum.isNotEmpty()) {
             spectrum.forEachIndexed { index, value ->
                 if (index < animatables.size) {
-                    animatables[index].animateTo(
-                        targetValue = value.coerceIn(0f, 1f),
-                        animationSpec = tween(durationMillis = 40)
-                    )
+                    launch {
+                        animatables[index].animateTo(
+                            targetValue = value.coerceIn(0f, 1f),
+                            animationSpec = tween(durationMillis = 40)
+                        )
+                    }
                 }
             }
         } else {

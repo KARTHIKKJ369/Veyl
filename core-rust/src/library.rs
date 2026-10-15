@@ -166,7 +166,7 @@ impl MetadataExtractor {
                 let year = tag.year();
                 let track_number = tag.track();
                 let disc_number = tag.disk();
-                let has_artwork = !tag.pictures().is_empty();
+                let has_artwork = !tag.pictures().is_empty() || tagged_file.tags().iter().any(|t| !t.pictures().is_empty());
 
                 (title, artist, album, album_artist, genre, year, track_number, disc_number, has_artwork)
             } else {
@@ -216,19 +216,22 @@ impl MetadataExtractor {
             Err(_) => return Ok(None),
         };
 
-        let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
+        // Check primary tag, first tag, or any tag in file for pictures
+        let picture = tagged_file
+            .primary_tag()
+            .and_then(|t| t.pictures().first())
+            .or_else(|| tagged_file.first_tag().and_then(|t| t.pictures().first()))
+            .or_else(|| tagged_file.tags().iter().find_map(|t| t.pictures().first()));
 
-        if let Some(tag) = tag {
-            if let Some(picture) = tag.pictures().first() {
-                let mime_type = match picture.mime_type() {
-                    Some(m) => m.as_str().to_string(),
-                    None => "image/jpeg".to_string(),
-                };
-                return Ok(Some(AlbumArtwork {
-                    mime_type,
-                    data: picture.data().to_vec(),
-                }));
-            }
+        if let Some(picture) = picture {
+            let mime_type = match picture.mime_type() {
+                Some(m) => m.as_str().to_string(),
+                None => "image/jpeg".to_string(),
+            };
+            return Ok(Some(AlbumArtwork {
+                mime_type,
+                data: picture.data().to_vec(),
+            }));
         }
 
         Ok(None)

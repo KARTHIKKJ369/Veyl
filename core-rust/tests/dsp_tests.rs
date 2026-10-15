@@ -76,9 +76,10 @@ fn test_tpdf_dither() {
 
     for s in samples {
         let q16 = dither.quantize_i16(s);
-        assert!(q16 >= i16::MIN);
+        let expected = (s * 32767.0).round() as i32;
+        assert!(((q16 as i32) - expected).abs() <= 2);
         let q24 = dither.quantize_i24(s);
-        assert!(q24 >= -8388608 && q24 <= 8388607);
+        assert!((-8388608..=8388607).contains(&q24));
     }
 }
 

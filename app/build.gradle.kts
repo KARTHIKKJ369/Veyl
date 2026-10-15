@@ -46,6 +46,10 @@ android {
         compose = true
     }
 
+    composeCompiler {
+        stabilityConfigurationFiles.add(project.rootProject.layout.projectDirectory.file("stability_config.conf"))
+    }
+
     sourceSets {
         getByName("main") {
             jniLibs.srcDirs("src/main/jniLibs")
@@ -83,7 +87,6 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.palette:palette-ktx:1.0.0")
     implementation("androidx.compose.ui:ui-text-google-fonts:1.7.8")
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     debugImplementation(libs.androidx.ui.tooling)
