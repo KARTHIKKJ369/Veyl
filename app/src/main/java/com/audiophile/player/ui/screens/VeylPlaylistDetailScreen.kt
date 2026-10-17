@@ -615,25 +615,7 @@ private fun PlaylistTrackRow(
             }
         }
 
-        // Lightweight Album Artwork Box (Zero elevation/shadow draw overhead)
-        Box(
-            modifier = Modifier
-                .size(46.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(colors.surfaceElevated)
-        ) {
-            AsyncAlbumArt(
-                uri = track.uri,
-                hasArtwork = track.hasArtwork,
-                targetSizePx = 128,
-                cornerRadius = 8.dp,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        Spacer(modifier = Modifier.width(14.dp))
-
-        // Title & Artist
+        // Title & Artist (Clean, immediate text - no album cover, zero lag)
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,

@@ -1760,25 +1760,7 @@ private fun SongListRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Small Album Art Thumbnail (42x42dp rounded square, zero-jank async load)
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(colors.surfaceElevated)
-        ) {
-            AsyncAlbumArt(
-                uri = track.uri,
-                hasArtwork = track.hasArtwork,
-                targetSizePx = 96,
-                cornerRadius = 8.dp,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        // Track Name & Artist
+        // Track Name & Artist (Clean, immediate text - no album cover, zero lag)
         Column(
             modifier = Modifier.weight(1f)
         ) {

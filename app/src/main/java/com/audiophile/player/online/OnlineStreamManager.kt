@@ -39,6 +39,13 @@ class OnlineStreamManager(private val context: Context) {
     private var activeStreamCall: Call? = null
     private var currentStreamFile: File? = null
 
+    // Rolling single-track prefetch state (strictly max 1 file on disk, zero RAM)
+    private var prefetchJob: Job? = null
+    private var prefetchCall: Call? = null
+    @Volatile private var prefetchedSongId: String? = null
+    @Volatile private var prefetchedSongTitle: String? = null
+    @Volatile private var prefetchedFile: File? = null
+
     /**
      * Resolves the direct audio stream URL. If already present, returns immediately (<1ms).
      * If missing, queries JioSaavnService for the stream URL.
@@ -372,14 +379,122 @@ class OnlineStreamManager(private val context: Context) {
         cleanOldStreamCaches()
     }
 
+    /**
+     * Checks if we have an active, complete prefetched file for the upcoming song.
+     */
+    fun getPrefetchedStreamFile(song: OnlineSongItem): File? {
+        val file = prefetchedFile
+        if (file != null && file.exists() && file.length() > 50_000L) {
+            val sId = song.id.removePrefix("online://")
+            val pId = prefetchedSongId?.removePrefix("online://")
+            val matchesId = !pId.isNullOrBlank() && (pId == sId || sId.contains(pId))
+            val matchesTitle = prefetchedSongTitle != null && prefetchedSongTitle.equals(song.title, ignoreCase = true)
+            if (matchesId || matchesTitle) {
+                // Hand over ownership: this file is now being used for active playback
+                prefetchedFile = null
+                prefetchedSongId = null
+                prefetchedSongTitle = null
+                currentStreamFile = file
+                return file
+            }
+        }
+        return null
+    }
+
+    /**
+     * Prefetches ONLY the single next upcoming online track in the background.
+     * Uses ZERO extra RAM by streaming directly to a single bounded rolling disk file.
+     * Replaces any existing prefetch file so storage remains minimal (strictly max 1 cached file).
+     */
+    fun prefetchNextTrack(song: OnlineSongItem) {
+        if (isSongDownloaded(song)) return
+        val currentPFile = prefetchedFile
+        val sId = song.id.removePrefix("online://")
+        val pId = prefetchedSongId?.removePrefix("online://")
+        if (pId == sId && currentPFile != null && currentPFile.exists() && currentPFile.length() > 50_000L) {
+            return
+        }
+
+        cancelPrefetch()
+
+        prefetchJob = scope.launch {
+            try {
+                // 1. Resolve direct stream URL ahead of time
+                val streamUrl = resolveAudioStreamUrl(song) ?: return@launch
+
+                // 2. Prepare single rolling prefetch file
+                val ext = if (streamUrl.contains(".mp4") || streamUrl.contains(".m4a") || streamUrl.contains("saavncdn")) "m4a" else "webm"
+                val tempPrefetchFile = File(context.cacheDir, "veyl_next_prefetch_${System.currentTimeMillis()}.$ext")
+
+                // Clean any older prefetch files first
+                context.cacheDir.listFiles { _, name -> name.startsWith("veyl_next_prefetch_") }?.forEach { it.delete() }
+
+                val request = okhttp3.Request.Builder()
+                    .url(streamUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .build()
+
+                val call = okHttpClient.newCall(request)
+                prefetchCall = call
+
+                val response = call.execute()
+                if (!response.isSuccessful) return@launch
+
+                val body = response.body ?: return@launch
+                val inputStream = body.byteStream()
+                val outputStream = FileOutputStream(tempPrefetchFile)
+
+                val buffer = ByteArray(65536)
+                var bytesRead = inputStream.read(buffer)
+                var totalBytesWritten = 0L
+
+                try {
+                    while (isActive && bytesRead != -1) {
+                        outputStream.write(buffer, 0, bytesRead)
+                        totalBytesWritten += bytesRead
+                        bytesRead = inputStream.read(buffer)
+                    }
+                    outputStream.flush()
+                } finally {
+                    try { outputStream.close() } catch (_: Exception) {}
+                    try { inputStream.close() } catch (_: Exception) {}
+                }
+
+                if (isActive && totalBytesWritten > 50_000L) {
+                    prefetchedFile = tempPrefetchFile
+                    prefetchedSongId = song.id
+                    prefetchedSongTitle = song.title
+                    Log.i(TAG, "Prefetched next track into rolling cache: ${song.title} (${totalBytesWritten / 1024} KB, 0 MB RAM)")
+                } else {
+                    tempPrefetchFile.delete()
+                }
+            } catch (_: CancellationException) {
+                // Cancelled when next track changes or user skips
+            } catch (e: Exception) {
+                Log.w(TAG, "Prefetch error for ${song.title}", e)
+            }
+        }
+    }
+
+    fun cancelPrefetch() {
+        try {
+            prefetchJob?.cancel()
+            prefetchJob = null
+            prefetchCall?.cancel()
+            prefetchCall = null
+        } catch (_: Exception) {}
+    }
+
     private fun cleanOldStreamCaches() {
         try {
             val cacheDir = context.cacheDir
             cacheDir.listFiles { _, name ->
-                name.startsWith("veyl_online_stream_")
+                name.startsWith("veyl_online_stream_") ||
+                (name.startsWith("veyl_next_prefetch_") && name != prefetchedFile?.name)
             }?.forEach { file ->
-                // Don't delete if it's the currently active stream file
-                if (file.absolutePath != currentStreamFile?.absolutePath) {
+                // Don't delete if it's the currently active stream file or active prefetched file
+                if (file.absolutePath != currentStreamFile?.absolutePath &&
+                    file.absolutePath != prefetchedFile?.absolutePath) {
                     file.delete()
                 }
             }

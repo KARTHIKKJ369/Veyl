@@ -1934,6 +1934,21 @@ class AudioEngineController private constructor(private val context: Context) {
             _originalQueue.value = listOf(placeholder)
         }
 
+        // 1. Instant zero-lag playback if the song was already prefetched into the single rolling disk buffer!
+        val readyPrefetched = onlineStreamManager.getPrefetchedStreamFile(song)
+        if (readyPrefetched != null && readyPrefetched.exists() && readyPrefetched.length() > 50_000L) {
+            Log.i("AudioEngineController", "Zero-lag playback from prefetched buffer for ${song.title}")
+            _isOnlineBuffering.value = false
+            val trackInfo = onlineStreamManager.createTrackInfo(song, readyPrefetched)
+            ArtworkCache.registerOnlineArtwork(readyPrefetched.absolutePath, song.thumbnailUrl)
+            ArtworkCache.registerOnlineArtwork("online://${song.id}", song.thumbnailUrl)
+
+            updateQueueWithStreamTrack(song, trackInfo)
+            playTrack(trackInfo)
+            scheduleNextTrackPrefetch()
+            return
+        }
+
         scope.launch(Dispatchers.IO) {
             val streamUrl = if (song.streamUrl.isNotBlank()) {
                 song.streamUrl
@@ -1959,27 +1974,9 @@ class AudioEngineController private constructor(private val context: Context) {
                     ArtworkCache.registerOnlineArtwork(cacheFile.absolutePath, song.thumbnailUrl)
                     ArtworkCache.registerOnlineArtwork("online://${song.id}", song.thumbnailUrl)
 
-                    // Update track in _queue without replacing other tracks!
-                    val curQ = _queue.value
-                    val updatedQ = curQ.map { qItem ->
-                        if (qItem.title.equals(song.title, ignoreCase = true) || qItem.uri == "online://${song.id}") {
-                            trackInfo
-                        } else {
-                            qItem
-                        }
-                    }
-                    _queue.value = if (updatedQ.none { it.uri == trackInfo.uri }) listOf(trackInfo) + curQ else updatedQ
-
-                    val curOrig = _originalQueue.value
-                    _originalQueue.value = curOrig.map { qItem ->
-                        if (qItem.title.equals(song.title, ignoreCase = true) || qItem.uri == "online://${song.id}") {
-                            trackInfo
-                        } else {
-                            qItem
-                        }
-                    }
-
+                    updateQueueWithStreamTrack(song, trackInfo)
                     playTrack(trackInfo)
+                    scheduleNextTrackPrefetch()
                 },
                 onError = { error ->
                     Log.e("AudioEngineController", "Error streaming ${song.title}", error)
@@ -1988,6 +1985,77 @@ class AudioEngineController private constructor(private val context: Context) {
                     _currentOnlineSong.value = null
                 }
             )
+        }
+    }
+
+    private fun updateQueueWithStreamTrack(song: OnlineSongItem, trackInfo: TrackInfo) {
+        val curQ = _queue.value
+        val updatedQ = curQ.map { qItem ->
+            if (qItem.title.equals(song.title, ignoreCase = true) || qItem.uri == "online://${song.id}") {
+                trackInfo
+            } else {
+                qItem
+            }
+        }
+        _queue.value = if (updatedQ.none { it.uri == trackInfo.uri }) listOf(trackInfo) + curQ else updatedQ
+
+        val curOrig = _originalQueue.value
+        _originalQueue.value = curOrig.map { qItem ->
+            if (qItem.title.equals(song.title, ignoreCase = true) || qItem.uri == "online://${song.id}") {
+                trackInfo
+            } else {
+                qItem
+            }
+        }
+    }
+
+    private var prefetchScheduleJob: Job? = null
+
+    /**
+     * Schedules prefetching of the single next track in the active queue.
+     * ZERO extra RAM: streams audio directly into a single bounded rolling file on disk.
+     */
+    private fun scheduleNextTrackPrefetch() {
+        prefetchScheduleJob?.cancel()
+        prefetchScheduleJob = scope.launch(Dispatchers.IO) {
+            delay(2500L) // Wait 2.5s after playback start so initial network is calm
+            val q = _queue.value
+            if (q.isEmpty()) return@launch
+
+            val current = pendingActiveTrack ?: _status.value?.currentTrack
+            val currentIndex = q.indexOfFirst { it.uri == current?.uri || (current != null && it.title.equals(current.title, ignoreCase = true)) }
+
+            val nextTrack = if (_isShuffleEnabled.value) {
+                unplayedShufflePool.firstOrNull() ?: q.firstOrNull()
+            } else {
+                if (currentIndex != -1 && currentIndex < q.size - 1) {
+                    q[currentIndex + 1]
+                } else if (_repeatMode.value == RepeatMode.ALL) {
+                    q.firstOrNull()
+                } else {
+                    null
+                }
+            } ?: return@launch
+
+            val isOnline = nextTrack.genre == "Online Stream" ||
+                           nextTrack.uri.startsWith("online://") ||
+                           nextTrack.uri.contains("veyl_online_stream_")
+
+            if (isOnline && !isTrackDownloaded(nextTrack)) {
+                val songItem = _currentOnlineSong.value?.takeIf { it.title.equals(nextTrack.title, ignoreCase = true) }
+                    ?: onlineSongMetadataCache[nextTrack.uri]
+                    ?: onlineSongMetadataCache[nextTrack.title.lowercase()]
+                    ?: OnlineSongItem(
+                        id = nextTrack.uri.removePrefix("online://"),
+                        title = nextTrack.title,
+                        artist = nextTrack.artist ?: "Unknown Artist",
+                        album = nextTrack.album ?: "",
+                        durationSeconds = nextTrack.durationSeconds,
+                        thumbnailUrl = ArtworkCache.getOnlineArtwork(nextTrack.uri) ?: "",
+                        streamUrl = ""
+                    )
+                onlineStreamManager.prefetchNextTrack(songItem)
+            }
         }
     }
 
@@ -2352,6 +2420,7 @@ class AudioEngineController private constructor(private val context: Context) {
             } else if (!currentQ.any { it.uri == track.uri }) {
                 _queue.value = currentQ + track
             }
+            scheduleNextTrackPrefetch()
             } catch (error: Throwable) {
                 Log.e("AudioEngineController", "Unable to start playback for ${track.uri}", error)
             }
@@ -2443,6 +2512,8 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun stop() {
         onlineStreamManager.stopCurrentStream()
+        onlineStreamManager.cancelPrefetch()
+        prefetchScheduleJob?.cancel()
         _isOnlineStreaming.value = false
         _isOnlineBuffering.value = false
         _currentOnlineSong.value = null

@@ -45,10 +45,10 @@ import java.util.concurrent.TimeUnit
 
 object ArtworkCache {
 
-    private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    private val cacheSize = (maxMemory / 5).coerceAtLeast(16 * 1024)
+    // Minimal footprint memory cache (4 MB) strictly for current playing track header / now playing screen
+    private const val CACHE_SIZE_KB = 4 * 1024
 
-    private val memoryCache = object : LruCache<String, Bitmap>(cacheSize) {
+    private val memoryCache = object : LruCache<String, Bitmap>(CACHE_SIZE_KB) {
         override fun sizeOf(key: String, bitmap: Bitmap): Int {
             return bitmap.byteCount / 1024
         }
