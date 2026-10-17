@@ -92,7 +92,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
                         engineController.setVolume(preDuckVolume)
                         isDucked = false
                     }
-                    if (shouldResume || hadCall) {
+                    if (shouldResume) {
                         delay(50)
                         engineController.play()
                     }
@@ -101,11 +101,13 @@ class PlaybackService : MediaBrowserServiceCompat() {
             AudioManager.AUDIOFOCUS_LOSS -> {
                 hasAudioFocus = false
                 val isCurrentlyPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
-                resumeOnFocusGain = isCurrentlyPlaying
+                resumeOnFocusGain = false
                 wasCallActive = audioManager.mode != AudioManager.MODE_NORMAL
                 isDucked = false
                 audioFocusJob?.cancel()
-                engineController.pause()
+                if (isCurrentlyPlaying) {
+                    engineController.pause()
+                }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 // Focus lost transiently without ducking (e.g. Phone Call, VoIP, Alarm, Navigation voice)
@@ -258,6 +260,9 @@ class PlaybackService : MediaBrowserServiceCompat() {
                                 resumeOnFocusGain = true
                                 engineController.pause()
                             }
+                        } else if (isCall && !isPlaying) {
+                            // Call arrived while music was already paused: do NOT resume after call ends
+                            resumeOnFocusGain = false
                         } else if (!isCall) {
                             if (resumeOnFocusGain) {
                                 Log.i("PlaybackService", "Audio mode returned to MODE_NORMAL. Restoring playback.")
@@ -676,9 +681,13 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 }
             }
             ACTION_PAUSE -> {
+                resumeOnFocusGain = false
                 engineController.pause()
             }
             ACTION_TOGGLE_PAUSE -> {
+                if (engineController.playbackState.value == PlaybackStateEnum.PLAYING) {
+                    resumeOnFocusGain = false
+                }
                 engineController.togglePlayPause()
             }
             ACTION_NEXT -> {
