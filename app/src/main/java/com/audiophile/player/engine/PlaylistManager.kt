@@ -15,7 +15,8 @@ import java.util.UUID
 data class UserPlaylist(
     val id: String,
     val name: String,
-    val trackUris: List<String>
+    val trackUris: List<String>,
+    val coverUrl: String? = null
 )
 
 class PlaylistManager(context: Context) {
@@ -71,7 +72,12 @@ class PlaylistManager(context: Context) {
                         tracks.add(t)
                     }
                 }
-                list.add(UserPlaylist(id, name, tracks))
+                val coverUrl = obj.optString("coverUrl").takeIf { it.isNotBlank() }
+                if (!coverUrl.isNullOrBlank()) {
+                    ArtworkCache.registerOnlineArtwork(id, coverUrl)
+                    ArtworkCache.registerOnlineArtwork(name, coverUrl)
+                }
+                list.add(UserPlaylist(id, name, tracks, coverUrl))
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error loading playlists", e)
@@ -152,7 +158,7 @@ class PlaylistManager(context: Context) {
         return pl
     }
 
-    fun createPlaylistWithTracks(name: String, trackUris: List<String>): UserPlaylist {
+    fun createPlaylistWithTracks(name: String, trackUris: List<String>, coverUrl: String? = null): UserPlaylist {
         var finalName = name.trim().ifEmpty { "Imported Playlist" }
         val existingNames = _playlists.value.map { it.name.lowercase() }.toSet()
         var counter = 1
@@ -165,8 +171,13 @@ class PlaylistManager(context: Context) {
         val newPlaylist = UserPlaylist(
             id = UUID.randomUUID().toString(),
             name = finalName,
-            trackUris = trackUris.distinct()
+            trackUris = trackUris.distinct(),
+            coverUrl = coverUrl
         )
+        if (!coverUrl.isNullOrBlank()) {
+            ArtworkCache.registerOnlineArtwork(newPlaylist.id, coverUrl)
+            ArtworkCache.registerOnlineArtwork(newPlaylist.name, coverUrl)
+        }
         val updatedList = _playlists.value + newPlaylist
         savePlaylists(updatedList)
         return newPlaylist
@@ -625,6 +636,9 @@ class PlaylistManager(context: Context) {
                 val obj = JSONObject().apply {
                     put("id", pl.id)
                     put("name", pl.name)
+                    if (!pl.coverUrl.isNullOrBlank()) {
+                        put("coverUrl", pl.coverUrl)
+                    }
                     val tracksArr = JSONArray()
                     pl.trackUris.forEach { tracksArr.put(it) }
                     put("tracks", tracksArr)

@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.graphics.Brush
+import com.audiophile.player.engine.ArtworkCache
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -120,6 +122,9 @@ fun VeylSongsScreen(
     val isScanning by controller.isScanning.collectAsStateWithLifecycle()
     val favoriteUris by controller.favoriteUris.collectAsStateWithLifecycle()
     val playlists by controller.playlists.collectAsStateWithLifecycle()
+    val topTracks by controller.topTracks.collectAsStateWithLifecycle()
+    val lastAddedTracks by controller.lastAddedTracks.collectAsStateWithLifecycle()
+    val historyTracks by controller.playbackHistory.collectAsStateWithLifecycle()
     val currentUri by controller.currentUri.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
@@ -192,7 +197,7 @@ fun VeylSongsScreen(
         }
     }
 
-    val tabs = listOf("All", "Favorites", "Artists", "Albums", "Playlists")
+    val tabs = listOf("All", "Playlists", "Favorites", "Artists", "Albums")
 
     val fileModifiedMap = remember { java.util.concurrent.ConcurrentHashMap<String, Long>() }
 
@@ -916,7 +921,7 @@ fun VeylSongsScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 // Create New Playlist Button
@@ -925,7 +930,7 @@ fun VeylSongsScreen(
                                     color = colors.accentSignal,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(46.dp)
+                                        .height(44.dp)
                                         .clickable {
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             newPlaylistNameInput = ""
@@ -941,7 +946,7 @@ fun VeylSongsScreen(
                                             imageVector = VeylIcons.Plus,
                                             contentDescription = "New Playlist",
                                             tint = Color.Black,
-                                            modifier = Modifier.size(17.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
@@ -959,7 +964,7 @@ fun VeylSongsScreen(
                                     color = colors.surfaceElevated,
                                     modifier = Modifier
                                         .weight(1.1f)
-                                        .height(46.dp)
+                                        .height(44.dp)
                                         .clickable {
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             importPlaylistLauncher.launch(
@@ -976,7 +981,7 @@ fun VeylSongsScreen(
                                             imageVector = VeylIcons.Upload,
                                             contentDescription = "Import File",
                                             tint = colors.textPrimary,
-                                            modifier = Modifier.size(17.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
@@ -995,7 +1000,7 @@ fun VeylSongsScreen(
                                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1ED760).copy(alpha = 0.55f)),
                                     modifier = Modifier
                                         .weight(1.1f)
-                                        .height(46.dp)
+                                        .height(44.dp)
                                         .clickable {
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             spotifyUrlInput = ""
@@ -1012,7 +1017,7 @@ fun VeylSongsScreen(
                                             imageVector = VeylIcons.Spotify,
                                             contentDescription = "Import Spotify Playlist",
                                             tint = Color(0xFF1ED760),
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(17.dp)
                                         )
                                         Spacer(modifier = Modifier.width(5.dp))
                                         Text(
@@ -1026,13 +1031,358 @@ fun VeylSongsScreen(
                             }
                         }
 
+                        // Featured Pinned Playlist Card: Favorites
+                        item {
+                            val favTracks = remember(favoriteUris, tracks) {
+                                favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+                                    val fName = File(it.uri).name
+                                    !fName.startsWith(".") &&
+                                    !fName.contains("trashed", ignoreCase = true) &&
+                                    !it.title.contains("trashed", ignoreCase = true) &&
+                                    !fName.startsWith("veyl_online_stream_") &&
+                                    !it.uri.contains("/cache/")
+                                }
+                            }
+                            val favCoverUri = remember(favTracks) { favTracks.firstOrNull()?.uri ?: "" }
+
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = colors.surfacePanel,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.35f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                                    .clickable {
+                                        onNavigateToPlaylist?.invoke("Favorites")
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(modifier = Modifier.size(62.dp)) {
+                                        if (favCoverUri.isNotBlank()) {
+                                            AsyncAlbumArt(
+                                                uri = favCoverUri,
+                                                contentDescription = "Favorites",
+                                                modifier = Modifier.fillMaxSize(),
+                                                cornerRadius = 14.dp,
+                                                targetSizePx = 150
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .background(
+                                                        Brush.linearGradient(
+                                                            listOf(colors.accentSignal, colors.accentSignal.copy(alpha = 0.65f))
+                                                        )
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = VeylIcons.FavoriteFilled,
+                                                    contentDescription = null,
+                                                    tint = Color.Black,
+                                                    modifier = Modifier.size(26.dp)
+                                                )
+                                            }
+                                        }
+                                        // Red heart badge on cover
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .size(20.dp)
+                                                .clip(CircleShape)
+                                                .background(colors.background)
+                                                .padding(2.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFE53935)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = VeylIcons.FavoriteFilled,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(10.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(14.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "Favorites",
+                                                style = VeylTypography.TitleMedium,
+                                                color = colors.textPrimary,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 17.sp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(100.dp),
+                                                color = colors.accentSignal.copy(alpha = 0.15f)
+                                            ) {
+                                                Text(
+                                                    text = "PINNED",
+                                                    style = VeylTypography.MonoBadge,
+                                                    color = colors.accentSignal,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.height(3.dp))
+                                        Text(
+                                            text = "${favTracks.size} tracks • The tracks you like the most",
+                                            style = VeylTypography.BodySmall,
+                                            color = colors.textMuted,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            if (favTracks.isNotEmpty()) {
+                                                controller.playTrackList(favTracks, startIndex = 0)
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                            .background(colors.surfaceElevated)
+                                    ) {
+                                        Icon(
+                                            imageVector = VeylIcons.Play,
+                                            contentDescription = "Play Favorites",
+                                            tint = colors.accentSignal,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Smart Playlists Carousel (Top Tracks, Recently Added, History)
+                        item {
+                            Column(modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)) {
+                                Text(
+                                    text = "SMART COLLECTIONS",
+                                    style = VeylTypography.MonoBadge,
+                                    color = colors.textMuted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    // Card 1: Top Tracks
+                                    val topCover = remember(topTracks) { topTracks.firstOrNull()?.uri ?: "" }
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = colors.surfacePanel,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { onNavigateToPlaylist?.invoke("Top Tracks") }
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(68.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                            ) {
+                                                if (topCover.isNotBlank()) {
+                                                    AsyncAlbumArt(
+                                                        uri = topCover,
+                                                        contentDescription = "Top Tracks",
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        cornerRadius = 10.dp,
+                                                        targetSizePx = 140
+                                                    )
+                                                } else {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .background(colors.surfaceElevated),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(VeylIcons.Equalizer, null, tint = colors.accentSignal, modifier = Modifier.size(24.dp))
+                                                    }
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                text = "Top Tracks",
+                                                style = VeylTypography.BodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = colors.textPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${topTracks.size} tracks",
+                                                style = VeylTypography.MonoSpec,
+                                                fontSize = 10.sp,
+                                                color = colors.textMuted
+                                            )
+                                        }
+                                    }
+
+                                    // Card 2: Recently Added
+                                    val lastAddedCover = remember(lastAddedTracks) { lastAddedTracks.firstOrNull()?.uri ?: "" }
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = colors.surfacePanel,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { onNavigateToPlaylist?.invoke("Last added") }
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(68.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                            ) {
+                                                if (lastAddedCover.isNotBlank()) {
+                                                    AsyncAlbumArt(
+                                                        uri = lastAddedCover,
+                                                        contentDescription = "Recently Added",
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        cornerRadius = 10.dp,
+                                                        targetSizePx = 140
+                                                    )
+                                                } else {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .background(colors.surfaceElevated),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(VeylIcons.QueueList, null, tint = colors.accentSignal, modifier = Modifier.size(24.dp))
+                                                    }
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                text = "Recent Added",
+                                                style = VeylTypography.BodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = colors.textPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${lastAddedTracks.size} tracks",
+                                                style = VeylTypography.MonoSpec,
+                                                fontSize = 10.sp,
+                                                color = colors.textMuted
+                                            )
+                                        }
+                                    }
+
+                                    // Card 3: History
+                                    val historyCover = remember(historyTracks) { historyTracks.firstOrNull()?.uri ?: "" }
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = colors.surfacePanel,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { onNavigateToPlaylist?.invoke("History") }
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(68.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                            ) {
+                                                if (historyCover.isNotBlank()) {
+                                                    AsyncAlbumArt(
+                                                        uri = historyCover,
+                                                        contentDescription = "History",
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        cornerRadius = 10.dp,
+                                                        targetSizePx = 140
+                                                    )
+                                                } else {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .background(colors.surfaceElevated),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(VeylIcons.Shuffle, null, tint = colors.accentSignal, modifier = Modifier.size(24.dp))
+                                                    }
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                text = "History",
+                                                style = VeylTypography.BodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = colors.textPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${historyTracks.size} tracks",
+                                                style = VeylTypography.MonoSpec,
+                                                fontSize = 10.sp,
+                                                color = colors.textMuted
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Section 3: Custom Playlists
+                        item {
+                            Text(
+                                text = "MY PLAYLISTS (${playlists.size})",
+                                style = VeylTypography.MonoBadge,
+                                color = colors.textMuted,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+
                         if (playlists.isEmpty()) {
                             item {
-                                EmptyStateNotice(message = "No playlists created yet. Create a new one or import an .m3u8 playlist!")
+                                EmptyStateNotice(message = "No custom playlists created yet. Create a new one or import from Spotify above!")
                             }
                         } else {
-                            items(playlists) { pl ->
+                            items(playlists, key = { it.id }) { pl ->
                                 var showPlaylistOptions by remember { mutableStateOf(false) }
+
+                                val playlistCoverUri: String = remember(pl, tracks) {
+                                    if (!pl.coverUrl.isNullOrBlank()) {
+                                        pl.coverUrl!!
+                                    } else {
+                                        val online = ArtworkCache.getOnlineArtwork(pl.id) ?: ArtworkCache.getOnlineArtwork(pl.name)
+                                        if (!online.isNullOrBlank()) {
+                                            online
+                                        } else {
+                                            val firstWithArt = pl.trackUris.firstOrNull { uri ->
+                                                val t = controller.resolveTrackInfo(uri)
+                                                t?.hasArtwork == true || ArtworkCache.getOnlineArtwork(uri) != null
+                                            } ?: pl.trackUris.firstOrNull() ?: ""
+                                            firstWithArt
+                                        }
+                                    }
+                                }
 
                                 Row(
                                     modifier = Modifier
@@ -1046,18 +1396,32 @@ fun VeylSongsScreen(
                                         .padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(12.dp),
-                                        color = colors.surfaceElevated,
-                                        modifier = Modifier.size(48.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = VeylIcons.QueueList,
-                                                contentDescription = null,
-                                                tint = colors.accentSignal,
-                                                modifier = Modifier.size(22.dp)
+                                    // Real Playlist Cover Artwork!
+                                    Box(modifier = Modifier.size(54.dp)) {
+                                        if (playlistCoverUri.isNotBlank()) {
+                                            AsyncAlbumArt(
+                                                uri = playlistCoverUri,
+                                                contentDescription = pl.name,
+                                                modifier = Modifier.fillMaxSize(),
+                                                cornerRadius = 12.dp,
+                                                targetSizePx = 140
                                             )
+                                        } else {
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = colors.surfaceElevated,
+                                                modifier = Modifier.fillMaxSize(),
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = VeylIcons.QueueList,
+                                                        contentDescription = null,
+                                                        tint = colors.accentSignal.copy(alpha = 0.7f),
+                                                        modifier = Modifier.size(22.dp)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
 
@@ -1074,6 +1438,25 @@ fun VeylSongsScreen(
                                             text = "${pl.trackUris.size} tracks",
                                             style = VeylTypography.BodySmall,
                                             color = colors.textMuted
+                                        )
+                                    }
+
+                                    // Quick Play Button
+                                    IconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            val plTracks = pl.trackUris.mapNotNull { controller.resolveTrackInfo(it) }
+                                            if (plTracks.isNotEmpty()) {
+                                                controller.playTrackList(plTracks, startIndex = 0)
+                                            }
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = VeylIcons.Play,
+                                            contentDescription = "Play Playlist",
+                                            tint = colors.textMuted,
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
 

@@ -1486,7 +1486,11 @@ class AudioEngineController private constructor(private val context: Context) {
                 }
             }
 
-            val playlist = playlistManager.createPlaylistWithTracks(spotifyData.title, importedUris)
+            val playlist = playlistManager.createPlaylistWithTracks(
+                name = spotifyData.title,
+                trackUris = importedUris,
+                coverUrl = spotifyData.coverUrl
+            )
 
             if (playlistCover.isNotBlank()) {
                 ArtworkCache.registerOnlineArtwork(playlist.name, playlistCover)
