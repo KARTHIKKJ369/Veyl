@@ -58,6 +58,7 @@ import com.audiophile.player.ui.screens.VeylHomeRedesigned
 import com.audiophile.player.ui.screens.VeylNowPlayingScreen
 import com.audiophile.player.ui.screens.VeylOnboardingScreen
 import com.audiophile.player.ui.screens.VeylPlaylistDetailScreen
+import com.audiophile.player.ui.screens.VeylPlaylistsScreen
 import com.audiophile.player.ui.screens.VeylQueueScreen
 import com.audiophile.player.ui.screens.VeylSearchScreen
 import com.audiophile.player.ui.screens.VeylSettingsRedesigned
@@ -70,6 +71,7 @@ import com.audiophile.player.ui.theme.VeylTypography
 sealed class VeylScreen(val route: String, val title: String, val icon: ImageVector) {
     object Home : VeylScreen("home", "Home", VeylIcons.StorageLocal)
     object Songs : VeylScreen("songs", "Library", VeylIcons.Folder)
+    object Playlists : VeylScreen("playlists", "Playlists", VeylIcons.QueueList)
     object Favorites : VeylScreen("favorites", "Collection", VeylIcons.FavoriteFilled)
     object Equalizer : VeylScreen("equalizer", "EQ", VeylIcons.Equalizer)
     object Settings : VeylScreen("settings", "Settings", VeylIcons.Settings)
@@ -127,7 +129,7 @@ fun AudiophileNavHost(
         val bottomNavItems = listOf(
             VeylScreen.Home,
             VeylScreen.Songs,
-            VeylScreen.Favorites,
+            VeylScreen.Playlists,
             VeylScreen.Settings
         )
 
@@ -162,7 +164,8 @@ fun AudiophileNavHost(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             bottomNavItems.forEach { screen ->
-                                val isSelected = currentDestination?.route == screen.route
+                                val isSelected = currentDestination?.route == screen.route ||
+                                    (screen == VeylScreen.Playlists && (currentDestination?.route?.startsWith("playlist/") == true || currentDestination?.route == VeylScreen.Favorites.route))
                                 val displayTitle = if (screen == VeylScreen.Home) homeTitle else screen.title
                                 val displayIcon = if (screen == VeylScreen.Home) homeIcon else screen.icon
 
@@ -276,7 +279,21 @@ fun AudiophileNavHost(
                     )
                 }
 
-                // Screen 3: Favorites Screen
+                // Screen 3: Playlists Screen (All playlists, pinned Favorites, smart collections)
+                composable(
+                    route = VeylScreen.Playlists.route,
+                    enterTransition = { fadeIn(animationSpec = tween(180)) },
+                    exitTransition = { fadeOut(animationSpec = tween(140)) }
+                ) {
+                    VeylPlaylistsScreen(
+                        controller = controller,
+                        onNavigateToPlaylist = { playlistName ->
+                            navController.navigate("playlist/$playlistName")
+                        }
+                    )
+                }
+
+                // Favorites Screen (direct route fallback)
                 composable(
                     route = VeylScreen.Favorites.route,
                     enterTransition = { fadeIn(animationSpec = tween(180)) },
@@ -288,7 +305,7 @@ fun AudiophileNavHost(
                         description = "The tracks I like the most",
                         onNavigateBack = {
                             if (!navController.popBackStack()) {
-                                navController.navigate(VeylScreen.Home.route)
+                                navController.navigate(VeylScreen.Playlists.route)
                             }
                         }
                     )
@@ -359,10 +376,10 @@ fun AudiophileNavHost(
                     VeylPlaylistDetailScreen(
                         controller = controller,
                         title = playlistName,
-                        description = "Custom Playlist",
+                        description = if (playlistName == "Favorites") "The tracks I like the most" else "Custom Playlist",
                         onNavigateBack = {
                             if (!navController.popBackStack()) {
-                                navController.navigate(VeylScreen.Songs.route)
+                                navController.navigate(VeylScreen.Playlists.route)
                             }
                         }
                     )

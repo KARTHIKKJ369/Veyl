@@ -2,6 +2,7 @@ package com.audiophile.player.ui.screens
 
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -79,6 +80,10 @@ fun VeylPlaylistDetailScreen(
     val context = LocalContext.current
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
+
+    BackHandler {
+        onNavigateBack()
+    }
     val allTracks by controller.tracks.collectAsStateWithLifecycle()
     val favoriteUris by controller.favoriteUris.collectAsStateWithLifecycle()
     val topTracks by controller.topTracks.collectAsStateWithLifecycle()
