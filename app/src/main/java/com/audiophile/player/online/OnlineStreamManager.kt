@@ -57,6 +57,11 @@ class OnlineStreamManager(private val context: Context) {
             val results = JioSaavnService.searchSongs(query)
             if (results.isNotEmpty()) {
                 val match = results.first()
+                if (match.thumbnailUrl.isNotBlank()) {
+                    com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork(song.id, match.thumbnailUrl)
+                    com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork("online://${song.id}", match.thumbnailUrl)
+                    com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork(song.title.lowercase(), match.thumbnailUrl)
+                }
                 return match.streamUrl
             }
         } catch (e: Exception) {

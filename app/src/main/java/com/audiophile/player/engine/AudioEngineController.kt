@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.audiophile.player.online.JioSaavnService
 import com.audiophile.player.online.OnlineSongItem
 import com.audiophile.player.online.OnlineStreamManager
 import uniffi.audiophile_core.AudiophileEngineHandle
@@ -1342,6 +1343,9 @@ class AudioEngineController private constructor(private val context: Context) {
             var localMatches = 0
             var onlineStreams = 0
 
+            val playlistCover = spotifyData.coverUrl ?: ""
+            val newlyCreatedTracks = mutableListOf<Pair<TrackInfo, OnlineSongItem>>()
+
             for (spTrack in spotifyData.tracks) {
                 // Match against local library: exact title & fuzzy artist, or exact title
                 val matched = allLibraryTracks.find { lib ->
@@ -1359,6 +1363,9 @@ class AudioEngineController private constructor(private val context: Context) {
                     // Create streaming-ready track
                     val hash = "${spTrack.title}_${spTrack.artist}".hashCode().toUInt().toString(16)
                     val onlineUri = "online://spotify_$hash"
+                    val trackCover = spTrack.coverUrl?.takeIf { it.isNotBlank() } ?: playlistCover
+                    val hasArt = trackCover.isNotBlank()
+
                     val onlineTrack = TrackInfo(
                         uri = onlineUri,
                         title = spTrack.title,
@@ -1375,7 +1382,7 @@ class AudioEngineController private constructor(private val context: Context) {
                         bitrate = 320000u,
                         channels = 2u,
                         formatName = "AAC 320k",
-                        hasArtwork = false
+                        hasArtwork = hasArt
                     )
 
                     val onlineSong = OnlineSongItem(
@@ -1384,20 +1391,54 @@ class AudioEngineController private constructor(private val context: Context) {
                         artist = spTrack.artist,
                         album = spotifyData.title,
                         durationSeconds = spTrack.durationSeconds,
-                        thumbnailUrl = "",
+                        thumbnailUrl = trackCover,
                         streamUrl = ""
                     )
+
+                    if (hasArt) {
+                        ArtworkCache.registerOnlineArtwork(onlineTrack.uri, trackCover)
+                        ArtworkCache.registerOnlineArtwork(onlineSong.id, trackCover)
+                        ArtworkCache.registerOnlineArtwork("online://${onlineSong.id}", trackCover)
+                        ArtworkCache.registerOnlineArtwork(onlineTrack.title.lowercase(), trackCover)
+                    }
 
                     playlistManager.registerOnlineTrack(onlineTrack, onlineSong)
                     onlineSongMetadataCache[onlineTrack.uri] = onlineSong
                     onlineSongMetadataCache[onlineTrack.title.lowercase()] = onlineSong
 
                     importedUris.add(onlineUri)
+                    newlyCreatedTracks.add(onlineTrack to onlineSong)
                     onlineStreams++
                 }
             }
 
             val playlist = playlistManager.createPlaylistWithTracks(spotifyData.title, importedUris)
+
+            if (playlistCover.isNotBlank()) {
+                ArtworkCache.registerOnlineArtwork(playlist.name, playlistCover)
+                ArtworkCache.registerOnlineArtwork(playlist.id, playlistCover)
+            }
+
+            // Asynchronously resolve individual track covers in background
+            scope.launch(Dispatchers.IO) {
+                for ((track, song) in newlyCreatedTracks) {
+                    try {
+                        val query = "${track.title} ${track.artist}".trim()
+                        val results = JioSaavnService.searchSongs(query)
+                        if (results.isNotEmpty()) {
+                            val match = results.first()
+                            if (match.thumbnailUrl.isNotBlank()) {
+                                ArtworkCache.registerOnlineArtwork(track.uri, match.thumbnailUrl)
+                                ArtworkCache.registerOnlineArtwork(song.id, match.thumbnailUrl)
+                                ArtworkCache.registerOnlineArtwork("online://${song.id}", match.thumbnailUrl)
+                                ArtworkCache.registerOnlineArtwork(track.title.lowercase(), match.thumbnailUrl)
+                                val updatedTrack = track.copy(hasArtwork = true)
+                                playlistManager.registerOnlineTrack(updatedTrack, match)
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
 
             SpotifyImportResult(
                 playlist = playlist,
@@ -1939,9 +1980,12 @@ class AudioEngineController private constructor(private val context: Context) {
         if (readyPrefetched != null && readyPrefetched.exists() && readyPrefetched.length() > 50_000L) {
             Log.i("AudioEngineController", "Zero-lag playback from prefetched buffer for ${song.title}")
             _isOnlineBuffering.value = false
-            val trackInfo = onlineStreamManager.createTrackInfo(song, readyPrefetched)
-            ArtworkCache.registerOnlineArtwork(readyPrefetched.absolutePath, song.thumbnailUrl)
-            ArtworkCache.registerOnlineArtwork("online://${song.id}", song.thumbnailUrl)
+            val bestThumb = song.thumbnailUrl.ifBlank { ArtworkCache.getOnlineArtwork("online://${song.id}") ?: "" }
+            val trackInfo = onlineStreamManager.createTrackInfo(song.copy(thumbnailUrl = bestThumb), readyPrefetched)
+            if (bestThumb.isNotBlank()) {
+                ArtworkCache.registerOnlineArtwork(readyPrefetched.absolutePath, bestThumb)
+                ArtworkCache.registerOnlineArtwork("online://${song.id}", bestThumb)
+            }
 
             updateQueueWithStreamTrack(song, trackInfo)
             playTrack(trackInfo)
@@ -1970,9 +2014,12 @@ class AudioEngineController private constructor(private val context: Context) {
                 streamUrl = streamUrl,
                 onStreamReady = { cacheFile ->
                     _isOnlineBuffering.value = false
-                    val trackInfo = onlineStreamManager.createTrackInfo(song, cacheFile)
-                    ArtworkCache.registerOnlineArtwork(cacheFile.absolutePath, song.thumbnailUrl)
-                    ArtworkCache.registerOnlineArtwork("online://${song.id}", song.thumbnailUrl)
+                    val bestThumb = song.thumbnailUrl.ifBlank { ArtworkCache.getOnlineArtwork("online://${song.id}") ?: "" }
+                    val trackInfo = onlineStreamManager.createTrackInfo(song.copy(thumbnailUrl = bestThumb), cacheFile)
+                    if (bestThumb.isNotBlank()) {
+                        ArtworkCache.registerOnlineArtwork(cacheFile.absolutePath, bestThumb)
+                        ArtworkCache.registerOnlineArtwork("online://${song.id}", bestThumb)
+                    }
 
                     updateQueueWithStreamTrack(song, trackInfo)
                     playTrack(trackInfo)

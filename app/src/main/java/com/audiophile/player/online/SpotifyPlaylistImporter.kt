@@ -13,11 +13,13 @@ data class SpotifyTrack(
     val title: String,
     val artist: String,
     val durationSeconds: Double,
-    val previewUrl: String? = null
+    val previewUrl: String? = null,
+    val coverUrl: String? = null
 )
 
 data class SpotifyPlaylist(
     val title: String,
+    val coverUrl: String? = null,
     val tracks: List<SpotifyTrack>
 )
 
@@ -94,6 +96,38 @@ object SpotifyPlaylistImporter {
             }
             val playlistName = rawName.replace("&amp;", "&").replace("&quot;", "\"").trim()
 
+            // Extract high-resolution cover art from entity
+            var playlistCoverUrl: String? = null
+            val visualImages = entity.optJSONObject("visualIdentity")?.optJSONArray("image")
+            if (visualImages != null && visualImages.length() > 0) {
+                var maxDim = 0
+                for (j in 0 until visualImages.length()) {
+                    val imgObj = visualImages.optJSONObject(j) ?: continue
+                    val w = imgObj.optInt("maxWidth", 0)
+                    val h = imgObj.optInt("maxHeight", 0)
+                    val dim = maxOf(w, h)
+                    val u = imgObj.optString("url")
+                    if (u.isNotBlank() && (dim >= maxDim || playlistCoverUrl == null)) {
+                        maxDim = dim
+                        playlistCoverUrl = u
+                    }
+                }
+            }
+
+            if (playlistCoverUrl.isNullOrBlank()) {
+                val coverSources = entity.optJSONObject("coverArt")?.optJSONArray("sources")
+                if (coverSources != null && coverSources.length() > 0) {
+                    playlistCoverUrl = coverSources.optJSONObject(0)?.optString("url")
+                }
+            }
+
+            if (playlistCoverUrl.isNullOrBlank()) {
+                val imagesArr = entity.optJSONArray("images")
+                if (imagesArr != null && imagesArr.length() > 0) {
+                    playlistCoverUrl = imagesArr.optJSONObject(0)?.optString("url")
+                }
+            }
+
             val trackListArray = entity.optJSONArray("trackList")
             val parsedTracks = mutableListOf<SpotifyTrack>()
 
@@ -113,7 +147,8 @@ object SpotifyPlaylistImporter {
                             title = title,
                             artist = if (artist.isNotBlank()) artist else "Unknown Artist",
                             durationSeconds = durationSec,
-                            previewUrl = previewUrl
+                            previewUrl = previewUrl,
+                            coverUrl = playlistCoverUrl
                         )
                     )
                 }
@@ -123,9 +158,10 @@ object SpotifyPlaylistImporter {
                 throw IllegalStateException("No tracks found in this Spotify playlist.")
             }
 
-            Log.i(TAG, "Successfully extracted Spotify playlist '$playlistName' with ${parsedTracks.size} tracks")
+            Log.i(TAG, "Successfully extracted Spotify playlist '$playlistName' with ${parsedTracks.size} tracks, cover=$playlistCoverUrl")
             SpotifyPlaylist(
                 title = playlistName,
+                coverUrl = playlistCoverUrl,
                 tracks = parsedTracks
             )
         }

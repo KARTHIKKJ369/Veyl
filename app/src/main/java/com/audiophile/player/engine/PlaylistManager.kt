@@ -88,6 +88,12 @@ class PlaylistManager(context: Context) {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val track = jsonToTrackInfo(obj)
+                val artUrl = obj.optString("artworkUrl")
+                if (artUrl.isNotBlank()) {
+                    ArtworkCache.registerOnlineArtwork(track.uri, artUrl)
+                    val fn = java.io.File(track.uri).name
+                    if (fn.isNotBlank()) ArtworkCache.registerOnlineArtwork(fn, artUrl)
+                }
                 metaMap[track.uri] = track
                 val fName = java.io.File(track.uri).name
                 if (fName.isNotBlank()) metaMap[fName] = track
@@ -530,6 +536,12 @@ class PlaylistManager(context: Context) {
             if (it.streamUrl.isNotBlank()) current[it.streamUrl] = track
             if (it.id.isNotBlank()) current[it.id] = track
             if (it.videoId.isNotBlank()) current[it.videoId] = track
+            if (it.thumbnailUrl.isNotBlank()) {
+                ArtworkCache.registerOnlineArtwork(track.uri, it.thumbnailUrl)
+                val fn = java.io.File(track.uri).name
+                if (fn.isNotBlank()) ArtworkCache.registerOnlineArtwork(fn, it.thumbnailUrl)
+                if (it.id.isNotBlank()) ArtworkCache.registerOnlineArtwork(it.id, it.thumbnailUrl)
+            }
         }
         _onlineTrackMeta.value = current
         persistOnlineTracks(current.values.toList())
@@ -554,6 +566,7 @@ class PlaylistManager(context: Context) {
     }
 
     private fun trackInfoToJson(t: TrackInfo): JSONObject {
+        val art = ArtworkCache.getOnlineArtwork(t.uri) ?: ""
         return JSONObject().apply {
             put("uri", t.uri)
             put("title", t.title)
@@ -568,6 +581,7 @@ class PlaylistManager(context: Context) {
             put("channels", t.channels.toInt())
             put("formatName", t.formatName)
             put("hasArtwork", t.hasArtwork)
+            if (art.isNotBlank()) put("artworkUrl", art)
         }
     }
 
