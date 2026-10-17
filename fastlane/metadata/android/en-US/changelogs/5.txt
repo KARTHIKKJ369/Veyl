@@ -1,0 +1,7 @@
+Version 2.0.0:
+• Added custom equalizer preset creation and management with persistent storage
+• Fixed audio sample rate synchronization and pitch shift on audio route changes
+• Fixed audio focus resumption so paused music stays paused after phone calls
+• Redesigned Playlists screen with pinned Favorites, Smart Collections, and custom artwork
+• Dedicated Playlists tab in bottom navigation bar
+• Native audio engine resampler safety improvements

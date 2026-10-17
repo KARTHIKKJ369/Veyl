@@ -1,0 +1,14 @@
+Veyl is a reference-grade, bit-perfect music player for Android, engineered for audiophiles who demand uncompromising sound reproduction.
+
+By pairing a pure Rust audio decoding and DSP engine (audiophile-core) with Android's low-latency AAudio MMAP Exclusive Mode, Veyl bypasses system-level audio mixing (AudioFlinger), avoiding unwanted resampling and bit-depth truncation.
+
+KEY FEATURES
+
+• Bit-Perfect Hardware Output: Exclusive direct hardware output routing via AAudio MMAP and direct USB DAC bit-perfect passthrough.
+• Hi-Res Format Mastery: Flawless playback of PCM up to 768 kHz / 32-bit (FLAC, WAV, ALAC, AIFF) and native DSD playback (DoP and Direct DSD up to DSD512).
+• Pure Rust Audio Engine: High-performance, zero-allocation ring buffers and professional-grade sinc resampling powered by Rubato.
+• 10-Band Parametric Equalizer: Studio-precision IIR biquad filters, real-time response curve visualization, factory profiles, and customizable user presets.
+• Smart Collections & Playlists: Instant local storage scanning, pinned Favorites, smart metadata grouping, and fluid playlist management.
+• Spotify Playlist Import: Import your public Spotify playlists with intelligent local file matching and high-fidelity streaming.
+• Modern Jetpack Compose Interface: Dark minimalist studio aesthetic, smooth 120Hz animations, real-time waveform visualizers, and synchronized lyrics.
+• Free & Open Source: 100% open-source under GNU General Public License v3.0 (GPL-3.0) with zero ads, zero trackers, and zero telemetry.
