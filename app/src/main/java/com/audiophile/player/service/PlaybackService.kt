@@ -56,6 +56,9 @@ class PlaybackService : MediaBrowserServiceCompat() {
     private var isNoisyReceiverRegistered = false
     // Volume in effect before a transient duck so we can restore it exactly.
     private var preDuckVolume = 1.0f
+    private var isDucked = false
+    private var wasCallActive = false
+    private var audioFocusJob: Job? = null
 
     private var lastTrackUri: String? = null
     private var cachedArtwork: Bitmap? = null
@@ -68,55 +71,70 @@ class PlaybackService : MediaBrowserServiceCompat() {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 hasAudioFocus = true
+                audioFocusJob?.cancel()
                 if (resumeOnFocusGain) {
                     resumeOnFocusGain = false
-                    serviceScope.launch {
-                        // Allow Android audio HAL to settle back to MODE_NORMAL after call termination
-                        var attempts = 0
-                        while (audioManager.mode != AudioManager.MODE_NORMAL && attempts < 10) {
-                            delay(50)
-                            attempts++
-                        }
-                        delay(120) // Settling window for audio routing switch
-                        engineController.refreshHardwareOutput()
-                        engineController.setVolume(preDuckVolume)
-                        engineController.play()
-                    }
-                } else {
-                    engineController.setVolume(preDuckVolume)
-                    // If music was continuously playing during a phone call, refresh hardware output upon focus gain
-                    if (engineController.playbackState.value == PlaybackStateEnum.PLAYING) {
-                        serviceScope.launch {
-                            delay(120)
+                    val hadCall = wasCallActive
+                    wasCallActive = false
+                    audioFocusJob = serviceScope.launch {
+                        if (hadCall) {
+                            // Allow Android audio HAL to settle back to MODE_NORMAL after call termination
+                            var attempts = 0
+                            while (audioManager.mode != AudioManager.MODE_NORMAL && attempts < 10) {
+                                delay(50)
+                                attempts++
+                            }
+                            delay(120) // Settling window for audio routing switch back from call earpiece
                             engineController.refreshHardwareOutput()
                         }
+                        if (isDucked) {
+                            engineController.setVolume(preDuckVolume)
+                            isDucked = false
+                        }
+                        engineController.play()
                     }
+                } else if (isDucked) {
+                    // Notification finished: smoothly restore volume back to pre-duck level without stream recreation
+                    isDucked = false
+                    engineController.setVolume(preDuckVolume)
                 }
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
                 hasAudioFocus = false
                 resumeOnFocusGain = false
+                wasCallActive = false
+                isDucked = false
+                audioFocusJob?.cancel()
                 engineController.pause()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 hasAudioFocus = false
+                audioFocusJob?.cancel()
                 val isCurrentlyPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
                 val isCallActive = audioManager.mode != AudioManager.MODE_NORMAL
 
                 if (engineController.playDuringCalls.value && isCallActive) {
                     // User explicitly chose to keep playing music during calls!
                     Log.i("PlaybackService", "Call active but playDuringCalls is enabled; continuing playback.")
-                } else if (isCallActive || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                    // Default behavior: Pause playback during calls or transient audio focus loss
+                } else if (isCallActive) {
+                    // True phone call or VoIP communication active: pause playback
                     if (isCurrentlyPlaying) {
                         resumeOnFocusGain = true
+                        wasCallActive = true
                         engineController.pause()
                     }
                 } else {
-                    // For short notifications (e.g. SMS chime, GPS alert) outside calls: duck volume
-                    preDuckVolume = engineController.volume
-                    engineController.setVolume(0.2f)
+                    // For short notifications (SMS, WhatsApp, system chimes) outside calls:
+                    // DUCK the music smoothly to 20% instead of repeatedly pausing and unpausing!
+                    // This prevents audio dropouts, pops, and glitch noise on multiple notifications.
+                    if (isCurrentlyPlaying) {
+                        if (!isDucked) {
+                            preDuckVolume = engineController.volume
+                            isDucked = true
+                        }
+                        engineController.setVolume(0.2f * preDuckVolume)
+                    }
                 }
             }
         }

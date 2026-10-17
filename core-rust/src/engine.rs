@@ -90,6 +90,7 @@ pub struct PlaybackEngine {
     #[allow(dead_code)]
     dither: Arc<Mutex<TpdfDither>>,
     resampler: Arc<Mutex<Option<StreamResampler>>>,
+    render_volume: Arc<Mutex<f32>>,
 
     // Playback State
     state: Arc<Mutex<PlaybackEngineState>>,
@@ -153,6 +154,7 @@ impl PlaybackEngine {
             equalizer,
             dither,
             resampler,
+            render_volume: Arc::new(Mutex::new(0.0)),
             state,
             queue,
             ring_buffer_producer: Arc::new(Mutex::new(producer)),
@@ -680,6 +682,7 @@ impl AudioRenderCallback for PlaybackEngine {
 
         if !is_playing {
             buffer.fill(0.0);
+            *self.render_volume.lock() = 0.0;
             return;
         }
 
@@ -699,13 +702,23 @@ impl AudioRenderCallback for PlaybackEngine {
         // which causes the receiving USB DAC to fail DSD synchronization and output 0 dBFS deafening noise.
         // Therefore, DSP and volume processing MUST be completely bypassed for DoP.
         if !is_dop {
-            // Apply Volume with perceptual (logarithmic) curve
-            let applied_volume = perceptual_volume(volume);
+            // Apply Volume with perceptual (logarithmic) curve and smooth ramping
+            let target_vol = perceptual_volume(volume);
+            let mut vol_guard = self.render_volume.lock();
+            let start_vol = *vol_guard;
 
-            if (applied_volume - 1.0).abs() > f32::EPSILON {
-                for sample in buffer.iter_mut() {
-                    *sample *= applied_volume;
+            if (start_vol - target_vol).abs() > 0.0001 || (target_vol - 1.0).abs() > f32::EPSILON {
+                let step = (target_vol - start_vol) / (frames as f32).max(1.0);
+                let mut current_v = start_vol;
+                for f in 0..frames {
+                    current_v += step;
+                    for ch in 0..channels {
+                        buffer[f * channels + ch] *= current_v;
+                    }
                 }
+                *vol_guard = target_vol;
+            } else {
+                *vol_guard = target_vol;
             }
 
             // Process DSP Equalizer
