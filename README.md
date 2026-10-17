@@ -11,11 +11,12 @@
   [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
   [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
   [![Audio Engine](https://img.shields.io/badge/Engine-Bit--Perfect%20AAudio%20MMAP-00E5FF?style=flat-square)](https://developer.android.com/ndk/guides/audio/aaudio/aaudio)
+  [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
   [![Download APK](https://img.shields.io/badge/Download-APK%20(v2.0.0)-FFB300?style=flat-square&logo=android&logoColor=black)](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)
 
   ⭐ If you find Veyl useful, star the repository on GitHub!
 
-  [Overview](#overview) • [Key Features](#key-features) • [Architecture](#architecture) • [Audio Engine Specifications](#audio-engine-specifications) • [Spotify Playlist Import](#spotify-playlist-import) • [Getting Started](#getting-started) • [Building from Source](#building-from-source)
+  [Overview](#overview) • [Key Features](#key-features) • [Architecture](#architecture) • [Audio Engine Specifications](#audio-engine-specifications) • [Spotify Playlist Import](#spotify-playlist-import) • [Getting Started](#getting-started) • [Building from Source](#building-from-source) • [License](#license)
 
 </div>
 
@@ -218,3 +219,9 @@ To install directly onto an adb-connected Android device:
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+---
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0** (GPL-3.0). See the [LICENSE](LICENSE) file for details.
