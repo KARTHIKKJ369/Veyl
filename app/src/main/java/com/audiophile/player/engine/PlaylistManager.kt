@@ -142,6 +142,27 @@ class PlaylistManager(context: Context) {
         return pl
     }
 
+    fun createPlaylistWithTracks(name: String, trackUris: List<String>): UserPlaylist {
+        var finalName = name.trim().ifEmpty { "Imported Playlist" }
+        val existingNames = _playlists.value.map { it.name.lowercase() }.toSet()
+        var counter = 1
+        val baseName = finalName
+        while (existingNames.contains(finalName.lowercase())) {
+            finalName = "$baseName ($counter)"
+            counter++
+        }
+
+        val newPlaylist = UserPlaylist(
+            id = UUID.randomUUID().toString(),
+            name = finalName,
+            trackUris = trackUris.distinct()
+        )
+        val updatedList = _playlists.value + newPlaylist
+        savePlaylists(updatedList)
+        return newPlaylist
+    }
+
+
     fun addTrackToPlaylist(playlistId: String, uri: String) {
         val updated = _playlists.value.map { pl ->
             if (pl.id == playlistId && !pl.trackUris.contains(uri)) {

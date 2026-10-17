@@ -1327,6 +1327,87 @@ class AudioEngineController private constructor(private val context: Context) {
     ): Result<UserPlaylist> =
         playlistManager.importPlaylist(inputStream, defaultName, libraryTracks)
 
+    data class SpotifyImportResult(
+        val playlist: UserPlaylist,
+        val totalTracks: Int,
+        val localMatches: Int,
+        val onlineStreams: Int
+    )
+
+    suspend fun importSpotifyPlaylist(url: String): Result<SpotifyImportResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            val spotifyData = com.audiophile.player.online.SpotifyPlaylistImporter.fetchPlaylist(url).getOrThrow()
+            val allLibraryTracks = tracks.value
+            val importedUris = mutableListOf<String>()
+            var localMatches = 0
+            var onlineStreams = 0
+
+            for (spTrack in spotifyData.tracks) {
+                // Match against local library: exact title & fuzzy artist, or exact title
+                val matched = allLibraryTracks.find { lib ->
+                    lib.title.equals(spTrack.title, ignoreCase = true) &&
+                    (lib.artist.contains(spTrack.artist, ignoreCase = true) ||
+                     spTrack.artist.contains(lib.artist, ignoreCase = true))
+                } ?: allLibraryTracks.find { lib ->
+                    lib.title.equals(spTrack.title, ignoreCase = true)
+                }
+
+                if (matched != null) {
+                    importedUris.add(matched.uri)
+                    localMatches++
+                } else {
+                    // Create streaming-ready track
+                    val hash = "${spTrack.title}_${spTrack.artist}".hashCode().toUInt().toString(16)
+                    val onlineUri = "online://spotify_$hash"
+                    val onlineTrack = TrackInfo(
+                        uri = onlineUri,
+                        title = spTrack.title,
+                        artist = spTrack.artist,
+                        album = spotifyData.title,
+                        albumArtist = null,
+                        genre = "Online Stream",
+                        year = null,
+                        trackNumber = null,
+                        discNumber = null,
+                        durationSeconds = spTrack.durationSeconds,
+                        sampleRate = 44100u,
+                        bitDepth = 16u,
+                        bitrate = 320000u,
+                        channels = 2u,
+                        formatName = "AAC 320k",
+                        hasArtwork = false
+                    )
+
+                    val onlineSong = OnlineSongItem(
+                        id = onlineUri.removePrefix("online://"),
+                        title = spTrack.title,
+                        artist = spTrack.artist,
+                        album = spotifyData.title,
+                        durationSeconds = spTrack.durationSeconds,
+                        thumbnailUrl = "",
+                        streamUrl = ""
+                    )
+
+                    playlistManager.registerOnlineTrack(onlineTrack, onlineSong)
+                    onlineSongMetadataCache[onlineTrack.uri] = onlineSong
+                    onlineSongMetadataCache[onlineTrack.title.lowercase()] = onlineSong
+
+                    importedUris.add(onlineUri)
+                    onlineStreams++
+                }
+            }
+
+            val playlist = playlistManager.createPlaylistWithTracks(spotifyData.title, importedUris)
+
+            SpotifyImportResult(
+                playlist = playlist,
+                totalTracks = spotifyData.tracks.size,
+                localMatches = localMatches,
+                onlineStreams = onlineStreams
+            )
+        }
+    }
+
     fun removeFromQueue(index: Int) {
         val currentQueue = _queue.value.toMutableList()
         if (index in currentQueue.indices) {

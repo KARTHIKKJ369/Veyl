@@ -137,6 +137,12 @@ fun VeylSongsScreen(
     var newPlaylistNameInput by remember { mutableStateOf("") }
     var playlistToExport by remember { mutableStateOf<UserPlaylist?>(null) }
 
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+    var showSpotifyImportDialog by remember { mutableStateOf(false) }
+    var spotifyUrlInput by remember { mutableStateOf("") }
+    var isImportingSpotify by remember { mutableStateOf(false) }
+    var spotifyImportError by remember { mutableStateOf<String?>(null) }
+
     val importPlaylistLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -462,15 +468,53 @@ fun VeylSongsScreen(
                     }
                 }
 
-                // View Layout Switcher (Grid, List, Sliders)
                 Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(colors.surfacePanel)
-                        .padding(2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Quick Shuffle Button
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.accentSignal,
+                        modifier = Modifier
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                val pool = if (filteredTracks.isNotEmpty()) filteredTracks else tracks
+                                if (pool.isNotEmpty()) {
+                                    controller.playShuffled(pool)
+                                }
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.Shuffle,
+                                contentDescription = "Shuffle",
+                                tint = Color.Black,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Shuffle",
+                                style = VeylTypography.BodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    // View Layout Switcher (Grid, List, Sliders)
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colors.surfacePanel)
+                            .padding(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                     // Grid View Button
                     IconButton(
                         onClick = {
@@ -530,6 +574,7 @@ fun VeylSongsScreen(
                 }
             }
         }
+    }
 
         // 4. Content Area: Dedicated Lazy Layouts & Floating Fast Scrubber
         Box(
@@ -872,11 +917,11 @@ fun VeylSongsScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 // Create New Playlist Button
                                 Surface(
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     color = colors.accentSignal,
                                     modifier = Modifier
                                         .weight(1f)
@@ -896,11 +941,11 @@ fun VeylSongsScreen(
                                             imageVector = VeylIcons.Plus,
                                             contentDescription = "New Playlist",
                                             tint = Color.Black,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(17.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = "New Playlist",
+                                            text = "New",
                                             style = VeylTypography.BodySmall,
                                             color = Color.Black,
                                             fontWeight = FontWeight.Bold
@@ -908,12 +953,12 @@ fun VeylSongsScreen(
                                     }
                                 }
 
-                                // Import Playlist Button
+                                // Import File / M3U Button
                                 Surface(
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     color = colors.surfaceElevated,
                                     modifier = Modifier
-                                        .weight(1f)
+                                        .weight(1.1f)
                                         .height(46.dp)
                                         .clickable {
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -929,16 +974,52 @@ fun VeylSongsScreen(
                                     ) {
                                         Icon(
                                             imageVector = VeylIcons.Upload,
-                                            contentDescription = "Import",
+                                            contentDescription = "Import File",
                                             tint = colors.textPrimary,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(17.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = "Import Playlist",
+                                            text = "File / M3U",
                                             style = VeylTypography.BodySmall,
                                             color = colors.textPrimary,
                                             fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+
+                                // Import Spotify Playlist Button
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = colors.surfaceElevated,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1ED760).copy(alpha = 0.55f)),
+                                    modifier = Modifier
+                                        .weight(1.1f)
+                                        .height(46.dp)
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            spotifyUrlInput = ""
+                                            spotifyImportError = null
+                                            showSpotifyImportDialog = true
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = VeylIcons.Spotify,
+                                            contentDescription = "Import Spotify Playlist",
+                                            tint = Color(0xFF1ED760),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(5.dp))
+                                        Text(
+                                            text = "Spotify",
+                                            style = VeylTypography.BodySmall,
+                                            color = colors.textPrimary,
+                                            fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
@@ -1386,6 +1467,171 @@ fun VeylSongsScreen(
             }
         )
     }
+
+    if (showSpotifyImportDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isImportingSpotify) {
+                    showSpotifyImportDialog = false
+                    spotifyImportError = null
+                }
+            },
+            containerColor = colors.surfacePanel,
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.Spotify,
+                        contentDescription = "Spotify",
+                        tint = Color(0xFF1ED760),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text(
+                        text = "Import from Spotify",
+                        style = VeylTypography.SectionHeader,
+                        color = colors.textPrimary
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Paste any public Spotify playlist or album link. Veyl will match your local high-res audio files and make the rest streamable in 320k.",
+                        style = VeylTypography.BodySmall,
+                        color = colors.textSecondary,
+                        lineHeight = 18.sp
+                    )
+
+                    OutlinedTextField(
+                        value = spotifyUrlInput,
+                        onValueChange = {
+                            spotifyUrlInput = it
+                            spotifyImportError = null
+                        },
+                        placeholder = {
+                            Text("https://open.spotify.com/playlist/...", color = colors.textMuted, fontSize = 13.sp)
+                        },
+                        singleLine = true,
+                        enabled = !isImportingSpotify,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary,
+                            focusedBorderColor = Color(0xFF1ED760),
+                            unfocusedBorderColor = colors.borderHairline
+                        ),
+                        trailingIcon = {
+                            if (spotifyUrlInput.isBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = colors.surfaceElevated,
+                                    modifier = Modifier
+                                        .padding(end = 4.dp)
+                                        .clickable {
+                                            val clip = clipboardManager.getText()?.text
+                                            if (!clip.isNullOrBlank()) {
+                                                spotifyUrlInput = clip.trim()
+                                                spotifyImportError = null
+                                            }
+                                        }
+                                ) {
+                                    Text(
+                                        text = "Paste",
+                                        style = VeylTypography.MonoSpec,
+                                        color = colors.accentSignal,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (isImportingSpotify) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color(0xFF1ED760),
+                                strokeWidth = 2.dp
+                            )
+                            Text(
+                                text = "Extracting tracks from Spotify...",
+                                style = VeylTypography.BodySmall,
+                                color = colors.textPrimary
+                            )
+                        }
+                    }
+
+                    if (!spotifyImportError.isNullOrBlank()) {
+                        Text(
+                            text = spotifyImportError!!,
+                            style = VeylTypography.BodySmall,
+                            color = colors.accentPeak,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = spotifyUrlInput.trim()
+                        if (trimmed.isNotBlank() && !isImportingSpotify) {
+                            isImportingSpotify = true
+                            spotifyImportError = null
+                            coroutineScope.launch {
+                                val result = controller.importSpotifyPlaylist(trimmed)
+                                isImportingSpotify = false
+                                result.onSuccess { stats ->
+                                    showSpotifyImportDialog = false
+                                    spotifyUrlInput = ""
+                                    Toast.makeText(
+                                        context,
+                                        "Imported \"${stats.playlist.name}\" (${stats.totalTracks} tracks: ${stats.localMatches} local, ${stats.onlineStreams} streaming)",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    onNavigateToPlaylist?.invoke(stats.playlist.name)
+                                }.onFailure { err ->
+                                    spotifyImportError = err.message ?: "Failed to import Spotify playlist"
+                                }
+                            }
+                        }
+                    },
+                    enabled = spotifyUrlInput.isNotBlank() && !isImportingSpotify,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1ED760),
+                        contentColor = Color.Black
+                    )
+                ) {
+                    Text(
+                        text = if (isImportingSpotify) "Importing…" else "Import",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showSpotifyImportDialog = false
+                        spotifyImportError = null
+                    },
+                    enabled = !isImportingSpotify
+                ) {
+                    Text("Cancel", color = colors.textMuted)
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -1511,10 +1757,28 @@ private fun SongListRow(
             .fillMaxWidth()
             .background(if (isPlaying) colors.surfaceElevated else Color.Transparent)
             .clickable { onPlay(index) }
-            .padding(horizontal = 16.dp, vertical = 9.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Track Name & Artist (Clean, immediate text - no music icon, no box)
+        // Small Album Art Thumbnail (42x42dp rounded square, zero-jank async load)
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.surfaceElevated)
+        ) {
+            AsyncAlbumArt(
+                uri = track.uri,
+                hasArtwork = track.hasArtwork,
+                targetSizePx = 96,
+                cornerRadius = 8.dp,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // Track Name & Artist
         Column(
             modifier = Modifier.weight(1f)
         ) {

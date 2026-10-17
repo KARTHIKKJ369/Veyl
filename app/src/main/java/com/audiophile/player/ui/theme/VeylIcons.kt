@@ -1331,6 +1331,43 @@ object VeylIcons {
             }
         }.build()
     }
+
+    val Spotify: ImageVector by lazy {
+        ImageVector.Builder("VeylSpotify", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color(0xFF1ED760))) {
+                moveTo(12f, 2f)
+                curveTo(6.477f, 2f, 2f, 6.477f, 2f, 12f)
+                reflectiveCurveToRelative(4.477f, 10f, 10f, 10f)
+                reflectiveCurveToRelative(10f, -4.477f, 10f, -10f)
+                reflectiveCurveTo(17.523f, 2f, 12f, 2f)
+                close()
+                moveTo(16.586f, 16.424f)
+                curveToRelative(-0.18f, 0.295f, -0.563f, 0.387f, -0.857f, 0.207f)
+                curveToRelative(-2.35f, -1.434f, -5.308f, -1.758f, -8.793f, -0.963f)
+                curveToRelative(-0.335f, 0.077f, -0.67f, -0.133f, -0.746f, -0.469f)
+                curveToRelative(-0.077f, -0.334f, 0.132f, -0.67f, 0.467f, -0.747f)
+                curveToRelative(3.808f, -0.871f, 7.076f, -0.496f, 9.721f, 1.12f)
+                curveToRelative(0.293f, 0.178f, 0.386f, 0.561f, 0.208f, 0.852f)
+                close()
+                moveTo(17.81f, 13.7f)
+                curveToRelative(-0.226f, 0.367f, -0.706f, 0.482f, -1.072f, 0.257f)
+                curveToRelative(-2.687f, -1.652f, -6.785f, -2.131f, -9.965f, -1.166f)
+                curveToRelative(-0.413f, 0.127f, -0.849f, -0.106f, -0.973f, -0.517f)
+                curveToRelative(-0.125f, -0.413f, 0.108f, -0.849f, 0.52f, -0.973f)
+                curveToRelative(3.632f, -1.102f, 8.147f, -0.568f, 11.233f, 1.328f)
+                curveToRelative(0.366f, 0.226f, 0.48f, 0.707f, 0.257f, 1.071f)
+                close()
+                moveTo(17.915f, 10.865f)
+                curveTo(14.692f, 9.04f, 9.385f, 8.87f, 6.305f, 9.805f)
+                curveToRelative(-0.494f, 0.15f, -1.017f, -0.129f, -1.167f, -0.622f)
+                curveToRelative(-0.15f, -0.494f, 0.13f, -1.017f, 0.622f, -1.167f)
+                curveToRelative(3.534f, -1.073f, 9.404f, -0.866f, 13.115f, 1.337f)
+                curveToRelative(0.445f, 0.264f, 0.59f, 0.838f, 0.327f, 1.282f)
+                curveToRelative(-0.264f, 0.443f, -0.838f, 0.59f, -1.282f, 0.327f)
+                close()
+            }
+        }.build()
+    }
 }
 
 

@@ -110,30 +110,18 @@ object ArtworkCache {
         }
     }
 
-    fun getArtwork(uri: String, targetSizePx: Int = 128): Bitmap? {
+    fun getMemoryOnlyArtwork(uri: String, targetSizePx: Int = 128): Bitmap? {
         if (uri.isBlank()) return null
         val clean = uri.removePrefix("file://")
         if (noArtworkSet.contains(uri) || noArtworkSet.contains(clean)) return null
 
         val actualUri = onlineArtMapping[uri] ?: onlineArtMapping[clean] ?: onlineArtMapping["file://$clean"] ?: onlineArtMapping[File(clean).name] ?: uri
         val cacheKey = if (targetSizePx > 256) "${actualUri}_lg" else "${actualUri}_sm"
-        val mem = memoryCache.get(cacheKey)
-        if (mem != null) return mem
+        return memoryCache.get(cacheKey)
+    }
 
-        // Persistent disk cache lookup: provides instant album covers on app reopen
-        val diskFile = getDiskCacheFile(cacheKey)
-        if (diskFile != null && diskFile.exists() && diskFile.length() > 0) {
-            try {
-                val diskBmp = BitmapFactory.decodeFile(diskFile.absolutePath)
-                if (diskBmp != null) {
-                    memoryCache.put(cacheKey, diskBmp)
-                    return diskBmp
-                }
-            } catch (_: Throwable) {
-                diskFile.delete()
-            }
-        }
-        return null
+    fun getArtwork(uri: String, targetSizePx: Int = 128): Bitmap? {
+        return getMemoryOnlyArtwork(uri, targetSizePx)
     }
 
     private fun getDiskCacheFile(cacheKey: String): File? {
@@ -178,23 +166,9 @@ object ArtworkCache {
         val cachedMem = memoryCache.get(cacheKey)
         if (cachedMem != null) return cachedMem
 
-        // 2. In-flight Deduplication: Await existing load if another row already requested it
-        val existingJob = inFlightLoads[cacheKey]
-        if (existingJob != null) {
-            return existingJob.await()
-        }
-
-        // 3. Launch single deduplicated background load
-        return coroutineScope {
-            val deferred = async(Dispatchers.IO) {
-                try {
-                    doLoadArtwork(uri, clean, actualUri, cacheKey, targetSizePx)
-                } finally {
-                    inFlightLoads.remove(cacheKey)
-                }
-            }
-            inFlightLoads[cacheKey] = deferred
-            deferred.await()
+        // 2. Offload disk lookup & extraction to Dispatchers.IO to guarantee 0ms UI thread pause
+        return withContext(Dispatchers.IO) {
+            doLoadArtwork(uri, clean, actualUri, cacheKey, targetSizePx)
         }
     }
 
@@ -383,9 +357,14 @@ fun AsyncAlbumArt(
     placeholderHueSeed: String = uri,
     hasArtwork: Boolean? = null
 ) {
-    // Synchronously check memory and disk cache during composition for instant display
+    if (hasArtwork == false || uri.isBlank()) {
+        ArtworkPlaceholder(placeholderHueSeed = placeholderHueSeed, shape = shape, modifier = modifier)
+        return
+    }
+
+    // 0ms Synchronous RAM-only check during composition (strictly zero disk I/O or background thread waiting)
     val cached = remember(uri, targetSizePx) {
-        ArtworkCache.getArtwork(uri, targetSizePx)
+        ArtworkCache.getMemoryOnlyArtwork(uri, targetSizePx)
     }
 
     var bitmapState by remember(uri, targetSizePx) {
@@ -410,7 +389,7 @@ fun AsyncAlbumArt(
             contentScale = ContentScale.Crop
         )
     } else {
-        ArtworkPlaceholder(shape = shape, modifier = modifier)
+        ArtworkPlaceholder(placeholderHueSeed = placeholderHueSeed, shape = shape, modifier = modifier)
     }
 }
 

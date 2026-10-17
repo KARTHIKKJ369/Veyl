@@ -161,7 +161,11 @@ fun VeylHomeRedesigned(
                         state = continueListeningState,
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        itemsIndexed(history.take(8), key = { index, track -> "${track.uri}_$index" }) { _, track ->
+                        itemsIndexed(
+                            items = history.take(8),
+                            key = { index, track -> "${track.uri}_$index" },
+                            contentType = { _, _ -> "continue_tile" }
+                        ) { _, track ->
                             AlbumTile(track = track, onClick = { controller.playTrack(track) })
                         }
                     }
@@ -176,7 +180,11 @@ fun VeylHomeRedesigned(
             }
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    itemsIndexed(recentTracks, key = { index, track -> "${track.uri}_$index" }) { _, track ->
+                    itemsIndexed(
+                        items = recentTracks,
+                        key = { index, track -> "${track.uri}_$index" },
+                        contentType = { _, _ -> "recent_tile" }
+                    ) { _, track ->
                         AlbumTile(track = track, onClick = { controller.playTrack(track) })
                     }
                 }
@@ -196,7 +204,11 @@ fun VeylHomeRedesigned(
                     }
                 )
             }
-            items(randomLibraryTracks, key = { track -> track.uri }) { track ->
+            items(
+                items = randomLibraryTracks,
+                key = { track -> track.uri },
+                contentType = { "library_row" }
+            ) { track ->
                 LibraryRow(
                     track = track,
                     isCurrent = track.uri == currentTrack?.uri,

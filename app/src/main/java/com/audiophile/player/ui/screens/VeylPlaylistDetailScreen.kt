@@ -97,32 +97,42 @@ fun VeylPlaylistDetailScreen(
     val customPlaylist = playlists.find { it.name.equals(currentPlaylistTitle, ignoreCase = true) }
     val isCustomPlaylist = customPlaylist != null && currentPlaylistTitle !in listOf("Favorites", "Top Tracks", "Last added", "History")
 
-    val playlistTracks = when (currentPlaylistTitle) {
-        "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
-            val fName = File(it.uri).name
-            !fName.startsWith(".") &&
-            !fName.contains("trashed", ignoreCase = true) &&
-            !it.title.contains("trashed", ignoreCase = true) &&
-            !fName.startsWith("veyl_online_stream_") &&
-            !it.uri.contains("/cache/")
-        }.distinctBy {
-            controller.onlineStreamManager.getTargetStorageFileForTrack(it).absolutePath
-        }
-        "Top Tracks" -> if (topTracks.isNotEmpty()) topTracks else allTracks
-        "Last added" -> if (lastAddedTracks.isNotEmpty()) lastAddedTracks else allTracks
-        "History" -> historyTracks
-        else -> {
-            if (customPlaylist != null) {
-                customPlaylist.trackUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
-                    val fName = File(it.uri).name
-                    !fName.startsWith(".") &&
-                    !fName.contains("trashed", ignoreCase = true) &&
-                    !it.title.contains("trashed", ignoreCase = true) &&
-                    !fName.startsWith("veyl_online_stream_") &&
-                    !it.uri.contains("/cache/")
+    val playlistTracks = remember(
+        currentPlaylistTitle,
+        favoriteUris,
+        topTracks,
+        lastAddedTracks,
+        historyTracks,
+        playlists,
+        allTracks
+    ) {
+        when (currentPlaylistTitle) {
+            "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+                val fName = File(it.uri).name
+                !fName.startsWith(".") &&
+                !fName.contains("trashed", ignoreCase = true) &&
+                !it.title.contains("trashed", ignoreCase = true) &&
+                !fName.startsWith("veyl_online_stream_") &&
+                !it.uri.contains("/cache/")
+            }.distinctBy {
+                controller.onlineStreamManager.getTargetStorageFileForTrack(it).absolutePath
+            }
+            "Top Tracks" -> if (topTracks.isNotEmpty()) topTracks else allTracks
+            "Last added" -> if (lastAddedTracks.isNotEmpty()) lastAddedTracks else allTracks
+            "History" -> historyTracks
+            else -> {
+                if (customPlaylist != null) {
+                    customPlaylist.trackUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+                        val fName = File(it.uri).name
+                        !fName.startsWith(".") &&
+                        !fName.contains("trashed", ignoreCase = true) &&
+                        !it.title.contains("trashed", ignoreCase = true) &&
+                        !fName.startsWith("veyl_online_stream_") &&
+                        !it.uri.contains("/cache/")
+                    }
+                } else {
+                    allTracks
                 }
-            } else {
-                allTracks
             }
         }
     }
@@ -142,9 +152,10 @@ fun VeylPlaylistDetailScreen(
         }
     }
 
-    val totalDurationSec = playlistTracks.sumOf { it.durationSeconds }
-    val totalMin = (totalDurationSec / 60).toInt()
-    val totalSec = (totalDurationSec % 60).toInt()
+    val (totalMin, totalSec) = remember(playlistTracks) {
+        val totalDurationSec = playlistTracks.sumOf { it.durationSeconds }
+        (totalDurationSec / 60).toInt() to (totalDurationSec % 60).toInt()
+    }
 
     LazyColumn(
         modifier = modifier
@@ -442,100 +453,25 @@ fun VeylPlaylistDetailScreen(
                 }
             }
         } else {
-            itemsIndexed(playlistTracks, key = { index, track -> "${track.uri}_$index" }) { index, track ->
+            itemsIndexed(
+                items = playlistTracks,
+                key = { index, track -> "${track.uri}_$index" },
+                contentType = { _, _ -> "playlist_track_item" }
+            ) { index, track ->
                 val isPlayingThis = currentUri == track.uri
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            controller.playTrackList(playlistTracks, startIndex = index)
-                        }
-                        .background(if (isPlayingThis) colors.surfaceElevated.copy(alpha = 0.5f) else Color.Transparent)
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Index number or playing animation indicator
-                    Box(
-                        modifier = Modifier.width(28.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        if (isPlayingThis) {
-                            Icon(
-                                imageVector = VeylIcons.Equalizer,
-                                contentDescription = "Playing",
-                                tint = colors.accentSignal,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        } else {
-                            Text(
-                                text = "${index + 1}",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textMuted,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                PlaylistTrackRow(
+                    track = track,
+                    index = index,
+                    isPlaying = isPlayingThis,
+                    onPlay = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        controller.playTrackList(playlistTracks, startIndex = index)
+                    },
+                    onOptions = {
+                        selectedTrackForOptions = track
                     }
-
-                    // Album Artwork
-                    Card(
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        AsyncAlbumArt(
-                            uri = track.uri,
-                            hasArtwork = track.hasArtwork,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    // Title & Artist
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = track.title,
-                            style = VeylTypography.TitleMedium,
-                            color = if (isPlayingThis) colors.accentSignal else colors.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            fontWeight = if (isPlayingThis) FontWeight.Bold else FontWeight.Medium
-                        )
-                        Text(
-                            text = track.artist,
-                            style = VeylTypography.BodySmall,
-                            color = colors.textSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    // Duration
-                    val min = (track.durationSeconds / 60).toInt()
-                    val sec = (track.durationSeconds % 60).toInt()
-                    Text(
-                        text = String.format("%d:%02d", min, sec),
-                        style = VeylTypography.MonoSpec,
-                        color = colors.textMuted,
-                        fontSize = 11.sp
-                    )
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    // 3-dot options sheet trigger
-                    IconButton(
-                        onClick = { selectedTrackForOptions = track },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = VeylIcons.MoreVert,
-                            contentDescription = "Options",
-                            tint = colors.textMuted,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
+                )
             }
         }
     }
@@ -635,5 +571,114 @@ fun VeylPlaylistDetailScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun PlaylistTrackRow(
+    track: TrackInfo,
+    index: Int,
+    isPlaying: Boolean,
+    onPlay: () -> Unit,
+    onOptions: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalVeylColors.current
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onPlay)
+            .background(if (isPlaying) colors.surfaceElevated.copy(alpha = 0.5f) else Color.Transparent)
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Index number or playing animation indicator
+        Box(
+            modifier = Modifier.width(28.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            if (isPlaying) {
+                Icon(
+                    imageVector = VeylIcons.Equalizer,
+                    contentDescription = "Playing",
+                    tint = colors.accentSignal,
+                    modifier = Modifier.size(16.dp)
+                )
+            } else {
+                Text(
+                    text = "${index + 1}",
+                    style = VeylTypography.BodySmall,
+                    color = colors.textMuted,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        // Lightweight Album Artwork Box (Zero elevation/shadow draw overhead)
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.surfaceElevated)
+        ) {
+            AsyncAlbumArt(
+                uri = track.uri,
+                hasArtwork = track.hasArtwork,
+                targetSizePx = 128,
+                cornerRadius = 8.dp,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        // Title & Artist
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = track.title,
+                style = VeylTypography.TitleMedium,
+                color = if (isPlaying) colors.accentSignal else colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.Medium
+            )
+            Text(
+                text = track.artist ?: "Unknown Artist",
+                style = VeylTypography.BodySmall,
+                color = colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // Duration (fast math formatting without String.format overhead)
+        val totalSec = track.durationSeconds.toInt()
+        if (totalSec > 0) {
+            val m = totalSec / 60
+            val s = totalSec % 60
+            val durationText = if (s < 10) "$m:0$s" else "$m:$s"
+            Text(
+                text = durationText,
+                style = VeylTypography.MonoSpec,
+                color = colors.textMuted,
+                fontSize = 11.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // 3-dot options sheet trigger
+        IconButton(
+            onClick = onOptions,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(
+                imageVector = VeylIcons.MoreVert,
+                contentDescription = "Options",
+                tint = colors.textMuted,
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }

@@ -85,7 +85,7 @@ fun VeylOnboardingScreen(
     val haptic = LocalHapticFeedback.current
 
     var step by remember { mutableStateOf(1) } // 1: Choose Mode, 2: Setup (Cloud taste or Local dir)
-    var selectedMode by remember { mutableStateOf(AppExperienceMode.CLOUD_FIRST) }
+    var selectedMode by remember { mutableStateOf(AppExperienceMode.LOCAL_FIRST) }
 
     // Cloud taste state
     val selectedLanguages = remember { mutableStateListOf("Malayalam", "Tamil", "English", "Hindi") }
@@ -178,28 +178,28 @@ fun VeylOnboardingScreen(
 
                             item {
                                 ExperienceCard(
-                                    title = "Cloud First (Streaming)",
-                                    tag = "Recommended",
-                                    description = "Spotify-style dynamic feed. Discover trending hits, personalized mixes & curated recommendations tailored to your taste.",
-                                    badge = "Free • 320k Studio Master",
-                                    isSelected = selectedMode == AppExperienceMode.CLOUD_FIRST,
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        selectedMode = AppExperienceMode.CLOUD_FIRST
-                                    }
-                                )
-                            }
-
-                            item {
-                                ExperienceCard(
                                     title = "Local First (Audiophile)",
-                                    tag = "Offline Storage",
+                                    tag = "Recommended",
                                     description = "Folder & file-based player for your downloaded music. Pure bit-perfect audio directly from your device storage.",
                                     badge = "Bit-Perfect • Lossless & DSD",
                                     isSelected = selectedMode == AppExperienceMode.LOCAL_FIRST,
                                     onClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         selectedMode = AppExperienceMode.LOCAL_FIRST
+                                    }
+                                )
+                            }
+
+                            item {
+                                ExperienceCard(
+                                    title = "Cloud First (Streaming)",
+                                    tag = "Online Stream",
+                                    description = "Spotify-style dynamic feed. Discover trending hits, personalized mixes & curated recommendations tailored to your taste.",
+                                    badge = "Free • 320k Studio Master",
+                                    isSelected = selectedMode == AppExperienceMode.CLOUD_FIRST,
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        selectedMode = AppExperienceMode.CLOUD_FIRST
                                     }
                                 )
                             }
