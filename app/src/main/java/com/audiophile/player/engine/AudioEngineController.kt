@@ -592,18 +592,46 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
+    @Volatile var isPlaybackStalled: Boolean = false
+        private set
+
     private var lastTransitionTimestamp = 0L
 
     private fun startPolling() {
         pollJob?.cancel()
         pollJob = nativeScope.launch {
             var tickCount = 0
+            var lastTrackPos = -1.0
+            var stalledTicks = 0
             while (isActive) {
                 try {
                     withNativeEngine { it.getStatus() }?.let { currentStatus ->
                         val pos = currentStatus.positionSeconds
                         val dur = currentStatus.durationSeconds
                         val isPlaying = currentStatus.state == PlaybackStateEnum.PLAYING
+
+                        // Detect stalled AAudio output stream (e.g. after phone call disconnects stream)
+                        if (isPlaying && !_isOnlineBuffering.value && !isTransitioning) {
+                            if (pos == lastTrackPos && pos > 0.0) {
+                                stalledTicks++
+                                if (stalledTicks >= 35) {
+                                    isPlaybackStalled = true
+                                }
+                                if (stalledTicks == 35) {
+                                    Log.w("AudioEngineController", "Audio output stream stalled at pos $pos. Auto-recovering hardware stream...")
+                                    refreshHardwareOutput()
+                                    withNativeEngine { it.play() }
+                                }
+                            } else {
+                                stalledTicks = 0
+                                isPlaybackStalled = false
+                                lastTrackPos = pos
+                            }
+                        } else {
+                            stalledTicks = 0
+                            isPlaybackStalled = false
+                            lastTrackPos = pos
+                        }
 
                         _currentPositionSec.value = pos
                         _currentPositionMs.value = (pos * 1000.0).toLong()
@@ -1335,10 +1363,37 @@ class AudioEngineController private constructor(private val context: Context) {
         val onlineStreams: Int
     )
 
+    private fun normalizeTitle(raw: String): String {
+        return raw.lowercase()
+            .replace('\u2018', '\'').replace('\u2019', '\'')
+            .replace('\u201C', '"').replace('\u201D', '"')
+            .replace('\u2013', '-').replace('\u2014', '-')
+            .replace(Regex("""^\d{1,3}[\s.\-_]+"""), "") // strip "01. ", "01 - "
+            .replace(Regex("""\s*[\(\[](?:feat\.?|ft\.?|with)\s+[^)\]]+[\)\]]""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+-\s+(?:feat\.?|ft\.?|with)\s+.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s*[\(\[](?:remastered|remaster|radio edit|original mix|acoustic|live|bonus track|deluxe|version|edit|mono|stereo|anniversary)[^)\]]*[\)\]]""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+-\s+(?:remastered|remaster|radio edit|original mix|acoustic|live|bonus track|deluxe|anniversary).*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s*[\(\[]from\s+[^)\]]+[\)\]]""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+-\s+from\s+.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\.(mp3|flac|m4a|wav|aac|ogg|opus|dsf|dff)$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""[^\p{L}\p{Nd}\s]"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+    }
+
+    private fun normalizeArtist(raw: String): String {
+        return raw.lowercase()
+            .replace('\u2018', '\'').replace('\u2019', '\'')
+            .replace(Regex("""\s*(?:feat\.?|ft\.?|with|&|,|/|x)\s*""", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("""[^\p{L}\p{Nd}\s]"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+    }
+
     suspend fun importSpotifyPlaylist(url: String): Result<SpotifyImportResult> = withContext(Dispatchers.IO) {
         runCatching {
             val spotifyData = com.audiophile.player.online.SpotifyPlaylistImporter.fetchPlaylist(url).getOrThrow()
-            val allLibraryTracks = tracks.value
+            val allLibraryTracks = tracks.value.ifEmpty { _libraryTracks.value }
             val importedUris = mutableListOf<String>()
             var localMatches = 0
             var onlineStreams = 0
@@ -1347,13 +1402,32 @@ class AudioEngineController private constructor(private val context: Context) {
             val newlyCreatedTracks = mutableListOf<Pair<TrackInfo, OnlineSongItem>>()
 
             for (spTrack in spotifyData.tracks) {
-                // Match against local library: exact title & fuzzy artist, or exact title
+                val spNormTitle = normalizeTitle(spTrack.title)
+                val spNormArtist = normalizeArtist(spTrack.artist)
+                val spArtistWords = spNormArtist.split(" ").filter { it.length > 2 }
+
                 val matched = allLibraryTracks.find { lib ->
+                    // Tier 1: Exact title & artist
                     lib.title.equals(spTrack.title, ignoreCase = true) &&
-                    (lib.artist.contains(spTrack.artist, ignoreCase = true) ||
-                     spTrack.artist.contains(lib.artist, ignoreCase = true))
+                    (lib.artist.contains(spTrack.artist, ignoreCase = true) || spTrack.artist.contains(lib.artist, ignoreCase = true))
                 } ?: allLibraryTracks.find { lib ->
-                    lib.title.equals(spTrack.title, ignoreCase = true)
+                    // Tier 2: Normalized title match + artist overlap
+                    val libNormTitle = normalizeTitle(lib.title)
+                    if (libNormTitle == spNormTitle && spNormTitle.isNotBlank()) {
+                        val libNormArtist = normalizeArtist(lib.artist ?: "")
+                        spArtistWords.isEmpty() || spArtistWords.any { libNormArtist.contains(it) } || libNormArtist.isBlank() || libNormArtist == "unknown artist"
+                    } else {
+                        false
+                    }
+                } ?: allLibraryTracks.find { lib ->
+                    // Tier 3: Match against local filename (e.g. "Song Name.flac" or "Artist - Song Name.mp3")
+                    val fName = File(lib.uri).nameWithoutExtension
+                    val normFileName = normalizeTitle(fName)
+                    normFileName == spNormTitle || (normFileName.contains(spNormTitle) && spArtistWords.any { normFileName.contains(it) })
+                } ?: allLibraryTracks.find { lib ->
+                    // Tier 4: Exact normalized title match
+                    val libNormTitle = normalizeTitle(lib.title)
+                    libNormTitle.isNotBlank() && libNormTitle == spNormTitle
                 }
 
                 if (matched != null) {
@@ -2617,6 +2691,8 @@ class AudioEngineController private constructor(private val context: Context) {
                 playTrack(curTrack)
                 return@launch
             }
+            // Always ensure the native hardware output stream is refreshed and alive before playback starts
+            refreshHardwareOutput()
             withNativeEngine { it.play() }
         }
     }

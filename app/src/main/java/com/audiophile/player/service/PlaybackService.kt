@@ -72,69 +72,73 @@ class PlaybackService : MediaBrowserServiceCompat() {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 hasAudioFocus = true
                 audioFocusJob?.cancel()
-                if (resumeOnFocusGain) {
-                    resumeOnFocusGain = false
-                    val hadCall = wasCallActive
-                    wasCallActive = false
-                    audioFocusJob = serviceScope.launch {
-                        if (hadCall) {
-                            // Allow Android audio HAL to settle back to MODE_NORMAL after call termination
-                            var attempts = 0
-                            while (audioManager.mode != AudioManager.MODE_NORMAL && attempts < 10) {
-                                delay(50)
-                                attempts++
-                            }
-                            delay(120) // Settling window for audio routing switch back from call earpiece
-                            engineController.refreshHardwareOutput()
+                val shouldResume = resumeOnFocusGain
+                val hadCall = wasCallActive || (audioManager.mode != AudioManager.MODE_NORMAL)
+                resumeOnFocusGain = false
+                wasCallActive = false
+
+                audioFocusJob = serviceScope.launch {
+                    if (hadCall) {
+                        // Allow Android audio HAL to settle back to MODE_NORMAL after call termination
+                        var attempts = 0
+                        while (audioManager.mode != AudioManager.MODE_NORMAL && attempts < 15) {
+                            delay(50)
+                            attempts++
                         }
-                        if (isDucked) {
-                            engineController.setVolume(preDuckVolume)
-                            isDucked = false
-                        }
+                        delay(200) // Settling window for audio routing switch back from call earpiece
+                        engineController.refreshHardwareOutput()
+                    }
+                    if (isDucked) {
+                        engineController.setVolume(preDuckVolume)
+                        isDucked = false
+                    }
+                    if (shouldResume || hadCall) {
+                        delay(50)
+                        engineController.refreshHardwareOutput()
                         engineController.play()
                     }
-                } else if (isDucked) {
-                    // Notification finished: smoothly restore volume back to pre-duck level without stream recreation
-                    isDucked = false
-                    engineController.setVolume(preDuckVolume)
                 }
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
                 hasAudioFocus = false
-                resumeOnFocusGain = false
-                wasCallActive = false
+                val isCurrentlyPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
+                resumeOnFocusGain = isCurrentlyPlaying
+                wasCallActive = audioManager.mode != AudioManager.MODE_NORMAL
                 isDucked = false
                 audioFocusJob?.cancel()
                 engineController.pause()
             }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                // Focus lost transiently without ducking (e.g. Phone Call, VoIP, Alarm, Navigation voice)
+                hasAudioFocus = false
+                audioFocusJob?.cancel()
+                val isCurrentlyPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
+                resumeOnFocusGain = isCurrentlyPlaying
+                wasCallActive = true
+
+                if (engineController.playDuringCalls.value && audioManager.mode != AudioManager.MODE_NORMAL) {
+                    Log.i("PlaybackService", "Call active but playDuringCalls is enabled; continuing playback.")
+                } else if (isCurrentlyPlaying) {
+                    engineController.pause()
+                }
+            }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // Short notification chime (SMS, WhatsApp, system alert): duck music smoothly without pause
                 hasAudioFocus = false
                 audioFocusJob?.cancel()
                 val isCurrentlyPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
                 val isCallActive = audioManager.mode != AudioManager.MODE_NORMAL
 
-                if (engineController.playDuringCalls.value && isCallActive) {
-                    // User explicitly chose to keep playing music during calls!
-                    Log.i("PlaybackService", "Call active but playDuringCalls is enabled; continuing playback.")
-                } else if (isCallActive) {
-                    // True phone call or VoIP communication active: pause playback
-                    if (isCurrentlyPlaying) {
-                        resumeOnFocusGain = true
-                        wasCallActive = true
-                        engineController.pause()
+                if (isCallActive) {
+                    resumeOnFocusGain = isCurrentlyPlaying
+                    wasCallActive = true
+                    if (isCurrentlyPlaying) engineController.pause()
+                } else if (isCurrentlyPlaying) {
+                    if (!isDucked) {
+                        preDuckVolume = engineController.volume
+                        isDucked = true
                     }
-                } else {
-                    // For short notifications (SMS, WhatsApp, system chimes) outside calls:
-                    // DUCK the music smoothly to 20% instead of repeatedly pausing and unpausing!
-                    // This prevents audio dropouts, pops, and glitch noise on multiple notifications.
-                    if (isCurrentlyPlaying) {
-                        if (!isDucked) {
-                            preDuckVolume = engineController.volume
-                            isDucked = true
-                        }
-                        engineController.setVolume(0.2f * preDuckVolume)
-                    }
+                    engineController.setVolume(0.2f * preDuckVolume)
                 }
             }
         }
@@ -785,8 +789,9 @@ class PlaybackService : MediaBrowserServiceCompat() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         val isPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
-        if (!isPlaying) {
-            Log.i("PlaybackService", "App swiped away and not playing, stopping background service.")
+        val isStalled = engineController.isPlaybackStalled
+        if (!isPlaying || isStalled) {
+            Log.i("PlaybackService", "App swiped away and not actively rendering audio, stopping background service.")
             try {
                 abandonAudioFocus()
                 unregisterNoisyReceiver()
