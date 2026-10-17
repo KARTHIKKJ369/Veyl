@@ -1608,33 +1608,79 @@ class AudioEngineController private constructor(private val context: Context) {
         return Triple(prev, active, next)
     }
 
+    fun autoDetectRootDirectory(): String {
+        val saved = prefs.getString("root_audio_dir", null)
+        if (saved != null && File(saved).exists()) {
+            _selectedRootPath.value = saved
+            return saved
+        }
+
+        // 1. Try to detect where music actually lives from MediaStore
+        try {
+            val projection = arrayOf(MediaStore.Audio.Media.DATA)
+            val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                null
+            )?.use { cursor ->
+                val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                val dirCounts = mutableMapOf<String, Int>()
+                var inspected = 0
+                while (cursor.moveToNext() && inspected < 150) {
+                    val filePath = cursor.getString(dataCol) ?: continue
+                    val file = File(filePath)
+                    val parent = file.parentFile ?: continue
+                    var dir = parent
+                    while (dir.parentFile != null &&
+                        dir.parentFile?.absolutePath != "/storage/emulated/0" &&
+                        dir.parentFile?.absolutePath != "/storage" &&
+                        !dir.parentFile?.absolutePath.orEmpty().matches(Regex("^/storage/[^/]+$"))
+                    ) {
+                        dir = dir.parentFile ?: break
+                    }
+                    val pathKey = dir.absolutePath
+                    dirCounts[pathKey] = (dirCounts[pathKey] ?: 0) + 1
+                    inspected++
+                }
+                val topDir = dirCounts.maxByOrNull { it.value }?.key
+                if (topDir != null && File(topDir).exists()) {
+                    _selectedRootPath.value = topDir
+                    prefs.edit().putString("root_audio_dir", topDir).apply()
+                    return topDir
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("AudioEngineController", "Error auto-detecting folder from MediaStore", e)
+        }
+
+        // 2. Standard Android system directories
+        val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+        val sdcardMusic = File("/storage/emulated/0/Music")
+        val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+
+        val detected = when {
+            musicDir != null && musicDir.exists() -> musicDir.absolutePath
+            sdcardMusic.exists() -> sdcardMusic.absolutePath
+            downloadDir != null && downloadDir.exists() -> downloadDir.absolutePath
+            else -> "/storage/emulated/0/Music"
+        }
+
+        _selectedRootPath.value = detected
+        prefs.edit().putString("root_audio_dir", detected).apply()
+        return detected
+    }
+
     private fun loadSavedRootDirectory() {
         val hasCached = _libraryTracks.value.isNotEmpty()
-        val savedPath = prefs.getString("root_audio_dir", null)
-        if (savedPath != null && File(savedPath).exists()) {
-            _selectedRootPath.value = savedPath
-            if (!hasCached) {
-                scanMediaStore()
-            }
-        } else {
-            val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-            val sdcardMusic = File("/storage/emulated/0/Music")
-            val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-
-            val detectedPath = when {
-                musicDir != null && musicDir.exists() && musicDir.canRead() -> musicDir.absolutePath
-                sdcardMusic.exists() && sdcardMusic.canRead() -> sdcardMusic.absolutePath
-                downloadDir != null && downloadDir.exists() && downloadDir.canRead() -> downloadDir.absolutePath
-                else -> null
-            }
-
-            if (detectedPath != null) {
-                _selectedRootPath.value = detectedPath
-                prefs.edit().putString("root_audio_dir", detectedPath).apply()
-                if (!hasCached) {
-                    scanMediaStore()
-                }
-            } else if (!hasCached) {
+        val detected = autoDetectRootDirectory()
+        if (!hasCached) {
+            val file = File(detected)
+            if (file.exists() && file.canRead()) {
+                scanDirectory(detected)
+            } else {
                 scanMediaStore()
             }
         }
@@ -1698,29 +1744,12 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun rescanLibrary() {
-        val root = _selectedRootPath.value ?: prefs.getString("root_audio_dir", null)
-        if (root != null && File(root).exists()) {
-            _selectedRootPath.value = root
+        val root = _selectedRootPath.value ?: autoDetectRootDirectory()
+        val file = File(root)
+        if (file.exists() && file.canRead()) {
             scanDirectory(root)
         } else {
-            val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-            val sdcardMusic = File("/storage/emulated/0/Music")
-            val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-
-            val detected = when {
-                musicDir != null && musicDir.exists() && musicDir.canRead() -> musicDir.absolutePath
-                sdcardMusic.exists() && sdcardMusic.canRead() -> sdcardMusic.absolutePath
-                downloadDir != null && downloadDir.exists() && downloadDir.canRead() -> downloadDir.absolutePath
-                else -> null
-            }
-
-            if (detected != null) {
-                _selectedRootPath.value = detected
-                prefs.edit().putString("root_audio_dir", detected).apply()
-                scanDirectory(detected)
-            } else {
-                scanMediaStore()
-            }
+            scanMediaStore()
         }
     }
 
@@ -1866,6 +1895,9 @@ class AudioEngineController private constructor(private val context: Context) {
                         _libraryTracks.value = enrichedTracks
                         persistLibraryTracksCache(enrichedTracks)
                         updateDerivedTrackLists(enrichedTracks)
+                        if (_selectedRootPath.value == null) {
+                            _selectedRootPath.value = autoDetectRootDirectory()
+                        }
                         if (_originalQueue.value.isEmpty()) {
                             _originalQueue.value = enrichedTracks
                             _queue.value = enrichedTracks

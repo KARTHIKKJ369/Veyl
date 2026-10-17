@@ -44,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +84,14 @@ fun VeylOnboardingScreen(
 ) {
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
+
+    val detectedRootPath by controller.selectedRootPath.collectAsState()
+    val isScanning by controller.isScanning.collectAsState()
+    val libraryTracks by controller.libraryTracks.collectAsState()
+
+    LaunchedEffect(Unit) {
+        controller.autoDetectRootDirectory()
+    }
 
     var step by remember { mutableStateOf(1) } // 1: Choose Mode, 2: Setup (Cloud taste or Local dir)
     var selectedMode by remember { mutableStateOf(AppExperienceMode.LOCAL_FIRST) }
@@ -576,7 +585,9 @@ fun VeylOnboardingScreen(
                             }
                         }
                     } else {
-                        // LOCAL FIRST STEP 2: Setup directory
+                        LaunchedEffect(Unit) {
+                            controller.rescanLibrary()
+                        }
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -619,7 +630,7 @@ fun VeylOnboardingScreen(
                                                 fontWeight = FontWeight.Bold
                                             )
                                             Text(
-                                                text = "Select Music Directory",
+                                                text = "Music Storage Found",
                                                 style = VeylTypography.HeadlineMedium,
                                                 color = colors.textPrimary,
                                                 fontWeight = FontWeight.Bold,
@@ -629,7 +640,7 @@ fun VeylOnboardingScreen(
                                     }
                                     Spacer(Modifier.height(6.dp))
                                     Text(
-                                        text = "Veyl will scan your high-resolution audio files (FLAC, DSD, DSF, WAV, MP3) and build your bit-perfect offline library.",
+                                        text = "Veyl automatically discovered your device audio storage and will index your bit-perfect offline library.",
                                         style = VeylTypography.BodySmall,
                                         color = colors.textMuted,
                                         lineHeight = 18.sp
@@ -637,48 +648,137 @@ fun VeylOnboardingScreen(
                                 }
 
                                 item {
+                                    val currentPath = detectedRootPath ?: "/storage/emulated/0/Music"
+                                    val folderName = currentPath.substringAfterLast('/').ifBlank { "Music" }
+
                                     Surface(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable(onClick = onSelectRootFolder),
+                                        modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(20.dp),
                                         color = colors.surfaceElevated,
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.4f))
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.35f))
                                     ) {
                                         Column(
                                             modifier = Modifier.padding(24.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                                            verticalArrangement = Arrangement.spacedBy(16.dp)
                                         ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(60.dp)
-                                                    .clip(CircleShape)
-                                                    .background(colors.accentSignal.copy(alpha = 0.15f)),
-                                                contentAlignment = Alignment.Center
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxWidth()
                                             ) {
-                                                Icon(
-                                                    VeylIcons.Folder,
-                                                    contentDescription = null,
-                                                    tint = colors.accentSignal,
-                                                    modifier = Modifier.size(28.dp)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(52.dp)
+                                                        .clip(CircleShape)
+                                                        .background(colors.accentSignal.copy(alpha = 0.15f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        VeylIcons.Folder,
+                                                        contentDescription = null,
+                                                        tint = colors.accentSignal,
+                                                        modifier = Modifier.size(26.dp)
+                                                    )
+                                                }
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(100.dp),
+                                                    color = colors.accentSignal.copy(alpha = 0.15f),
+                                                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.3f))
+                                                ) {
+                                                    Text(
+                                                        text = "AUTO-DETECTED",
+                                                        style = VeylTypography.MonoBadge,
+                                                        color = colors.accentSignal,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text(
+                                                    text = folderName,
+                                                    style = VeylTypography.TitleLarge,
+                                                    color = colors.textPrimary,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 20.sp
+                                                )
+                                                Text(
+                                                    text = currentPath,
+                                                    style = VeylTypography.MonoBadge,
+                                                    color = colors.textMuted,
+                                                    fontSize = 12.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
 
-                                            Text(
-                                                text = "Choose Storage Folder",
-                                                style = VeylTypography.TitleMedium,
-                                                color = colors.textPrimary,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 16.sp
-                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = colors.background.copy(alpha = 0.6f),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    if (isScanning) {
+                                                        CircularProgressIndicator(
+                                                            modifier = Modifier.size(16.dp),
+                                                            color = colors.accentSignal,
+                                                            strokeWidth = 2.dp
+                                                        )
+                                                        Text(
+                                                            text = "Scanning device storage for music…",
+                                                            style = VeylTypography.BodySmall,
+                                                            color = colors.textSecondary
+                                                        )
+                                                    } else {
+                                                        Icon(
+                                                            VeylIcons.Check,
+                                                            contentDescription = null,
+                                                            tint = colors.accentSignal,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                        Text(
+                                                            text = if (libraryTracks.isNotEmpty()) {
+                                                                "${libraryTracks.size} tracks found • Ready for bit-perfect audio"
+                                                            } else {
+                                                                "Ready • Direct storage & MediaStore connected"
+                                                            },
+                                                            style = VeylTypography.BodySmall,
+                                                            color = colors.textPrimary,
+                                                            fontWeight = FontWeight.Medium
+                                                        )
+                                                    }
+                                                }
+                                            }
 
-                                            Text(
-                                                text = "Tap to open system file picker and grant permission to your Music folder.",
-                                                style = VeylTypography.BodySmall,
-                                                color = colors.textMuted,
-                                                textAlign = TextAlign.Center
-                                            )
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { onSelectRootFolder() }
+                                                    .padding(vertical = 4.dp),
+                                                horizontalArrangement = Arrangement.End,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Select different folder",
+                                                    style = VeylTypography.BodySmall,
+                                                    color = colors.textMuted,
+                                                    fontSize = 12.sp
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Icon(
+                                                    VeylIcons.ChevronRight,
+                                                    contentDescription = null,
+                                                    tint = colors.textMuted,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
