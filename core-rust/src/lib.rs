@@ -143,6 +143,12 @@ impl AudiophileEngineHandle {
                 device_id: None,
             };
             let out = output::android_oboe::AndroidAudioOutput::open(config, Arc::clone(&eng) as Arc<dyn output::AudioRenderCallback>).ok();
+            if let Some(ref s) = out {
+                let actual_rate = s.sample_rate() as f32;
+                if actual_rate > 0.0 {
+                    eng.set_output_sample_rate(actual_rate);
+                }
+            }
             Arc::new(Mutex::new(out))
         };
 

@@ -366,6 +366,16 @@ impl AudioDecoder {
                             let spec = *decoded.spec();
                             let num_channels = spec.channels.count();
 
+                            // Synchronize true decoded sample rate if packet spec differs from probed metadata
+                            if spec.rate > 0 && spec.rate != self.info.sample_rate {
+                                log::info!(
+                                    "AudioDecoder: dynamically updating sample rate from packet spec: {} -> {} Hz",
+                                    self.info.sample_rate,
+                                    spec.rate
+                                );
+                                self.info.sample_rate = spec.rate;
+                            }
+
                             let mut sample_buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
                             sample_buf.copy_interleaved_ref(decoded);
                             let raw_samples = sample_buf.samples();

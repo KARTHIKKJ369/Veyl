@@ -260,16 +260,7 @@ impl PlaybackEngine {
                     // Check if a flush was requested (new track loaded or rate change)
                     if flush_req.swap(false, Ordering::SeqCst) {
                         residual.clear();
-                        let dec_guard = active_decoder.lock();
-                        if let Some(ref dec) = *dec_guard {
-                            let info = dec.info();
-                            let mut res_guard = resampler.lock();
-                            if !info.is_dop && info.sample_rate != output_rate {
-                                *res_guard = Some(StreamResampler::new(info.sample_rate, output_rate, 2));
-                            } else {
-                                *res_guard = None;
-                            }
-                        } else if let Some(ref mut r) = *resampler.lock() {
+                        if let Some(ref mut r) = *resampler.lock() {
                             r.reset();
                         }
                     }
@@ -317,6 +308,9 @@ impl PlaybackEngine {
                     // 3. Decode next packet from active track
                     let mut decoded_chunk = None;
                     let mut track_ended = false;
+                    let mut track_sample_rate = 0;
+                    let mut is_dop = false;
+                    let mut replaygain_db = None;
 
                     {
                         let mut dec_guard = active_decoder.lock();
@@ -324,6 +318,10 @@ impl PlaybackEngine {
                             match dec.decode_next() {
                                 Ok(samples) => {
                                     decoded_chunk = Some(samples);
+                                    let info = dec.info();
+                                    track_sample_rate = info.sample_rate;
+                                    is_dop = info.is_dop;
+                                    replaygain_db = info.replaygain_db;
                                 }
                                 Err(DecodeError::EndOfStream) => {
                                     track_ended = true;
@@ -339,26 +337,44 @@ impl PlaybackEngine {
                     // 4. Apply ReplayGain normalization, resample if necessary, push into ring buffer
                     if let Some(mut raw_samples) = decoded_chunk {
                         // Apply ReplayGain loudness normalization (if tags exist)
-                        {
-                            let dec_guard = active_decoder.lock();
-                            if let Some(ref dec) = *dec_guard {
-                                if let Some(rg_db) = dec.info().replaygain_db {
-                                    let clamped_db = rg_db.clamp(-24.0, 12.0);
-                                    let linear_gain = 10.0f32.powf(clamped_db / 20.0);
-                                    for sample in raw_samples.iter_mut() {
-                                        *sample *= linear_gain;
-                                    }
-                                }
+                        if let Some(rg_db) = replaygain_db {
+                            let clamped_db = rg_db.clamp(-24.0, 12.0);
+                            let linear_gain = 10.0f32.powf(clamped_db / 20.0);
+                            for sample in raw_samples.iter_mut() {
+                                *sample *= linear_gain;
                             }
                         }
 
-                        let resampled = {
+                        // Resample if necessary to match hardware output rate
+                        let resampled = if !is_dop && track_sample_rate > 0 && output_rate > 0 && track_sample_rate != output_rate {
                             let mut res_guard = resampler.lock();
+                            let needs_rebuild = match *res_guard {
+                                Some(ref r) => {
+                                    (r.input_rate - track_sample_rate as f64).abs() > 0.1
+                                        || (r.output_rate - output_rate as f64).abs() > 0.1
+                                }
+                                None => true,
+                            };
+                            if needs_rebuild {
+                                log::info!(
+                                    "Dynamic Resampler: adapting from {} Hz to hardware output {} Hz",
+                                    track_sample_rate,
+                                    output_rate
+                                );
+                                *res_guard = Some(StreamResampler::new(track_sample_rate, output_rate, 2));
+                            }
                             if let Some(ref mut r) = *res_guard {
                                 r.process_interleaved(&raw_samples)
                             } else {
                                 raw_samples
                             }
+                        } else {
+                            // Exact rate match or DoP - bypass resampler and drop if stale
+                            let mut res_guard = resampler.lock();
+                            if res_guard.is_some() {
+                                *res_guard = None;
+                            }
+                            raw_samples
                         };
 
                         residual.extend(resampled);
@@ -495,6 +511,9 @@ impl PlaybackEngine {
         let decoder = AudioDecoder::open_with_dsd_mode(&source, dsd_mode)?;
         let info = decoder.info().clone();
 
+        // Clear any preloaded gapless next decoder to prevent stale track bleed on user skip
+        *self.next_decoder.lock() = None;
+
         // ── FLUSH: Drain all stale audio from the ring buffer before loading new track ──
         {
             let mut consumer = self.ring_buffer_consumer.lock();
@@ -503,8 +522,12 @@ impl PlaybackEngine {
                 consumer.skip(occupied);
             }
         }
-        // Signal decode worker to clear its residual buffer
-        self.flush_requested.store(true, Ordering::SeqCst);
+
+        // Set active decoder FIRST before triggering flush
+        {
+            let mut active = self.active_decoder.lock();
+            *active = Some(decoder);
+        }
 
         // Configure dynamic resampler if native track sample rate differs from hardware stream rate
         // CRIT-01: In DoP mode, never resample because rubato interpolation destroys DoP framing and DSD bits!
@@ -517,10 +540,8 @@ impl PlaybackEngine {
             *res_guard = None;
         }
 
-        {
-            let mut active = self.active_decoder.lock();
-            *active = Some(decoder);
-        }
+        // Signal decode worker to clear its residual buffer and reset resampler
+        self.flush_requested.store(true, Ordering::SeqCst);
 
         {
             let mut s = self.state.lock();

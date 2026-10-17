@@ -93,6 +93,8 @@ class AudioEngineController private constructor(private val context: Context) {
     // Native Rust Engine Handles
     private var nativeEngine: AudiophileEngineHandle? = null
     private val libraryEngine = LibraryEngine()
+    private var pendingActiveTrack: TrackInfo? = null
+    private var playTrackJob: Job? = null
 
     private inline fun <T> withNativeEngine(block: (AudiophileEngineHandle) -> T): T? =
         synchronized(nativeEngineLock) { nativeEngine?.let(block) }
@@ -615,6 +617,10 @@ class AudioEngineController private constructor(private val context: Context) {
                             _currentLyrics.value = null
                             _currentPositionSec.value = 0.0
                             _currentPositionMs.value = 0L
+
+                            if (pendingActiveTrack?.uri == currentUri) {
+                                pendingActiveTrack = null
+                            }
 
                             // Record play count and history with active track info
                             val curTrack = currentStatus.currentTrack
@@ -1172,7 +1178,7 @@ class AudioEngineController private constructor(private val context: Context) {
             }
         }
 
-        val current = _status.value?.currentTrack
+        val current = pendingActiveTrack ?: _status.value?.currentTrack
         val currentIndex = q.indexOfFirst { it.uri == current?.uri || (current != null && it.title.equals(current.title, ignoreCase = true)) }
 
         val nextTrack = if (_isShuffleEnabled.value) {
@@ -1220,7 +1226,7 @@ class AudioEngineController private constructor(private val context: Context) {
         val q = _queue.value
         if (q.isEmpty()) return
 
-        val current = _status.value?.currentTrack
+        val current = pendingActiveTrack ?: _status.value?.currentTrack
         val prevTrack = if (_isShuffleEnabled.value && playHistory.isNotEmpty()) {
             val prev = playHistory.removeAt(playHistory.size - 1)
             if (current != null) unplayedShufflePool.add(0, current)
@@ -2198,8 +2204,10 @@ class AudioEngineController private constructor(private val context: Context) {
 
         // Immediately record play count and update playback history in real time
         recordTrackPlayed(actualTrack.uri, actualTrack)
+        pendingActiveTrack = actualTrack
 
-        nativeScope.launch {
+        playTrackJob?.cancel()
+        playTrackJob = nativeScope.launch {
             try {
             // Only switch hardware sample-rate and exclusive mode for external USB DACs!
             // Internal phone speakers, 3.5mm jack, and Bluetooth must remain on standard shared 48kHz output.

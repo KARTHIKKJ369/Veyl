@@ -123,7 +123,6 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     private fun requestAudioFocus(): Boolean {
-        if (hasAudioFocus) return true
         val audioAttributes = AudioAttributesCompat.Builder()
             .setUsage(AudioAttributesCompat.USAGE_MEDIA)
             .setContentType(AudioAttributesCompat.CONTENT_TYPE_MUSIC)
@@ -201,23 +200,26 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
             updateMediaSession(curTrack, isPlaying, curPos, curTrack?.durationSeconds ?: 1.0, null)
 
-            val initialNotification = buildNotification(
-                track = curTrack,
-                isPlaying = isPlaying,
-                positionSec = curPos,
-                durationSec = curTrack?.durationSeconds ?: 1.0,
-                artwork = null
-            )
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ServiceCompat.startForeground(
-                    this,
-                    NOTIFICATION_ID,
-                    initialNotification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            // If a track is active or currently playing, start foreground immediately
+            if (curTrack != null || isPlaying) {
+                val initialNotification = buildNotification(
+                    track = curTrack,
+                    isPlaying = isPlaying,
+                    positionSec = curPos,
+                    durationSec = curTrack?.durationSeconds ?: 1.0,
+                    artwork = null
                 )
-            } else {
-                startForeground(NOTIFICATION_ID, initialNotification)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ServiceCompat.startForeground(
+                        this,
+                        NOTIFICATION_ID,
+                        initialNotification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, initialNotification)
+                }
             }
 
             observePlaybackState()
@@ -342,20 +344,17 @@ class PlaybackService : MediaBrowserServiceCompat() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = getSystemService(NotificationManager::class.java)
             try {
+                for (i in 1..10) {
+                    notificationManager?.deleteNotificationChannel("veyl_playback_channel_v$i")
+                    notificationManager?.deleteNotificationChannel("veyl_media_playback_channel_v$i")
+                }
                 notificationManager?.deleteNotificationChannel("veyl_playback_channel")
-                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v2")
-                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v3")
-                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v4")
-                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v5")
-                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v6")
-                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v7")
-                notificationManager?.deleteNotificationChannel("veyl_playback_channel_v8")
             } catch (_: Exception) {}
 
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Veyl Music Player",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Active music playback controls and media notifications"
                 setShowBadge(false)
@@ -371,34 +370,30 @@ class PlaybackService : MediaBrowserServiceCompat() {
         serviceScope.launch {
             combine(
                 engineController.currentTrack,
-                engineController.playbackState,
-                engineController.currentPositionSec
-            ) { track, state, posSec ->
-                Triple(track, state, posSec)
-            }.collect { (track, state, posSec) ->
+                engineController.playbackState
+            ) { track, state ->
+                Pair(track, state)
+            }.collect { (track, state) ->
                 val isPlaying = state == PlaybackStateEnum.PLAYING
                 val isTrackChange = track?.uri != lastTrackUri
                 val isStateChange = isPlaying != lastPostedIsPlaying
-                val isMajorSeek = kotlin.math.abs(posSec - lastMediaSessionPosSec) > 3.0
 
                 // Manage audio focus and noisy receiver
-                if (isStateChange) {
-                    if (isPlaying) {
-                        if (audioManager.mode != AudioManager.MODE_NORMAL && !engineController.playDuringCalls.value) {
-                            Log.w("PlaybackService", "Playback attempted while call mode active (${audioManager.mode}). Pausing.")
-                            resumeOnFocusGain = true
-                            engineController.pause()
-                            return@collect
-                        }
-                        if (requestAudioFocus()) {
-                            registerNoisyReceiver()
-                        } else {
-                            Log.w("PlaybackService", "Pausing because Android denied audio focus")
-                            engineController.pause()
-                        }
-                    } else {
-                        unregisterNoisyReceiver()
+                if (isPlaying) {
+                    if (audioManager.mode != AudioManager.MODE_NORMAL && !engineController.playDuringCalls.value) {
+                        Log.w("PlaybackService", "Playback attempted while call mode active (${audioManager.mode}). Pausing.")
+                        resumeOnFocusGain = true
+                        engineController.pause()
+                        return@collect
                     }
+                    if (requestAudioFocus()) {
+                        registerNoisyReceiver()
+                    } else {
+                        Log.w("PlaybackService", "Pausing because Android denied audio focus")
+                        engineController.pause()
+                    }
+                } else if (isStateChange) {
+                    unregisterNoisyReceiver()
                 }
 
                 // Asynchronously load artwork on track change
@@ -422,11 +417,23 @@ class PlaybackService : MediaBrowserServiceCompat() {
                     }
                 }
 
-                if (isTrackChange || isStateChange || isMajorSeek) {
-                    lastMediaSessionPosSec = posSec
+                if (isTrackChange || isStateChange) {
                     lastPostedIsPlaying = isPlaying
-                    updateMediaSession(track, isPlaying, posSec, track?.durationSeconds ?: 1.0, cachedArtwork)
-                    postNotification(track, isPlaying, posSec, track?.durationSeconds ?: 1.0, cachedArtwork)
+                    val nowPos = engineController.currentPositionSec.value
+                    updateMediaSession(track, isPlaying, nowPos, track?.durationSeconds ?: 1.0, cachedArtwork)
+                    postNotification(track, isPlaying, nowPos, track?.durationSeconds ?: 1.0, cachedArtwork)
+                }
+            }
+        }
+
+        // Lightweight observer for user seeks to keep MediaSession scrub bar accurate without spamming notifications
+        serviceScope.launch {
+            engineController.currentPositionSec.collect { posSec ->
+                val track = engineController.currentTrack.value
+                val isPlaying = engineController.playbackState.value == PlaybackStateEnum.PLAYING
+                if (track != null && kotlin.math.abs(posSec - lastMediaSessionPosSec) > 3.0) {
+                    lastMediaSessionPosSec = posSec
+                    updateMediaSession(track, isPlaying, posSec, track.durationSeconds, cachedArtwork)
                 }
             }
         }
@@ -461,33 +468,24 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
         val notification = buildNotification(track, isPlaying, positionSec, durationSec, artwork)
         try {
-            if (isPlaying) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    ServiceCompat.startForeground(
-                        this,
-                        NOTIFICATION_ID,
-                        notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                    )
-                } else {
-                    startForeground(NOTIFICATION_ID, notification)
-                }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
             } else {
-                // When paused: detach from ongoing foreground requirement so notification is dismissible/swipeable,
-                // but keep media controls visible in the notification shade & lockscreen
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_DETACH)
-                } else {
-                    @Suppress("DEPRECATION")
-                    stopForeground(false)
-                }
-                val notificationManager = getSystemService(NotificationManager::class.java)
-                notificationManager?.notify(NOTIFICATION_ID, notification)
+                startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: Exception) {
-            Log.e("PlaybackService", "Error posting notification", e)
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager?.notify(NOTIFICATION_ID, notification)
+            Log.e("PlaybackService", "Error posting foreground notification", e)
+            try {
+                val notificationManager = getSystemService(NotificationManager::class.java)
+                notificationManager?.notify(NOTIFICATION_ID, notification)
+            } catch (inner: Exception) {
+                Log.e("PlaybackService", "Fallback notify failed", inner)
+            }
         }
     }
 
@@ -634,6 +632,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
             .setLargeIcon(artwork)
             .setContentIntent(openAppIntent)
             .setDeleteIntent(stopIntent)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setShowWhen(false)
             .setOngoing(isPlaying)
@@ -648,7 +647,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
         val action = intent?.action
         when (action) {
             ACTION_START_SERVICE -> {
-                // Keep foreground service active and sync notification
+                requestAudioFocus()
             }
             ACTION_PLAY -> {
                 if (requestAudioFocus()) {
@@ -723,6 +722,18 @@ class PlaybackService : MediaBrowserServiceCompat() {
         return START_STICKY
     }
 
+    inner class LocalBinder : android.os.Binder() {
+        fun getService(): PlaybackService = this@PlaybackService
+    }
+    private val localBinder = LocalBinder()
+
+    override fun onBind(intent: Intent): android.os.IBinder? {
+        if (SERVICE_INTERFACE == intent.action) {
+            return super.onBind(intent)
+        }
+        return localBinder
+    }
+
     override fun onGetRoot(
         clientPackageName: String,
         clientUid: Int,
@@ -795,7 +806,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     companion object {
-        const val CHANNEL_ID = "veyl_media_playback_channel_v9"
+        const val CHANNEL_ID = "veyl_media_playback_channel_v11"
         const val NOTIFICATION_ID = 1001
 
         const val ACTION_START_SERVICE = "com.audiophile.player.ACTION_START_SERVICE"

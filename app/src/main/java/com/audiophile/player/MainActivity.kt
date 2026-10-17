@@ -1,11 +1,16 @@
 package com.audiophile.player
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.audiophile.player.engine.AudioEngineController
+import com.audiophile.player.service.PlaybackService
 import com.audiophile.player.ui.navigation.AudiophileNavHost
 import com.audiophile.player.ui.theme.VeylTheme
 import androidx.compose.runtime.collectAsState
@@ -22,6 +28,28 @@ import androidx.compose.runtime.getValue
 class MainActivity : ComponentActivity() {
 
     private lateinit var controller: AudioEngineController
+    private var isServiceBound = false
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            isServiceBound = true
+            Log.i("MainActivity", "Connected to PlaybackService")
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            isServiceBound = false
+            Log.i("MainActivity", "Disconnected from PlaybackService")
+        }
+    }
+
+    private fun bindPlaybackService() {
+        try {
+            val serviceIntent = Intent(this, PlaybackService::class.java)
+            bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to bind PlaybackService", e)
+        }
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -61,6 +89,7 @@ class MainActivity : ComponentActivity() {
         }
 
         controller = AudioEngineController.getInstance(this)
+        bindPlaybackService()
         checkPermissions()
         handleIncomingIntent(intent)
 
@@ -163,5 +192,17 @@ class MainActivity : ComponentActivity() {
 
     private fun checkStorageAccessAndScan() {
         controller.rescanLibrary()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isServiceBound) {
+            try {
+                unbindService(serviceConnection)
+                isServiceBound = false
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Error unbinding PlaybackService", e)
+            }
+        }
     }
 }
