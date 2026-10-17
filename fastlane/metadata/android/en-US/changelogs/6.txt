@@ -1,0 +1,7 @@
+Version 2.1.0:
+• Custom Equalizer Presets: save, load, and manage personalized 10-band EQ settings
+• Audio Pitch Shift Bug Fix: robust resampler recovery preventing pitch jumps across audio routes
+• Phone Call Resume Fix: paused songs strictly remain paused after phone calls
+• Redesigned Playlists: pinned Favorites, Smart Collections, and custom playlist covers
+• Elevated Playlists to the bottom navigation bar for quick access
+• GNU General Public License v3.0 (GPL-3.0)

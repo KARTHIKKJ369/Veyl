@@ -50,17 +50,15 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Veyl Latest Build' }}
           body: |
-            ## 🎵 Veyl — Audiophile Android Music Player
+            ## 🎵 Veyl — Reference Audiophile Android Music Player
 
-            ### 🚀 Features & Fixes in this release:
-            - **High-Fidelity Online Streaming (Official Music Only)**: Instant zero-lag dynamic search and playback powered directly by YouTube Music's `WEB_REMIX` catalog with strict studio music filters (excluding vlogs, memes, and amateur clips).
-            - **Native Rust Audio Engine Stream Pipeline**: All online audio streams directly through Veyl's native Rust DSP engine with 10-band biquad parametric EQ, high-fidelity sinc resampling, and AAudio MMAP bit-perfect hardware output.
-            - **Zero Permanent Storage Footprint**: Rolling progressive stream buffer (~150ms instant start) with automatic cleanup on completion or track switch.
-            - **Dedicated Full-Screen Search with Online Filter Tabs**: Seamless search with `All`, `Local`, and `YouTube Music` filter pills.
-            - **Dedicated In-Library Quick Filter**: Fast inline filter in Songs screen to quickly isolate tracks without interrupting browsing.
-            - **Lifecycle-Aware Performance**: Upgraded to `collectAsStateWithLifecycle` to halt background recompositions and drastically improve battery and CPU efficiency.
-            - **Asynchronous Native Engine Execution**: Native audio commands (play, pause, seek, EQ faders, volume) are executed on a dedicated background scope for stutter-free UI smoothness.
-            - **Audiophile DSP & Pure Rust Engine**: 10-band biquad parametric EQ, high-fidelity resampling, lock-free ring-buffer, and bit-perfect hardware output.
+            ### 🚀 Highlights in this release (v2.1.0):
+            - **Custom Equalizer Presets**: Create, save, load, and delete customized 10-band equalizer settings with persistent storage.
+            - **Sample Rate & Pitch Stability**: Fixed sample rate synchronization and Rubato resampler error recovery, eliminating unexpected pitch jumps across audio route changes.
+            - **Intelligent Phone Call Handling**: Paused songs strictly remain paused after phone calls end; audio focus recovery only resumes music if it was actively playing before the call.
+            - **Redesigned Playlists & Collections**: Pinned Favorites, Smart Collections, custom playlist artwork, and elevated bottom navigation bar tab.
+            - **Bit-Perfect AAudio MMAP & Direct USB DAC Output**: Pure Rust audio engine (`audiophile-core`) bypassing Android system mixer audio degradation.
+            - **100% Free & Open Source**: Licensed under the GNU General Public License v3.0 (GPL-3.0) with zero ads and zero telemetry.
 
             ### 📥 Download
             Download and install **`veyl-debug.apk`** from the Assets below.
