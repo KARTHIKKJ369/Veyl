@@ -1363,7 +1363,7 @@ class AudioEngineController private constructor(private val context: Context) {
                     // Create streaming-ready track
                     val hash = "${spTrack.title}_${spTrack.artist}".hashCode().toUInt().toString(16)
                     val onlineUri = "online://spotify_$hash"
-                    val trackCover = spTrack.coverUrl?.takeIf { it.isNotBlank() } ?: playlistCover
+                    val trackCover = spTrack.coverUrl?.takeIf { it.isNotBlank() } ?: ""
                     val hasArt = trackCover.isNotBlank()
 
                     val onlineTrack = TrackInfo(
@@ -1434,6 +1434,16 @@ class AudioEngineController private constructor(private val context: Context) {
                                 ArtworkCache.registerOnlineArtwork(track.title.lowercase(), match.thumbnailUrl)
                                 val updatedTrack = track.copy(hasArtwork = true)
                                 playlistManager.registerOnlineTrack(updatedTrack, match)
+
+                                val enrichedSong = song.copy(
+                                    thumbnailUrl = match.thumbnailUrl,
+                                    album = if (match.album.isNotBlank()) match.album else song.album,
+                                    streamUrl = if (match.streamUrl.isNotBlank()) match.streamUrl else song.streamUrl
+                                )
+                                onlineSongMetadataCache[track.uri] = enrichedSong
+                                onlineSongMetadataCache[song.id] = enrichedSong
+                                onlineSongMetadataCache["online://${song.id}"] = enrichedSong
+                                onlineSongMetadataCache[track.title.lowercase()] = enrichedSong
                             }
                         }
                     } catch (_: Exception) {}
@@ -1898,16 +1908,32 @@ class AudioEngineController private constructor(private val context: Context) {
         isTransitioning = false
         lastTransitionTimestamp = System.currentTimeMillis()
 
+        // Resolve specific track artwork from ArtworkCache before falling back to song.thumbnailUrl
+        val sId = song.id.removePrefix("online://")
+        val specificTrackArt = ArtworkCache.getOnlineArtwork("online://$sId")
+            ?: ArtworkCache.getOnlineArtwork(sId)
+            ?: ArtworkCache.getOnlineArtwork(song.title.lowercase())
+
+        val resolvedThumb = specificTrackArt?.takeIf { it.isNotBlank() }
+            ?: song.thumbnailUrl.takeIf { it.isNotBlank() }
+            ?: ""
+
+        val effectiveSong = if (resolvedThumb.isNotBlank()) song.copy(thumbnailUrl = resolvedThumb) else song
+
         ensurePlaybackServiceStarted()
         _isOnlineStreaming.value = true
         _isOnlineBuffering.value = true
-        _currentOnlineSong.value = song
+        _currentOnlineSong.value = effectiveSong
 
         // Cache metadata for this song
-        onlineSongMetadataCache[song.id] = song
-        onlineSongMetadataCache["online://${song.id}"] = song
-        onlineSongMetadataCache[song.title.lowercase()] = song
-        ArtworkCache.registerOnlineArtwork("online://${song.id}", song.thumbnailUrl)
+        onlineSongMetadataCache[effectiveSong.id] = effectiveSong
+        onlineSongMetadataCache["online://${effectiveSong.id}"] = effectiveSong
+        onlineSongMetadataCache[effectiveSong.title.lowercase()] = effectiveSong
+        if (resolvedThumb.isNotBlank()) {
+            ArtworkCache.registerOnlineArtwork("online://${effectiveSong.id}", resolvedThumb)
+            ArtworkCache.registerOnlineArtwork(effectiveSong.id, resolvedThumb)
+            ArtworkCache.registerOnlineArtwork(effectiveSong.title.lowercase(), resolvedThumb)
+        }
 
         // Setup Queue if contextQueue is provided
         if (contextQueue.isNotEmpty()) {
@@ -1915,7 +1941,15 @@ class AudioEngineController private constructor(private val context: Context) {
                 onlineSongMetadataCache[item.id] = item
                 onlineSongMetadataCache["online://${item.id}"] = item
                 onlineSongMetadataCache[item.title.lowercase()] = item
-                ArtworkCache.registerOnlineArtwork("online://${item.id}", item.thumbnailUrl)
+                val itemArt = ArtworkCache.getOnlineArtwork("online://${item.id}")
+                    ?: ArtworkCache.getOnlineArtwork(item.id)
+                    ?: ArtworkCache.getOnlineArtwork(item.title.lowercase())
+                    ?: item.thumbnailUrl
+                if (itemArt.isNotBlank()) {
+                    ArtworkCache.registerOnlineArtwork("online://${item.id}", itemArt)
+                    ArtworkCache.registerOnlineArtwork(item.id, itemArt)
+                    ArtworkCache.registerOnlineArtwork(item.title.lowercase(), itemArt)
+                }
 
                 TrackInfo(
                     uri = if (item.id.startsWith("online://")) item.id else "online://${item.id}",
@@ -1942,9 +1976,9 @@ class AudioEngineController private constructor(private val context: Context) {
             if (startShuffled || _isShuffleEnabled.value) {
                 _isShuffleEnabled.value = true
                 prefs.edit().putBoolean("shuffle_enabled", true).apply()
-                val currentPlaceholder = queueTracks.firstOrNull { it.title.equals(song.title, ignoreCase = true) }
+                val currentPlaceholder = queueTracks.firstOrNull { it.title.equals(effectiveSong.title, ignoreCase = true) }
                     ?: queueTracks.first()
-                val remaining = queueTracks.filter { !it.title.equals(song.title, ignoreCase = true) }.shuffled()
+                val remaining = queueTracks.filter { !it.title.equals(effectiveSong.title, ignoreCase = true) }.shuffled()
                 val shuffledQueue = listOf(currentPlaceholder) + remaining
                 _queue.value = shuffledQueue
                 unplayedShufflePool.clear()
@@ -1952,18 +1986,18 @@ class AudioEngineController private constructor(private val context: Context) {
             } else {
                 _queue.value = queueTracks
             }
-        } else if (!preserveQueue && _queue.value.none { it.title.equals(song.title, ignoreCase = true) }) {
+        } else if (!preserveQueue && _queue.value.none { it.title.equals(effectiveSong.title, ignoreCase = true) }) {
             val placeholder = TrackInfo(
-                uri = "online://${song.id}",
-                title = song.title,
-                artist = song.artist,
-                album = song.album,
+                uri = "online://${effectiveSong.id}",
+                title = effectiveSong.title,
+                artist = effectiveSong.artist,
+                album = effectiveSong.album,
                 albumArtist = null,
                 genre = "Online Stream",
                 year = null,
                 trackNumber = null,
                 discNumber = null,
-                durationSeconds = song.durationSeconds,
+                durationSeconds = effectiveSong.durationSeconds,
                 sampleRate = 44100u,
                 bitDepth = 16u,
                 bitrate = 320000u,
@@ -1976,32 +2010,46 @@ class AudioEngineController private constructor(private val context: Context) {
         }
 
         // 1. Instant zero-lag playback if the song was already prefetched into the single rolling disk buffer!
-        val readyPrefetched = onlineStreamManager.getPrefetchedStreamFile(song)
+        val readyPrefetched = onlineStreamManager.getPrefetchedStreamFile(effectiveSong)
         if (readyPrefetched != null && readyPrefetched.exists() && readyPrefetched.length() > 50_000L) {
-            Log.i("AudioEngineController", "Zero-lag playback from prefetched buffer for ${song.title}")
+            Log.i("AudioEngineController", "Zero-lag playback from prefetched buffer for ${effectiveSong.title}")
             _isOnlineBuffering.value = false
-            val bestThumb = song.thumbnailUrl.ifBlank { ArtworkCache.getOnlineArtwork("online://${song.id}") ?: "" }
-            val trackInfo = onlineStreamManager.createTrackInfo(song.copy(thumbnailUrl = bestThumb), readyPrefetched)
+            val currentSpecificArt = ArtworkCache.getOnlineArtwork("online://${effectiveSong.id}")
+                ?: ArtworkCache.getOnlineArtwork(effectiveSong.id)
+                ?: ArtworkCache.getOnlineArtwork(effectiveSong.title.lowercase())
+                ?: effectiveSong.thumbnailUrl
+            val bestThumb = currentSpecificArt.takeIf { it.isNotBlank() } ?: effectiveSong.thumbnailUrl
+            val trackInfo = onlineStreamManager.createTrackInfo(effectiveSong.copy(thumbnailUrl = bestThumb), readyPrefetched)
             if (bestThumb.isNotBlank()) {
                 ArtworkCache.registerOnlineArtwork(readyPrefetched.absolutePath, bestThumb)
-                ArtworkCache.registerOnlineArtwork("online://${song.id}", bestThumb)
+                ArtworkCache.registerOnlineArtwork("online://${effectiveSong.id}", bestThumb)
+                ArtworkCache.registerOnlineArtwork(effectiveSong.id, bestThumb)
+                ArtworkCache.registerOnlineArtwork(effectiveSong.title.lowercase(), bestThumb)
             }
 
-            updateQueueWithStreamTrack(song, trackInfo)
+            updateQueueWithStreamTrack(effectiveSong, trackInfo)
             playTrack(trackInfo)
             scheduleNextTrackPrefetch()
             return
         }
 
         scope.launch(Dispatchers.IO) {
-            val streamUrl = if (song.streamUrl.isNotBlank()) {
-                song.streamUrl
+            val streamUrl = if (effectiveSong.streamUrl.isNotBlank()) {
+                effectiveSong.streamUrl
             } else {
-                onlineStreamManager.resolveAudioStreamUrl(song)
+                onlineStreamManager.resolveAudioStreamUrl(effectiveSong)
             }
 
+            // In case resolveAudioStreamUrl newly resolved track cover from JioSaavn:
+            val newlyResolvedArt = ArtworkCache.getOnlineArtwork("online://${effectiveSong.id}")
+                ?: ArtworkCache.getOnlineArtwork(effectiveSong.id)
+                ?: ArtworkCache.getOnlineArtwork(effectiveSong.title.lowercase())
+                ?: effectiveSong.thumbnailUrl
+
+            val playingSong = if (newlyResolvedArt.isNotBlank()) effectiveSong.copy(thumbnailUrl = newlyResolvedArt) else effectiveSong
+
             if (streamUrl.isNullOrBlank()) {
-                Log.e("AudioEngineController", "Failed to resolve stream URL for ${song.title}")
+                Log.e("AudioEngineController", "Failed to resolve stream URL for ${playingSong.title}")
                 withContext(Dispatchers.Main) {
                     _isOnlineBuffering.value = false
                     _isOnlineStreaming.value = false
@@ -2014,19 +2062,25 @@ class AudioEngineController private constructor(private val context: Context) {
                 streamUrl = streamUrl,
                 onStreamReady = { cacheFile ->
                     _isOnlineBuffering.value = false
-                    val bestThumb = song.thumbnailUrl.ifBlank { ArtworkCache.getOnlineArtwork("online://${song.id}") ?: "" }
-                    val trackInfo = onlineStreamManager.createTrackInfo(song.copy(thumbnailUrl = bestThumb), cacheFile)
+                    val trackSpecificArt = ArtworkCache.getOnlineArtwork("online://${playingSong.id}")
+                        ?: ArtworkCache.getOnlineArtwork(playingSong.id)
+                        ?: ArtworkCache.getOnlineArtwork(playingSong.title.lowercase())
+                        ?: playingSong.thumbnailUrl
+                    val bestThumb = trackSpecificArt.takeIf { it.isNotBlank() } ?: playingSong.thumbnailUrl
+                    val trackInfo = onlineStreamManager.createTrackInfo(playingSong.copy(thumbnailUrl = bestThumb), cacheFile)
                     if (bestThumb.isNotBlank()) {
                         ArtworkCache.registerOnlineArtwork(cacheFile.absolutePath, bestThumb)
-                        ArtworkCache.registerOnlineArtwork("online://${song.id}", bestThumb)
+                        ArtworkCache.registerOnlineArtwork("online://${playingSong.id}", bestThumb)
+                        ArtworkCache.registerOnlineArtwork(playingSong.id, bestThumb)
+                        ArtworkCache.registerOnlineArtwork(playingSong.title.lowercase(), bestThumb)
                     }
 
-                    updateQueueWithStreamTrack(song, trackInfo)
+                    updateQueueWithStreamTrack(playingSong, trackInfo)
                     playTrack(trackInfo)
                     scheduleNextTrackPrefetch()
                 },
                 onError = { error ->
-                    Log.e("AudioEngineController", "Error streaming ${song.title}", error)
+                    Log.e("AudioEngineController", "Error streaming ${playingSong.title}", error)
                     _isOnlineBuffering.value = false
                     _isOnlineStreaming.value = false
                     _currentOnlineSong.value = null
@@ -2089,18 +2143,25 @@ class AudioEngineController private constructor(private val context: Context) {
                            nextTrack.uri.contains("veyl_online_stream_")
 
             if (isOnline && !isTrackDownloaded(nextTrack)) {
-                val songItem = _currentOnlineSong.value?.takeIf { it.title.equals(nextTrack.title, ignoreCase = true) }
+                val realTrackArt = ArtworkCache.getOnlineArtwork(nextTrack.uri)
+                    ?: ArtworkCache.getOnlineArtwork("online://${nextTrack.uri.removePrefix("online://")}")
+                    ?: ArtworkCache.getOnlineArtwork(nextTrack.title.lowercase())
+
+                val cachedSong = _currentOnlineSong.value?.takeIf { it.title.equals(nextTrack.title, ignoreCase = true) }
                     ?: onlineSongMetadataCache[nextTrack.uri]
                     ?: onlineSongMetadataCache[nextTrack.title.lowercase()]
-                    ?: OnlineSongItem(
-                        id = nextTrack.uri.removePrefix("online://"),
-                        title = nextTrack.title,
-                        artist = nextTrack.artist ?: "Unknown Artist",
-                        album = nextTrack.album ?: "",
-                        durationSeconds = nextTrack.durationSeconds,
-                        thumbnailUrl = ArtworkCache.getOnlineArtwork(nextTrack.uri) ?: "",
-                        streamUrl = ""
-                    )
+
+                val songItem = (cachedSong ?: OnlineSongItem(
+                    id = nextTrack.uri.removePrefix("online://"),
+                    title = nextTrack.title,
+                    artist = nextTrack.artist ?: "Unknown Artist",
+                    album = nextTrack.album ?: "",
+                    durationSeconds = nextTrack.durationSeconds,
+                    thumbnailUrl = realTrackArt ?: "",
+                    streamUrl = ""
+                )).let {
+                    if (!realTrackArt.isNullOrBlank()) it.copy(thumbnailUrl = realTrackArt) else it
+                }
                 onlineStreamManager.prefetchNextTrack(songItem)
             }
         }
@@ -2372,18 +2433,25 @@ class AudioEngineController private constructor(private val context: Context) {
                 actualTrack = actualTrack.copy(uri = targetFile.absolutePath)
                 playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
             } else if (actualTrack.genre == "Online Stream" || actualTrack.uri.contains("veyl_online_stream_") || actualTrack.uri.startsWith("online://")) {
-                val songItem = _currentOnlineSong.value?.takeIf { it.title.equals(actualTrack.title, ignoreCase = true) }
+                val realTrackArt = ArtworkCache.getOnlineArtwork(actualTrack.uri)
+                    ?: ArtworkCache.getOnlineArtwork("online://${actualTrack.uri.removePrefix("online://")}")
+                    ?: ArtworkCache.getOnlineArtwork(actualTrack.title.lowercase())
+
+                val cachedSong = _currentOnlineSong.value?.takeIf { it.title.equals(actualTrack.title, ignoreCase = true) }
                     ?: onlineSongMetadataCache[actualTrack.uri]
                     ?: onlineSongMetadataCache[actualTrack.title.lowercase()]
-                    ?: OnlineSongItem(
-                        id = actualTrack.uri.removePrefix("online://"),
-                        title = actualTrack.title,
-                        artist = actualTrack.artist ?: "Unknown Artist",
-                        album = actualTrack.album ?: "",
-                        durationSeconds = actualTrack.durationSeconds,
-                        thumbnailUrl = ArtworkCache.getOnlineArtwork(actualTrack.uri) ?: "",
-                        streamUrl = ""
-                    )
+
+                val songItem = (cachedSong ?: OnlineSongItem(
+                    id = actualTrack.uri.removePrefix("online://"),
+                    title = actualTrack.title,
+                    artist = actualTrack.artist ?: "Unknown Artist",
+                    album = actualTrack.album ?: "",
+                    durationSeconds = actualTrack.durationSeconds,
+                    thumbnailUrl = realTrackArt ?: "",
+                    streamUrl = ""
+                )).let {
+                    if (!realTrackArt.isNullOrBlank()) it.copy(thumbnailUrl = realTrackArt) else it
+                }
                 playOnlineSong(song = songItem, preserveQueue = true)
                 return
             }

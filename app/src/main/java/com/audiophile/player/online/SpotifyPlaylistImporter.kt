@@ -142,13 +142,33 @@ object SpotifyPlaylistImporter {
                     val durationSec = if (durationMs > 0) durationMs / 1000.0 else 0.0
                     val previewUrl = item.optJSONObject("audioPreview")?.optString("url")
 
+                    val isAlbum = type == "album"
+
+                    // Extract track-specific cover art if present in embed JSON
+                    var trackCoverUrl: String? = null
+                    val itemAlbum = item.optJSONObject("album")
+                    val itemCoverArt = item.optJSONObject("coverArt") ?: itemAlbum?.optJSONObject("coverArt")
+                    val itemImages = item.optJSONArray("images") ?: itemAlbum?.optJSONArray("images") ?: itemCoverArt?.optJSONArray("sources")
+
+                    if (itemImages != null && itemImages.length() > 0) {
+                        trackCoverUrl = itemImages.optJSONObject(0)?.optString("url")
+                    }
+                    if (trackCoverUrl.isNullOrBlank()) {
+                        trackCoverUrl = item.optString("coverUrl").takeIf { it.isNotBlank() }
+                            ?: item.optString("artworkUrl").takeIf { it.isNotBlank() }
+                    }
+                    // For albums, all tracks share the album cover; for playlists, keep null so individual track cover is resolved
+                    if (trackCoverUrl.isNullOrBlank() && isAlbum) {
+                        trackCoverUrl = playlistCoverUrl
+                    }
+
                     parsedTracks.add(
                         SpotifyTrack(
                             title = title,
                             artist = if (artist.isNotBlank()) artist else "Unknown Artist",
                             durationSeconds = durationSec,
                             previewUrl = previewUrl,
-                            coverUrl = playlistCoverUrl
+                            coverUrl = trackCoverUrl
                         )
                     )
                 }

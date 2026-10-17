@@ -92,7 +92,11 @@ class PlaylistManager(context: Context) {
                 if (artUrl.isNotBlank()) {
                     ArtworkCache.registerOnlineArtwork(track.uri, artUrl)
                     val fn = java.io.File(track.uri).name
-                    if (fn.isNotBlank()) ArtworkCache.registerOnlineArtwork(fn, artUrl)
+                    if (fn.isNotBlank()) {
+                        ArtworkCache.registerOnlineArtwork(fn, artUrl)
+                        ArtworkCache.registerOnlineArtwork("online://$fn", artUrl)
+                    }
+                    ArtworkCache.registerOnlineArtwork(track.title.lowercase(), artUrl)
                 }
                 metaMap[track.uri] = track
                 val fName = java.io.File(track.uri).name
@@ -539,8 +543,15 @@ class PlaylistManager(context: Context) {
             if (it.thumbnailUrl.isNotBlank()) {
                 ArtworkCache.registerOnlineArtwork(track.uri, it.thumbnailUrl)
                 val fn = java.io.File(track.uri).name
-                if (fn.isNotBlank()) ArtworkCache.registerOnlineArtwork(fn, it.thumbnailUrl)
-                if (it.id.isNotBlank()) ArtworkCache.registerOnlineArtwork(it.id, it.thumbnailUrl)
+                if (fn.isNotBlank()) {
+                    ArtworkCache.registerOnlineArtwork(fn, it.thumbnailUrl)
+                    ArtworkCache.registerOnlineArtwork("online://$fn", it.thumbnailUrl)
+                }
+                if (it.id.isNotBlank()) {
+                    ArtworkCache.registerOnlineArtwork(it.id, it.thumbnailUrl)
+                    ArtworkCache.registerOnlineArtwork("online://${it.id}", it.thumbnailUrl)
+                }
+                ArtworkCache.registerOnlineArtwork(track.title.lowercase(), it.thumbnailUrl)
             }
         }
         _onlineTrackMeta.value = current

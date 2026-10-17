@@ -85,6 +85,13 @@ object ArtworkCache {
 
     fun registerOnlineArtwork(trackUri: String, imageUrl: String) {
         if (trackUri.isNotBlank() && imageUrl.isNotBlank()) {
+            val previous = onlineArtMapping[trackUri]
+            if (previous != null && previous != imageUrl) {
+                memoryCache.remove("${trackUri}_lg")
+                memoryCache.remove("${trackUri}_sm")
+                memoryCache.remove("${previous}_lg")
+                memoryCache.remove("${previous}_sm")
+            }
             onlineArtMapping[trackUri] = imageUrl
             val clean = trackUri.removePrefix("file://")
             onlineArtMapping[clean] = imageUrl
