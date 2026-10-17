@@ -48,6 +48,18 @@ import com.audiophile.player.ui.theme.VeylDarkColorScheme
 import com.audiophile.player.ui.theme.buildVeylColorScheme
 import com.audiophile.player.ui.theme.parseColorFromHex
 import com.audiophile.player.ui.theme.toHex
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
+
+data class CustomEqPreset(
+    val id: String,
+    val name: String,
+    val gains: List<Float>
+)
 
 data class SavedCustomTheme(
     val id: String,
@@ -122,6 +134,9 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private val _currentEqPreset = MutableStateFlow(prefs.getString("eq_preset", "Flat") ?: "Flat")
     val currentEqPreset: StateFlow<String> = _currentEqPreset.asStateFlow()
+
+    private val _customEqPresets = MutableStateFlow<List<CustomEqPreset>>(emptyList())
+    val customEqPresets: StateFlow<List<CustomEqPreset>> = _customEqPresets.asStateFlow()
 
     data class EqState(val enabled: Boolean = false, val bands: List<EqBandInfo> = emptyList())
     private val _eqState = MutableStateFlow(EqState(enabled = prefs.getBoolean("eq_enabled", false)))
@@ -541,6 +556,8 @@ class AudioEngineController private constructor(private val context: Context) {
         loadPlaybackHistory()
         loadSavedRootDirectory()
         observeUsbDacChanges()
+        registerAudioDeviceListener()
+        loadCustomEqPresets()
     }
 
     private fun initEngine() {
@@ -548,12 +565,40 @@ class AudioEngineController private constructor(private val context: Context) {
             synchronized(nativeEngineLock) {
                 nativeEngine = AudiophileEngineHandle(48000f, 2u)
                 nativeEngine?.setDsdMode(_dsdMode.value)
+                currentOutputSampleRate = nativeEngine?.getOutputSampleRate() ?: 48000u
             }
-            currentOutputSampleRate = 48000u
             restoreEqState()
         } catch (e: Throwable) {
             Log.e("AudioEngineController", "Failed to initialize native AudiophileEngineHandle", e)
         }
+    }
+
+    private fun registerAudioDeviceListener() {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        val deviceCallback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                val hasOutput = addedDevices?.any { it.isSink } == true
+                if (hasOutput) {
+                    Log.i("AudioEngineController", "Audio output device added (e.g. Bluetooth/Headphones). Refreshing hardware stream...")
+                    scope.launch {
+                        delay(250) // Let Android audio HAL settle routing
+                        refreshHardwareOutput()
+                    }
+                }
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                val hasOutput = removedDevices?.any { it.isSink } == true
+                if (hasOutput) {
+                    Log.i("AudioEngineController", "Audio output device removed. Refreshing hardware stream...")
+                    scope.launch {
+                        delay(250) // Let Android audio HAL settle routing
+                        refreshHardwareOutput()
+                    }
+                }
+            }
+        }
+        audioManager.registerAudioDeviceCallback(deviceCallback, null)
     }
 
     private fun restoreEqState() {
@@ -2656,7 +2701,9 @@ class AudioEngineController private constructor(private val context: Context) {
         return try {
             val success = withNativeEngine { it.reconfigureOutput(sampleRate, 2u, deviceId, exclusive) } ?: false
             if (success) {
-                currentOutputSampleRate = sampleRate
+                val actualRate = withNativeEngine { it.getOutputSampleRate() } ?: sampleRate
+                currentOutputSampleRate = actualRate
+                Log.i("AudioEngineController", "Hardware output reconfigured: target=$sampleRate Hz, actual=$actualRate Hz")
                 withNativeEngine { it.setEqEnabled(_isEqEnabled.value) }
                 val bands = _eqBands.value
                 for (i in bands.indices) {
@@ -2727,8 +2774,10 @@ class AudioEngineController private constructor(private val context: Context) {
                 playTrack(curTrack)
                 return@launch
             }
-            // Always ensure the native hardware output stream is refreshed and alive before playback starts
-            refreshHardwareOutput()
+            // If playback was stalled, refresh the hardware stream before resuming
+            if (isPlaybackStalled) {
+                refreshHardwareOutput()
+            }
             withNativeEngine { it.play() }
         }
     }
@@ -2808,6 +2857,88 @@ class AudioEngineController private constructor(private val context: Context) {
             }
         }
         refreshEq()
+    }
+
+    private fun loadCustomEqPresets() {
+        try {
+            val jsonStr = prefs.getString("custom_eq_presets_json", "[]") ?: "[]"
+            val arr = JSONArray(jsonStr)
+            val list = mutableListOf<CustomEqPreset>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val id = obj.optString("id", UUID.randomUUID().toString())
+                val name = obj.optString("name", "Custom")
+                val gainsArr = obj.optJSONArray("gains")
+                val gains = mutableListOf<Float>()
+                if (gainsArr != null) {
+                    for (j in 0 until gainsArr.length()) {
+                        gains.add(gainsArr.optDouble(j, 0.0).toFloat())
+                    }
+                }
+                if (gains.size == 10) {
+                    list.add(CustomEqPreset(id, name, gains))
+                }
+            }
+            _customEqPresets.value = list
+        } catch (e: Exception) {
+            Log.e("AudioEngineController", "Error loading custom EQ presets", e)
+        }
+    }
+
+    private fun saveCustomEqPresetsToPrefs(list: List<CustomEqPreset>) {
+        try {
+            val arr = JSONArray()
+            for (preset in list) {
+                val obj = JSONObject()
+                obj.put("id", preset.id)
+                obj.put("name", preset.name)
+                val gainsArr = JSONArray()
+                for (g in preset.gains) {
+                    gainsArr.put(g.toDouble())
+                }
+                obj.put("gains", gainsArr)
+                arr.put(obj)
+            }
+            prefs.edit().putString("custom_eq_presets_json", arr.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("AudioEngineController", "Error saving custom EQ presets", e)
+        }
+    }
+
+    fun saveCustomEqPreset(name: String, gains: List<Float>): CustomEqPreset {
+        val trimmedName = name.trim().ifEmpty { "My Preset" }
+        val currentList = _customEqPresets.value.toMutableList()
+        val existingIndex = currentList.indexOfFirst { it.name.equals(trimmedName, ignoreCase = true) }
+        val preset = if (existingIndex >= 0) {
+            val updated = currentList[existingIndex].copy(gains = gains)
+            currentList[existingIndex] = updated
+            updated
+        } else {
+            val newPreset = CustomEqPreset(
+                id = UUID.randomUUID().toString(),
+                name = trimmedName,
+                gains = gains
+            )
+            currentList.add(newPreset)
+            newPreset
+        }
+        _customEqPresets.value = currentList
+        saveCustomEqPresetsToPrefs(currentList)
+        setEqPreset(preset.name, preset.gains)
+        return preset
+    }
+
+    fun deleteCustomEqPreset(id: String) {
+        val currentList = _customEqPresets.value.toMutableList()
+        val removed = currentList.firstOrNull { it.id == id }
+        if (removed != null) {
+            currentList.removeAll { it.id == id }
+            _customEqPresets.value = currentList
+            saveCustomEqPresetsToPrefs(currentList)
+            if (_currentEqPreset.value == removed.name) {
+                setEqPreset("Flat", listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f))
+            }
+        }
     }
 
     fun setEqPreamp(gainDb: Float) {

@@ -45,13 +45,15 @@ pub mod android_oboe {
     use super::*;
     use oboe::{
         AudioOutputCallback, AudioOutputStream, AudioOutputStreamSafe, AudioStream, AudioStreamAsync,
-        AudioStreamBase, AudioStreamBuilder, DataCallbackResult, Output, PerformanceMode, SharingMode,
+        AudioStreamBase, AudioStreamBuilder, AudioStreamSafe, DataCallbackResult, Output, PerformanceMode, SharingMode,
         Stereo,
     };
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
     struct OboeCallbackWrapper {
         callback: Arc<dyn AudioRenderCallback>,
+        is_disconnected: Arc<AtomicBool>,
     }
 
     impl AudioOutputCallback for OboeCallbackWrapper {
@@ -84,12 +86,14 @@ pub mod android_oboe {
             error: oboe::Error,
         ) {
             log::warn!("Oboe audio stream error after close: {:?}", error);
+            self.is_disconnected.store(true, Ordering::SeqCst);
         }
     }
 
     pub struct AndroidAudioOutput {
         stream: AudioStreamAsync<Output, OboeCallbackWrapper>,
         is_exclusive: bool,
+        is_disconnected: Arc<AtomicBool>,
     }
 
     impl AndroidAudioOutput {
@@ -100,9 +104,11 @@ pub mod android_oboe {
             device_id: Option<i32>,
             buffer_size: Option<u32>,
             callback: Arc<dyn AudioRenderCallback>,
+            is_disconnected: Arc<AtomicBool>,
         ) -> Result<AudioStreamAsync<Output, OboeCallbackWrapper>, OutputError> {
             let cb_wrapper = OboeCallbackWrapper {
                 callback,
+                is_disconnected,
             };
 
             let mut builder = AudioStreamBuilder::default()
@@ -142,6 +148,7 @@ pub mod android_oboe {
             callback: Arc<dyn AudioRenderCallback>,
         ) -> Result<Self, OutputError> {
             let target_rate = config.sample_rate as i32;
+            let is_disconnected = Arc::new(AtomicBool::new(false));
 
             // Tier 1: If exclusive mode was explicitly requested, try Exclusive with LowLatency
             if config.sharing_mode == OutputSharingMode::Exclusive {
@@ -153,10 +160,11 @@ pub mod android_oboe {
                     config.device_id,
                     config.buffer_size_frames,
                     Arc::clone(&callback),
+                    Arc::clone(&is_disconnected),
                 ) {
                     let is_exclusive = stream.get_sharing_mode() == SharingMode::Exclusive;
                     log::info!("Successfully opened AAudio stream (Exclusive: {})", is_exclusive);
-                    return Ok(Self { stream, is_exclusive });
+                    return Ok(Self { stream, is_exclusive, is_disconnected });
                 }
                 log::warn!("AAudio Exclusive stream failed, falling back to Shared mode");
             }
@@ -169,8 +177,9 @@ pub mod android_oboe {
                 config.device_id,
                 None,
                 Arc::clone(&callback),
+                Arc::clone(&is_disconnected),
             ) {
-                return Ok(Self { stream, is_exclusive: false });
+                return Ok(Self { stream, is_exclusive: false, is_disconnected });
             }
 
             // Tier 3: Shared mode at standard 48000 Hz with LowLatency (native Android HAL rate)
@@ -182,8 +191,9 @@ pub mod android_oboe {
                 config.device_id,
                 None,
                 Arc::clone(&callback),
+                Arc::clone(&is_disconnected),
             ) {
-                return Ok(Self { stream, is_exclusive: false });
+                return Ok(Self { stream, is_exclusive: false, is_disconnected });
             }
 
             // Tier 4: Shared mode at 48000 Hz with standard latency (PerformanceMode::None)
@@ -195,8 +205,9 @@ pub mod android_oboe {
                 None,
                 None,
                 Arc::clone(&callback),
+                Arc::clone(&is_disconnected),
             ) {
-                return Ok(Self { stream, is_exclusive: false });
+                return Ok(Self { stream, is_exclusive: false, is_disconnected });
             }
 
             // Tier 5: Safe universal fallback (auto-detect all parameters from Oboe/AAudio)
@@ -208,13 +219,23 @@ pub mod android_oboe {
                 None,
                 None,
                 callback,
+                Arc::clone(&is_disconnected),
             )?;
 
-            Ok(Self { stream, is_exclusive: false })
+            Ok(Self { stream, is_exclusive: false, is_disconnected })
         }
 
         pub fn is_exclusive(&self) -> bool {
             self.is_exclusive
+        }
+
+        pub fn is_alive(&self) -> bool {
+            use oboe::StreamState;
+            !self.is_disconnected.load(Ordering::Relaxed)
+                && matches!(
+                    self.stream.get_state(),
+                    StreamState::Started | StreamState::Starting | StreamState::Paused | StreamState::Pausing
+                )
         }
 
         pub fn sample_rate(&self) -> i32 {
@@ -326,6 +347,10 @@ pub mod desktop_cpal {
 
         pub fn is_exclusive(&self) -> bool {
             false
+        }
+
+        pub fn is_alive(&self) -> bool {
+            self.is_running.load(Ordering::Relaxed)
         }
 
         pub fn sample_rate(&self) -> u32 {

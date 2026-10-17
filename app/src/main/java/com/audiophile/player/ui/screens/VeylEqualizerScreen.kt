@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -32,12 +33,15 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -73,6 +77,10 @@ fun VeylEqualizerScreen(
     val eqState by controller.eqState.collectAsState()
 
     val currentProfileName by controller.currentEqPreset.collectAsState()
+    val customPresets by controller.customEqPresets.collectAsState()
+
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var presetNameInput by remember { mutableStateOf("") }
 
     val presetProfiles = listOf(
         "Flat" to listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f),
@@ -200,12 +208,113 @@ fun VeylEqualizerScreen(
         // 3. Preset Profiles Filter Chips
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Presets",
-                    style = VeylTypography.SectionHeader,
-                    color = colors.textPrimary,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Presets",
+                        style = VeylTypography.SectionHeader,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.accentSignal.copy(alpha = 0.15f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                presetNameInput = ""
+                                showSaveDialog = true
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.Plus,
+                                contentDescription = "Save Preset",
+                                tint = colors.accentSignal,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Save Current",
+                                style = VeylTypography.BodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.accentSignal
+                            )
+                        }
+                    }
+                }
+
+                if (customPresets.isNotEmpty()) {
+                    Text(
+                        text = "CUSTOM PRESETS",
+                        style = VeylTypography.MonoSpec,
+                        color = colors.textMuted,
+                        fontSize = 11.sp
+                    )
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 2.dp)
+                    ) {
+                        items(customPresets, key = { it.id }) { preset ->
+                            val isSelected = currentProfileName == preset.name
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) colors.accentSignal else colors.surfaceElevated,
+                                modifier = Modifier.clip(RoundedCornerShape(12.dp))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            controller.setEqPreset(preset.name, preset.gains)
+                                        }
+                                        .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
+                                ) {
+                                    Text(
+                                        text = preset.name,
+                                        style = VeylTypography.BodySmall,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) colors.surfacePanel else colors.textPrimary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    IconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            controller.deleteCustomEqPreset(preset.id)
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = VeylIcons.Trash,
+                                            contentDescription = "Delete Preset",
+                                            tint = if (isSelected) colors.surfacePanel.copy(alpha = 0.8f) else colors.textMuted,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text(
+                        text = "FACTORY PRESETS",
+                        style = VeylTypography.MonoSpec,
+                        color = colors.textMuted,
+                        fontSize = 11.sp
+                    )
+                }
 
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -356,5 +465,81 @@ fun VeylEqualizerScreen(
         }
 
         item { Spacer(modifier = Modifier.height(100.dp)) }
+    }
+
+    if (showSaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveDialog = false },
+            containerColor = colors.surfacePanel,
+            titleContentColor = colors.textPrimary,
+            textContentColor = colors.textPrimary,
+            title = {
+                Text(
+                    text = "Save Custom Preset",
+                    style = VeylTypography.TitleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Save current 10-band equalizer settings as a personalized sound profile.",
+                        style = VeylTypography.BodySmall,
+                        color = colors.textMuted
+                    )
+                    OutlinedTextField(
+                        value = presetNameInput,
+                        onValueChange = { presetNameInput = it },
+                        placeholder = {
+                            Text(
+                                "Preset Name (e.g. Warm Bass)",
+                                color = colors.textMuted
+                            )
+                        },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = colors.accentSignal,
+                            unfocusedBorderColor = colors.borderHairline,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary,
+                            cursorColor = colors.accentSignal
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = presetNameInput.trim()
+                        if (trimmed.isNotEmpty()) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            val saved = controller.saveCustomEqPreset(trimmed, currentBands)
+                            controller.setEqPreset(saved.name, saved.gains)
+                            showSaveDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accentSignal),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "Save",
+                        color = colors.surfacePanel,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showSaveDialog = false }
+                ) {
+                    Text(
+                        text = "Cancel",
+                        color = colors.textMuted
+                    )
+                }
+            }
+        )
     }
 }

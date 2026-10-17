@@ -145,12 +145,9 @@ impl StreamResampler {
                 }
                 Err(e) => {
                     log::warn!("Rubato resampler error: {:?}", e);
-                    // On error, pass through unresampled as fallback
-                    for f in 0..self.chunk_size {
-                        for ch in 0..self.channels {
-                            output_interleaved.push(chunk_input[ch][f]);
-                        }
-                    }
+                    // On error, output silence rather than raw unresampled frames of the wrong sample rate
+                    output_interleaved.extend(std::iter::repeat(0.0f32).take(self.chunk_size * self.channels));
+                    self.inner.reset();
                 }
             }
         }

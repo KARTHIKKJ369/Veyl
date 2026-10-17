@@ -347,6 +347,11 @@ impl PlaybackEngine {
                             }
                         }
 
+                        if track_sample_rate == 0 {
+                            let dec_guard = active_decoder.lock();
+                            track_sample_rate = dec_guard.as_ref().map(|d| d.info().sample_rate).unwrap_or(44100);
+                        }
+
                         // Resample if necessary to match hardware output rate
                         let resampled = if !is_dop && track_sample_rate > 0 && output_rate > 0 && track_sample_rate != output_rate {
                             let mut res_guard = resampler.lock();

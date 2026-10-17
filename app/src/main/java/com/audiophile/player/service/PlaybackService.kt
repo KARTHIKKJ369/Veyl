@@ -94,7 +94,6 @@ class PlaybackService : MediaBrowserServiceCompat() {
                     }
                     if (shouldResume || hadCall) {
                         delay(50)
-                        engineController.refreshHardwareOutput()
                         engineController.play()
                     }
                 }

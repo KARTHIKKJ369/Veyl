@@ -199,15 +199,15 @@ impl AudiophileEngineHandle {
         #[cfg(target_os = "android")]
         {
             let mut out_guard = self.audio_output.lock();
+            if let Some(mut old_stream) = out_guard.take() {
+                let _ = old_stream.stop();
+            }
             let new_stream = output::android_oboe::AndroidAudioOutput::open(
                 config,
                 Arc::clone(&self.engine) as Arc<dyn output::AudioRenderCallback>,
             );
             match new_stream {
                 Ok(s) => {
-                    if let Some(mut old_stream) = out_guard.take() {
-                        let _ = old_stream.stop();
-                    }
                     let actual_rate = s.sample_rate() as f32;
                     self.engine.set_output_sample_rate(actual_rate);
                     *out_guard = Some(s);
