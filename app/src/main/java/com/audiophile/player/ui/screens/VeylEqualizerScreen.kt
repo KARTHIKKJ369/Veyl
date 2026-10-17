@@ -1,6 +1,7 @@
 package com.audiophile.player.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -55,9 +57,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Locale
 import com.audiophile.player.engine.AudioEngineController
 import com.audiophile.player.ui.components.EqualizerWaveform
 import com.audiophile.player.ui.theme.LocalVeylColors
@@ -81,6 +85,9 @@ fun VeylEqualizerScreen(
 
     var showSaveDialog by remember { mutableStateOf(false) }
     var presetNameInput by remember { mutableStateOf("") }
+
+    var selectedBandForManualInput by remember { mutableStateOf<Int?>(null) }
+    var manualGainInput by remember { mutableStateOf("") }
 
     val presetProfiles = listOf(
         "Flat" to listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f),
@@ -349,14 +356,14 @@ fun VeylEqualizerScreen(
             }
         }
 
-        // 4. Smooth Parametric EQ Response Waveform Curve
+        // 4. Smooth Parametric EQ Response Waveform Curve (Interactive)
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = colors.surfacePanel),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
+                    .height(200.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -367,13 +374,39 @@ fun VeylEqualizerScreen(
                         bands = currentBands,
                         valueRange = -12f..12f,
                         enabled = eqState.enabled,
+                        onBandGainChange = { bandIndex, newGain ->
+                            controller.setEqBandGain(bandIndex, newGain)
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
+
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(colors.surfaceElevated.copy(alpha = 0.85f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = VeylIcons.Edit,
+                            contentDescription = null,
+                            tint = colors.accentSignal,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            text = if (eqState.enabled) "Drag points on curve to shape" else "EQ Bypassed",
+                            style = VeylTypography.MonoSpec,
+                            fontSize = 10.sp,
+                            color = if (eqState.enabled) colors.textPrimary else colors.textMuted
+                        )
+                    }
                 }
             }
         }
 
-        // 5. 10-Band Sliders
+        // 5. 10-Band Sliders with Precision Steppers & Direct Numeric Entry
         item {
             Text(
                 text = "10-Band Frequency Adjustments",
@@ -388,56 +421,158 @@ fun VeylEqualizerScreen(
             val gainValue = eqState.bands.getOrNull(index)?.gainDb ?: 0f
 
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = colors.surfacePanel),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Frequency Label
-                    Text(
-                        text = freqLabel,
-                        style = VeylTypography.MonoSpec,
-                        color = colors.textPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.width(64.dp)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = freqLabel,
+                                style = VeylTypography.TitleMedium,
+                                color = colors.textPrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (gainValue != 0f && eqState.enabled) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = colors.surfaceElevated,
+                                    modifier = Modifier.clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        controller.setEqBandGain(index, 0f)
+                                    }
+                                ) {
+                                    Text(
+                                        text = "Reset 0dB",
+                                        style = VeylTypography.MonoSpec,
+                                        fontSize = 10.sp,
+                                        color = colors.textMuted,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
 
-                    // Continuous Slider (-12 dB to +12 dB)
-                    Slider(
-                        value = gainValue,
-                        onValueChange = { newGain ->
-                            controller.setEqBandGain(index, newGain)
-                        },
-                        valueRange = -12f..12f,
-                        enabled = eqState.enabled,
-                        modifier = Modifier.weight(1f),
-                        colors = SliderDefaults.colors(
-                            thumbColor = colors.accentSignal,
-                            activeTrackColor = colors.accentSignal,
-                            inactiveTrackColor = colors.surfaceElevated,
-                            disabledThumbColor = colors.textMuted,
-                            disabledActiveTrackColor = colors.borderHairline,
-                            disabledInactiveTrackColor = colors.surfaceElevated
+                        // Interactive Gain Readout Pill -> Tap to manually enter numeric value
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (gainValue != 0f && eqState.enabled) colors.accentSignal.copy(alpha = 0.15f) else colors.surfaceElevated,
+                            border = BorderStroke(
+                                1.dp,
+                                if (gainValue != 0f && eqState.enabled) colors.accentSignal.copy(alpha = 0.5f) else colors.borderHairline
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = eqState.enabled) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedBandForManualInput = index
+                                    manualGainInput = if (gainValue == 0f) "0" else String.format(Locale.US, "%.1f", gainValue)
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = String.format(Locale.US, "%+.1f dB", gainValue),
+                                    style = VeylTypography.MonoSpec,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (gainValue != 0f && eqState.enabled) colors.accentSignal else colors.textMuted
+                                )
+                                Icon(
+                                    imageVector = VeylIcons.Edit,
+                                    contentDescription = "Edit value",
+                                    tint = if (gainValue != 0f && eqState.enabled) colors.accentSignal else colors.textMuted,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Stepper minus [-0.5] + Slider + Stepper plus [+0.5]
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = colors.surfaceElevated,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = eqState.enabled && gainValue > -12f) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    val next = (Math.round((gainValue - 0.5f) * 2) / 2.0f).coerceIn(-12f, 12f)
+                                    controller.setEqBandGain(index, next)
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "−",
+                                    style = VeylTypography.TitleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (eqState.enabled && gainValue > -12f) colors.textPrimary else colors.textMuted
+                                )
+                            }
+                        }
+
+                        Slider(
+                            value = gainValue,
+                            onValueChange = { newGain ->
+                                val rounded = Math.round(newGain * 2) / 2.0f
+                                controller.setEqBandGain(index, rounded)
+                            },
+                            valueRange = -12f..12f,
+                            enabled = eqState.enabled,
+                            modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(
+                                thumbColor = colors.accentSignal,
+                                activeTrackColor = colors.accentSignal,
+                                inactiveTrackColor = colors.surfaceElevated,
+                                disabledThumbColor = colors.textMuted,
+                                disabledActiveTrackColor = colors.borderHairline,
+                                disabledInactiveTrackColor = colors.surfaceElevated
+                            )
                         )
-                    )
 
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    // Gain readout
-                    Text(
-                        text = String.format("%+.1f dB", gainValue),
-                        style = VeylTypography.MonoSpec,
-                        color = if (gainValue != 0f && eqState.enabled) colors.accentSignal else colors.textMuted,
-                        fontSize = 11.sp,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier.width(60.dp)
-                    )
+                        Surface(
+                            shape = CircleShape,
+                            color = colors.surfaceElevated,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = eqState.enabled && gainValue < 12f) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    val next = (Math.round((gainValue + 0.5f) * 2) / 2.0f).coerceIn(-12f, 12f)
+                                    controller.setEqBandGain(index, next)
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "+",
+                                    style = VeylTypography.TitleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (eqState.enabled && gainValue < 12f) colors.textPrimary else colors.textMuted
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -538,6 +673,106 @@ fun VeylEqualizerScreen(
                         text = "Cancel",
                         color = colors.textMuted
                     )
+                }
+            }
+        )
+    }
+
+    if (selectedBandForManualInput != null) {
+        val bandIdx = selectedBandForManualInput!!
+        val freqLabel = bandFrequencies.getOrNull(bandIdx) ?: "Band ${bandIdx + 1}"
+        AlertDialog(
+            onDismissRequest = { selectedBandForManualInput = null },
+            containerColor = colors.surfacePanel,
+            titleContentColor = colors.textPrimary,
+            textContentColor = colors.textPrimary,
+            title = {
+                Text(
+                    text = "Set Gain for $freqLabel",
+                    style = VeylTypography.TitleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Enter a precise gain value between -12.0 dB and +12.0 dB:",
+                        style = VeylTypography.BodySmall,
+                        color = colors.textMuted
+                    )
+
+                    OutlinedTextField(
+                        value = manualGainInput,
+                        onValueChange = { manualGainInput = it },
+                        placeholder = { Text("0.0", color = colors.textMuted) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = colors.accentSignal,
+                            unfocusedBorderColor = colors.borderHairline,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary,
+                            cursorColor = colors.accentSignal
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Text(
+                        text = "QUICK VALUES",
+                        style = VeylTypography.MonoSpec,
+                        fontSize = 10.sp,
+                        color = colors.textMuted
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        listOf(-6f, -3f, 0f, 3f, 6f).forEach { qVal ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = colors.surfaceElevated,
+                                modifier = Modifier.clickable {
+                                    manualGainInput = String.format(Locale.US, "%.1f", qVal)
+                                }
+                            ) {
+                                Text(
+                                    text = String.format(Locale.US, "%+.0f dB", qVal),
+                                    style = VeylTypography.MonoSpec,
+                                    fontSize = 11.sp,
+                                    color = if (qVal == 0f) colors.textPrimary else colors.accentSignal,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val parsed = manualGainInput.trim().toFloatOrNull()
+                        if (parsed != null) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            val clamped = parsed.coerceIn(-12f, 12f)
+                            controller.setEqBandGain(bandIdx, clamped)
+                            selectedBandForManualInput = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accentSignal),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "Apply",
+                        color = colors.surfacePanel,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedBandForManualInput = null }) {
+                    Text("Cancel", color = colors.textMuted)
                 }
             }
         )

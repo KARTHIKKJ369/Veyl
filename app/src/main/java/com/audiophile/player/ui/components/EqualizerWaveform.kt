@@ -1,9 +1,15 @@
 package com.audiophile.player.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -12,8 +18,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.audiophile.player.ui.theme.LocalVeylColors
+import kotlin.math.roundToInt
 
 @Composable
 fun EqualizerWaveform(
@@ -26,7 +34,8 @@ fun EqualizerWaveform(
     color: Color = LocalVeylColors.current.accentSignal,
     fillColor: Color = color.copy(alpha = 0.25f),
     strokeWidth: Float = 4f,
-    smoothingTension: Float = 0.22f
+    smoothingTension: Float = 0.22f,
+    onBandGainChange: ((index: Int, gainDb: Float) -> Unit)? = null
 ) {
     if (bands.isEmpty()) return
 
@@ -38,7 +47,58 @@ fun EqualizerWaveform(
     val maxGain = valueRange.endInclusive
     val rangeSize = (maxGain - minGain).coerceAtLeast(0.001f)
 
-    Canvas(modifier = modifier) {
+    var activeNodeIndex by remember { mutableStateOf<Int?>(null) }
+
+    val interactionModifier = if (enabled && onBandGainChange != null) {
+        modifier
+            .pointerInput(bands, valueRange) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        val width = size.width.toFloat()
+                        val height = size.height.toFloat()
+                        if (width > 0f && bands.isNotEmpty()) {
+                            val nearestIdx = if (bands.size > 1) {
+                                ((offset.x / width) * (bands.size - 1)).roundToInt().coerceIn(0, bands.size - 1)
+                            } else 0
+                            activeNodeIndex = nearestIdx
+                            val newGain = minGain + (1f - (offset.y / height).coerceIn(0f, 1f)) * rangeSize
+                            val roundedGain = (Math.round(newGain * 2) / 2.0f).coerceIn(minGain, maxGain)
+                            onBandGainChange(nearestIdx, roundedGain)
+                        }
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        val idx = activeNodeIndex
+                        val height = size.height.toFloat()
+                        if (idx != null && height > 0f) {
+                            val newGain = minGain + (1f - (change.position.y / height).coerceIn(0f, 1f)) * rangeSize
+                            val roundedGain = (Math.round(newGain * 2) / 2.0f).coerceIn(minGain, maxGain)
+                            onBandGainChange(idx, roundedGain)
+                        }
+                    },
+                    onDragEnd = { activeNodeIndex = null },
+                    onDragCancel = { activeNodeIndex = null }
+                )
+            }
+            .pointerInput(bands, valueRange) {
+                detectTapGestures { offset ->
+                    val width = size.width.toFloat()
+                    val height = size.height.toFloat()
+                    if (width > 0f && bands.isNotEmpty()) {
+                        val nearestIdx = if (bands.size > 1) {
+                            ((offset.x / width) * (bands.size - 1)).roundToInt().coerceIn(0, bands.size - 1)
+                        } else 0
+                        val newGain = minGain + (1f - (offset.y / height).coerceIn(0f, 1f)) * rangeSize
+                        val roundedGain = (Math.round(newGain * 2) / 2.0f).coerceIn(minGain, maxGain)
+                        onBandGainChange(nearestIdx, roundedGain)
+                    }
+                }
+            }
+    } else {
+        modifier
+    }
+
+    Canvas(modifier = interactionModifier) {
         val width = size.width
         val height = size.height
 
@@ -114,17 +174,36 @@ fun EqualizerWaveform(
             )
 
             // Dynamic Band Node Dots
-            points.forEach { point ->
-                drawCircle(
-                    color = actualColor,
-                    radius = strokeWidth * 1.6f,
-                    center = point
-                )
-                drawCircle(
-                    color = Color.White,
-                    radius = strokeWidth * 0.7f,
-                    center = point
-                )
+            points.forEachIndexed { index, point ->
+                val isActive = index == activeNodeIndex
+                if (isActive) {
+                    drawCircle(
+                        color = actualColor.copy(alpha = 0.35f),
+                        radius = strokeWidth * 4f,
+                        center = point
+                    )
+                    drawCircle(
+                        color = actualColor,
+                        radius = strokeWidth * 2.2f,
+                        center = point
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = strokeWidth * 1.0f,
+                        center = point
+                    )
+                } else {
+                    drawCircle(
+                        color = actualColor,
+                        radius = strokeWidth * 1.6f,
+                        center = point
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = strokeWidth * 0.7f,
+                        center = point
+                    )
+                }
             }
         }
     }

@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,16 +34,22 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.audiophile.player.engine.AsyncAlbumArt
@@ -83,11 +90,27 @@ fun VeylQueueScreen(
         if (it.isNaN() || it < 0f) 0f else it.coerceIn(0f, 1f)
     }
 
+    val density = LocalDensity.current
+    val itemHeightPx = with(density) { 68.dp.toPx() }
+
+    var draggingItemIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffsetY by remember { mutableStateOf(0f) }
+
     // Calculate total remaining queue duration without O(N) recalculation on position ticks
     val restQueueSec = remember(queue, currentTrack?.uri) {
         queue.filter { it.uri != currentTrack?.uri }.sumOf { it.durationSeconds }
     }
     val totalRemainingSeconds = (durationSec - positionSec).coerceAtLeast(0.0) + restQueueSec
+
+    val queueKeys = remember(queue) {
+        val seen = mutableMapOf<String, Int>()
+        queue.map { track ->
+            val base = "${track.uri}_${System.identityHashCode(track)}"
+            val count = seen.getOrDefault(base, 0)
+            seen[base] = count + 1
+            if (count == 0) base else "${base}_$count"
+        }
+    }
 
     val formattedRemainingTime = remember(totalRemainingSeconds.toInt()) {
         val totalSec = totalRemainingSeconds.toInt()
@@ -325,15 +348,61 @@ fun VeylQueueScreen(
             } else {
                 itemsIndexed(
                     items = queue,
-                    key = { index, track -> "${track.uri}_$index" }
+                    key = { index, _ -> if (index in queueKeys.indices) queueKeys[index] else index }
                 ) { index, track ->
                     val isCurrent = currentTrack?.uri == track.uri
+                    val isDragging = draggingItemIndex == index
+
+                    val dragHandleModifier = Modifier.pointerInput(track) {
+                        detectDragGestures(
+                            onDragStart = {
+                                val curIdx = queue.indexOfFirst { it === track }.takeIf { it != -1 } ?: index
+                                draggingItemIndex = curIdx
+                                dragOffsetY = 0f
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                dragOffsetY += dragAmount.y
+                                val threshold = itemHeightPx * 0.55f
+                                var cur = draggingItemIndex ?: queue.indexOfFirst { it === track }
+                                if (cur != -1) {
+                                    while (dragOffsetY > threshold && cur < queue.size - 1) {
+                                        controller.moveInQueue(cur, cur + 1)
+                                        cur += 1
+                                        draggingItemIndex = cur
+                                        dragOffsetY -= itemHeightPx
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                    while (dragOffsetY < -threshold && cur > 0) {
+                                        controller.moveInQueue(cur, cur - 1)
+                                        cur -= 1
+                                        draggingItemIndex = cur
+                                        dragOffsetY += itemHeightPx
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                }
+                            },
+                            onDragEnd = {
+                                draggingItemIndex = null
+                                dragOffsetY = 0f
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            },
+                            onDragCancel = {
+                                draggingItemIndex = null
+                                dragOffsetY = 0f
+                            }
+                        )
+                    }
 
                     QueueTrackRow(
                         index = index + 1,
                         track = track,
                         isCurrent = isCurrent,
                         isPlaying = isCurrent && isPlaying,
+                        isDragging = isDragging,
+                        dragOffsetY = if (isDragging) dragOffsetY else 0f,
+                        dragHandleModifier = dragHandleModifier,
                         onPlay = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             controller.playTrack(track)
@@ -341,19 +410,7 @@ fun VeylQueueScreen(
                         onRemove = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             controller.removeFromQueue(index)
-                        },
-                        onMoveUp = if (index > 0) {
-                            {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                controller.moveInQueue(index, index - 1)
-                            }
-                        } else null,
-                        onMoveDown = if (index < queue.size - 1) {
-                            {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                controller.moveInQueue(index, index + 1)
-                            }
-                        } else null
+                        }
                     )
                 }
             }
@@ -530,10 +587,11 @@ private fun QueueTrackRow(
     track: TrackInfo,
     isCurrent: Boolean,
     isPlaying: Boolean,
+    isDragging: Boolean = false,
+    dragOffsetY: Float = 0f,
+    dragHandleModifier: Modifier = Modifier,
     onPlay: () -> Unit,
-    onRemove: () -> Unit,
-    onMoveUp: (() -> Unit)? = null,
-    onMoveDown: (() -> Unit)? = null
+    onRemove: () -> Unit
 ) {
     val colors = LocalVeylColors.current
 
@@ -554,11 +612,18 @@ private fun QueueTrackRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .zIndex(if (isDragging) 10f else 1f)
+            .graphicsLayer {
+                translationY = if (isDragging) dragOffsetY else 0f
+                scaleX = if (isDragging) 1.02f else 1f
+                scaleY = if (isDragging) 1.02f else 1f
+                shadowElevation = if (isDragging) 24f else 0f
+            }
             .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-            .background(if (isCurrent) colors.surfaceElevated else colors.surfacePanel.copy(alpha = 0.6f))
+            .background(if (isDragging) colors.surfaceElevated else if (isCurrent) colors.surfaceElevated else colors.surfacePanel.copy(alpha = 0.6f))
             .border(
                 1.dp,
-                if (isCurrent) colors.borderActive else colors.borderHairline,
+                if (isDragging || isCurrent) colors.borderActive else colors.borderHairline,
                 RoundedCornerShape(VeylSpacing.RadiusMd)
             )
             .clickable(onClick = onPlay)
@@ -572,7 +637,7 @@ private fun QueueTrackRow(
         Text(
             text = "%02d".format(index),
             style = VeylTypography.MonoSpec,
-            color = if (isCurrent) colors.accentSignal else colors.textMuted,
+            color = if (isDragging || isCurrent) colors.accentSignal else colors.textMuted,
             modifier = Modifier.width(24.dp)
         )
 
@@ -585,7 +650,7 @@ private fun QueueTrackRow(
                 .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
                 .border(
                     1.dp,
-                    if (isCurrent) colors.accentSignal else colors.borderHairline,
+                    if (isDragging || isCurrent) colors.accentSignal else colors.borderHairline,
                     RoundedCornerShape(VeylSpacing.RadiusSm)
                 )
         ) {
@@ -607,7 +672,7 @@ private fun QueueTrackRow(
             Text(
                 text = track.title,
                 style = VeylTypography.TitleMedium,
-                color = if (isCurrent) colors.accentSignal else colors.textPrimary,
+                color = if (isDragging || isCurrent) colors.accentSignal else colors.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -650,32 +715,6 @@ private fun QueueTrackRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            if (onMoveUp != null) {
-                IconButton(
-                    onClick = onMoveUp,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = VeylIcons.ChevronUp,
-                        contentDescription = "Move up",
-                        tint = colors.textMuted,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-            if (onMoveDown != null) {
-                IconButton(
-                    onClick = onMoveDown,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = VeylIcons.ChevronDown,
-                        contentDescription = "Move down",
-                        tint = colors.textMuted,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
             IconButton(
                 onClick = onRemove,
                 modifier = Modifier.size(32.dp)
@@ -685,6 +724,28 @@ private fun QueueTrackRow(
                     contentDescription = "Remove from queue",
                     tint = colors.textMuted,
                     modifier = Modifier.size(16.dp)
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                    .background(if (isDragging) colors.surfaceElevated else colors.glassButtonBg)
+                    .border(
+                        1.dp,
+                        if (isDragging) colors.borderActive else colors.borderHairline,
+                        RoundedCornerShape(VeylSpacing.RadiusSm)
+                    )
+                    .then(dragHandleModifier)
+                    .padding(6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = VeylIcons.DragHandle,
+                    contentDescription = "Drag to reorder",
+                    tint = if (isDragging) colors.accentSignal else colors.textSecondary,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
