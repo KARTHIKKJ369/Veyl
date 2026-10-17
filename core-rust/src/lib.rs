@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 
 uniffi::setup_scaffolding!();
 
-#[derive(uniffi::Record, Clone, Debug)]
+#[derive(uniffi::Record, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TrackInfo {
     pub uri: String,
     pub title: String,
@@ -33,13 +33,13 @@ pub struct TrackInfo {
     pub has_artwork: bool,
 }
 
-#[derive(uniffi::Record, Clone, Debug)]
+#[derive(uniffi::Record, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AlbumArtworkData {
     pub mime_type: String,
     pub data: Vec<u8>,
 }
 
-#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PlaybackStateEnum {
     Stopped,
     Playing,
@@ -50,7 +50,7 @@ pub enum PlaybackStateEnum {
     Error,
 }
 
-#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DsdModeEnum {
     /// High-precision Sinc-FIR decimation to PCM (88.2 kHz, 176.4 kHz, etc.) with SACD +6dB boost
     PcmDecimation,
@@ -58,7 +58,7 @@ pub enum DsdModeEnum {
     DoP,
 }
 
-#[derive(uniffi::Record, Clone, Debug)]
+#[derive(uniffi::Record, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AudioMetrics {
     pub rms_left: f32,
     pub rms_right: f32,
@@ -67,7 +67,7 @@ pub struct AudioMetrics {
     pub spectrum_16: Vec<f32>,
 }
 
-#[derive(uniffi::Record, Clone, Debug)]
+#[derive(uniffi::Record, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EngineStatus {
     pub state: PlaybackStateEnum,
     pub current_track: Option<TrackInfo>,
@@ -84,7 +84,7 @@ pub struct EngineStatus {
     pub metrics: AudioMetrics,
 }
 
-#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FilterTypeEnum {
     Peaking,
     LowShelf,
@@ -95,7 +95,7 @@ pub enum FilterTypeEnum {
     BandPass,
 }
 
-#[derive(uniffi::Record, Clone, Debug)]
+#[derive(uniffi::Record, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EqBandInfo {
     pub index: u32,
     pub enabled: bool,
@@ -105,7 +105,7 @@ pub struct EqBandInfo {
     pub q: f32,
 }
 
-#[derive(uniffi::Record, Clone, Debug)]
+#[derive(uniffi::Record, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FrequencyPoint {
     pub frequency: f32,
     pub gain_db: f32,

@@ -39,6 +39,9 @@ thiserror = "1.0.63"
 num-complex = "0.4.6"
 rand = "0.8.5"
 
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+
 # UniFFI for Kotlin bindings
 uniffi = { version = "0.28.3", features = ["cli", "tokio"] }
 tokio = { version = "1.40.0", features = ["sync", "rt"], optional = true }
