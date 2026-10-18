@@ -127,7 +127,8 @@
   let bitDepth = $state<number | null>(16);
   let codecName = $state('FLAC/PCM');
   let isBitPerfect = $state(true);
-  let spectrum16 = $state<number[]>(new Array(16).fill(0));
+  const ZERO_SPECTRUM = new Array(16).fill(0);
+  let spectrum16 = $state<number[]>(ZERO_SPECTRUM);
   let rmsLeft = $state(0);
   let rmsRight = $state(0);
   let peakLeft = $state(0);
@@ -218,8 +219,9 @@
     if (album.firstTrack && trackArtworkMap.get(album.firstTrack.uri)) {
       return trackArtworkMap.get(album.firstTrack.uri) || null;
     }
-    for (const t of album.tracks) {
-      const art = trackArtworkMap.get(t.uri);
+    const maxCheck = Math.min(album.tracks.length, 3);
+    for (let i = 0; i < maxCheck; i++) {
+      const art = trackArtworkMap.get(album.tracks[i].uri);
       if (art) return art;
     }
     return null;
@@ -268,8 +270,9 @@
     if (art.firstTrack && trackArtworkMap.get(art.firstTrack.uri)) {
       return trackArtworkMap.get(art.firstTrack.uri) || null;
     }
-    for (const t of art.tracks) {
-      const a = trackArtworkMap.get(t.uri);
+    const maxCheck = Math.min(art.tracks.length, 3);
+    for (let i = 0; i < maxCheck; i++) {
+      const a = trackArtworkMap.get(art.tracks[i].uri);
       if (a) return a;
     }
     return null;
@@ -471,21 +474,10 @@
       if (!uri) break;
       activeArtworkWorkers++;
       api.getTrackArtwork(uri)
-        .then(async (art) => {
+        .then((art) => {
           if (art) {
             trackArtworkMap.set(uri, art);
           } else {
-            // Local track has no embedded or folder art, resolve online cover
-            const track = libraryTracks.find((t) => t.uri === uri);
-            if (track && track.title) {
-              try {
-                const onlineArt = await api.resolveTrackArtwork(track.title, track.artist || '');
-                if (onlineArt) {
-                  trackArtworkMap.set(uri, onlineArt);
-                  return;
-                }
-              } catch {}
-            }
             trackArtworkMap.set(uri, null);
           }
         })
@@ -495,7 +487,7 @@
         .finally(() => {
           artworkPending.delete(uri);
           activeArtworkWorkers--;
-          setTimeout(processArtworkQueue, 16);
+          setTimeout(processArtworkQueue, 24);
         });
     }
   }
@@ -580,11 +572,6 @@
         const results = await api.searchCloudTracks(q);
         if (searchQuery.trim() === q) {
           globalCloudResults = results || [];
-          for (const res of globalCloudResults) {
-            if (res.thumbnail_url && res.stream_url) {
-              trackArtworkMap.set(res.stream_url, res.thumbnail_url);
-            }
-          }
         }
       } catch (err) {
         console.error('Online search failed:', err);
@@ -825,8 +812,11 @@
   }
 
   let isSyncingEngine = false;
+  let pollTimeout: any = null;
+  let isComponentAlive = true;
+
   async function syncEngineStatus() {
-    if (isSyncingEngine) return;
+    if (isSyncingEngine || !isComponentAlive) return;
     isSyncingEngine = true;
     try {
       const status: EngineStatus = await api.getEngineStatus();
@@ -839,7 +829,11 @@
       isBitPerfect = status.is_bit_perfect;
 
       if (status.metrics) {
-        spectrum16 = status.metrics.spectrum_16 ?? new Array(16).fill(0);
+        if (status.state === 'Playing' && status.metrics.spectrum_16) {
+          spectrum16 = status.metrics.spectrum_16;
+        } else if (spectrum16 !== ZERO_SPECTRUM && spectrum16.some((v) => v !== 0)) {
+          spectrum16 = ZERO_SPECTRUM;
+        }
         rmsLeft = status.metrics.rms_left ?? 0;
         rmsRight = status.metrics.rms_right ?? 0;
         peakLeft = status.metrics.peak_left ?? 0;
@@ -865,6 +859,16 @@
     } finally {
       isSyncingEngine = false;
     }
+  }
+
+  function scheduleEnginePoll() {
+    if (!isComponentAlive) return;
+    if (pollTimeout) clearTimeout(pollTimeout);
+    const intervalMs = isPlaying ? 220 : 600;
+    pollTimeout = setTimeout(async () => {
+      await syncEngineStatus();
+      scheduleEnginePoll();
+    }, intervalMs);
   }
 
   function handleTrackEnded() {
@@ -1811,14 +1815,48 @@
     }
   }
 
+  function handleGoHome() {
+    activeTab = 'cloud';
+    selectedAlbum = null;
+    selectedArtist = null;
+    selectedPlaylistId = null;
+    selectedHomeCategory = 'all';
+    searchQuery = '';
+    isSearchSubmitted = false;
+    showSearchSuggestions = false;
+    showHomeSortMenu = false;
+    showLibraryAddMenu = false;
+    if (typeof document !== 'undefined') {
+      const panel = document.querySelector('.content-panel');
+      if (panel) {
+        panel.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  }
+
+  function handleGlobalClick(e: MouseEvent) {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (showSearchSuggestions && !target.closest('.search-pill-container')) {
+      showSearchSuggestions = false;
+    }
+    if (showLibraryAddMenu && !target.closest('.relative-wrap')) {
+      showLibraryAddMenu = false;
+    }
+    if (showHomeSortMenu && !target.closest('.home-sort-dropdown-wrap')) {
+      showHomeSortMenu = false;
+    }
+  }
+
   onMount(() => {
     // Restore Appearance (Dark / Light)
     const savedDark = localStorage.getItem('veyl_dark_mode');
     isDarkMode = savedDark !== 'false';
     applyAppearance(isDarkMode);
 
-    // Register global desktop keyboard controls
+    // Register global desktop keyboard & click controls
     window.addEventListener('keydown', handleKeydown);
+    window.addEventListener('click', handleGlobalClick);
 
     // Restore favorites
     try {
@@ -1870,14 +1908,17 @@
     } catch {}
 
     refreshEqualizer();
-    syncEngineStatus();
-    pollInterval = setInterval(syncEngineStatus, 140);
+    isComponentAlive = true;
+    syncEngineStatus().then(() => scheduleEnginePoll());
     loadCloudFeed();
   });
 
   onDestroy(() => {
-    window.removeEventListener('keydown', handleKeydown);
+    isComponentAlive = false;
+    if (pollTimeout) clearTimeout(pollTimeout);
     if (pollInterval) clearInterval(pollInterval);
+    window.removeEventListener('keydown', handleKeydown);
+    window.removeEventListener('click', handleGlobalClick);
   });
 </script>
 
@@ -1892,18 +1933,14 @@
   <!-- Top Navigation & Clean Workspace Header -->
   <!-- Top Navigation Bar: Spotify Centered Pill Search & Home -->
   <header class="top-bar">
-    <!-- Left: App Brand, Sidebar Toggle, & Circular Home Button -->
+    <!-- Left: App Brand as Home Button & Sidebar Toggle Pill -->
     <div class="top-bar-left">
       <button
         class="brand-badge-btn"
-        onclick={() => {
-          activeTab = 'cloud';
-          selectedAlbum = null;
-          selectedArtist = null;
-          selectedPlaylistId = null;
-          searchQuery = '';
-        }}
-        title="Veyl Music"
+        class:active={activeTab === 'cloud' && !selectedAlbum && !selectedArtist && !selectedPlaylistId && !searchQuery}
+        onclick={handleGoHome}
+        title="Home"
+        aria-label="Home"
       >
         <img src="/logo.png" alt="Veyl Logo" class="brand-icon" />
       </button>
@@ -1917,23 +1954,6 @@
         aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
         <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.sidebar}/></svg>
-      </button>
-
-      <!-- Circular Home Button (Exact Spotify desktop signature) -->
-      <button
-        class="home-circle-btn"
-        class:active={activeTab === 'cloud' && !selectedAlbum && !selectedArtist && !selectedPlaylistId && !searchQuery}
-        onclick={() => {
-          activeTab = 'cloud';
-          selectedAlbum = null;
-          selectedArtist = null;
-          selectedPlaylistId = null;
-          searchQuery = '';
-        }}
-        title="Home"
-        aria-label="Home"
-      >
-        <svg class="icon" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.home}/></svg>
       </button>
     </div>
 
@@ -2103,13 +2123,8 @@
         <div class="library-header">
           <button
             class="library-title-btn"
-            onclick={() => {
-              activeTab = 'songs';
-              selectedAlbum = null;
-              selectedArtist = null;
-              selectedPlaylistId = null;
-            }}
-            title="Your Library"
+            onclick={() => (isSidebarCollapsed = !isSidebarCollapsed)}
+            title="Collapse Your Library"
           >
             <svg class="icon" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.library}/></svg>
             <span class="library-title">Your Library</span>
@@ -2175,12 +2190,12 @@
               {/if}
             </div>
 
-            <!-- Collapse Sidebar Button -->
+            <!-- Collapse Sidebar Button (Toggle) -->
             <button
               class="icon-btn-ghost collapse-toggle-btn"
-              onclick={() => (isSidebarCollapsed = true)}
-              title="Collapse sidebar"
-              aria-label="Collapse sidebar"
+              onclick={() => (isSidebarCollapsed = !isSidebarCollapsed)}
+              title="Collapse Your Library"
+              aria-label="Collapse Your Library"
             >
               <svg class="icon" viewBox="0 0 24 24">
                 <path fill="currentColor" d={ICONS.chevronLeft}/>
@@ -2349,6 +2364,86 @@
         <span class="dot-live"></span>
         <span class="dac-text">{formatBadge}</span>
       </div>
+    {:else}
+      <!-- Collapsed Sidebar Mini-Rail: Always-Visible Library Toggle & Mini Library Items -->
+      <div class="sidebar-mini-rail">
+        <!-- Always-Visible Expand Toggle Button -->
+        <button
+          class="sidebar-mini-toggle-btn"
+          onclick={() => (isSidebarCollapsed = false)}
+          title="Expand Your Library"
+          aria-label="Expand Your Library"
+        >
+          <svg class="icon" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.library}/></svg>
+        </button>
+
+        <div class="sidebar-mini-divider"></div>
+
+        <div class="sidebar-mini-list">
+          <!-- Liked Songs Tile -->
+          <button
+            class="sidebar-mini-item"
+            class:active={activeTab === 'favorites'}
+            onclick={() => {
+              activeTab = 'favorites';
+              selectedAlbum = null;
+              selectedArtist = null;
+              selectedPlaylistId = null;
+            }}
+            title="Liked Songs ({favorites.size})"
+            aria-label="Liked Songs"
+          >
+            <div class="mini-liked-tile">
+              <svg class="icon-sm" viewBox="0 0 24 24"><path fill="#ffffff" d={ICONS.heartFilled}/></svg>
+            </div>
+          </button>
+
+          <!-- Quick library items (Playlists, Albums, Artists) -->
+          {#each filteredLibraryItems.filter((item) => item.type !== 'liked').slice(0, 10) as item (item.id)}
+            <button
+              class="sidebar-mini-item"
+              class:active={
+                (item.type === 'playlist' && selectedPlaylistId === item.id) ||
+                (item.type === 'album' && selectedAlbum === item.title) ||
+                (item.type === 'artist' && selectedArtist === item.title)
+              }
+              title="{item.title} ({item.subtitle})"
+              onclick={() => {
+                if (item.type === 'playlist') {
+                  selectedPlaylistId = item.id;
+                  selectedAlbum = null;
+                  selectedArtist = null;
+                  activeTab = 'playlists';
+                } else if (item.type === 'album') {
+                  selectedAlbum = item.title;
+                  selectedArtist = null;
+                  selectedPlaylistId = null;
+                  activeTab = 'songs';
+                } else if (item.type === 'artist') {
+                  selectedArtist = item.title;
+                  selectedAlbum = null;
+                  selectedPlaylistId = null;
+                  activeTab = 'songs';
+                }
+              }}
+            >
+              {#if item.artwork}
+                <img src={item.artwork} alt={item.title} class="sidebar-mini-art" class:avatar-circle={item.isCircular} />
+              {:else}
+                <div class="sidebar-mini-placeholder" class:avatar-circle={item.isCircular}>
+                  {#if item.type === 'artist'}
+                    <svg class="icon-xs" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.artist}/></svg>
+                  {:else if item.type === 'album'}
+                    <svg class="icon-xs" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.disc}/></svg>
+                  {:else}
+                    <svg class="icon-xs" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.playlist}/></svg>
+                  {/if}
+                </div>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
     {/if}
   </nav>
 
@@ -2413,9 +2508,13 @@
                 <div class="song-list-container">
                   <div class="song-list">
                     {#each globalLocalResults as track, i}
+                      <!-- svelte-ignore a11y_click_events_have_key_events -->
                       <div
                         class="song-list-row"
+                        role="button"
+                        tabindex="0"
                         class:active={currentTrack?.uri === track.uri}
+                        onclick={() => handlePlayTrack(track)}
                       >
                         <div class="sl-prefix">
                           <span class="sl-index">{i + 1}</span>
@@ -3420,9 +3519,13 @@
             <div class="song-list-container">
               <div class="song-list">
                 {#each filteredTracks as track, i}
+                  <!-- svelte-ignore a11y_click_events_have_key_events -->
                   <div
                     class="song-list-row"
+                    role="button"
+                    tabindex="0"
                     class:active={currentTrack?.uri === track.uri}
+                    onclick={() => handlePlayTrack(track)}
                   >
                     <div class="sl-prefix">
                       <span class="sl-index">{i + 1}</span>
@@ -3666,9 +3769,13 @@
               <div class="song-list-container">
                 <div class="song-list">
                   {#each selectedPlaylistTracks as track, i}
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <div
                       class="song-list-row"
+                      role="button"
+                      tabindex="0"
                       class:active={currentTrack?.uri === track.uri}
+                      onclick={() => handlePlayTrack(track)}
                     >
                       <div class="sl-prefix">
                         <span class="sl-index">{i + 1}</span>
@@ -4322,21 +4429,33 @@
           {:else}
             <div class="queue-list" role="list">
               {#each queue as track, i (track.uri + '_' + i)}
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <div
                   class="queue-item"
-                  role="listitem"
+                  role="button"
+                  tabindex="0"
                   class:active={currentTrack?.uri === track.uri}
                   class:dragging={draggedQueueIndex === i}
                   class:drag-over={dragOverIndex === i}
-                  draggable="true"
-                  ondragstart={(e) => handleQueueDragStart(e, i)}
                   ondragover={(e) => handleQueueDragOver(e, i)}
                   ondragenter={() => (dragOverIndex = i)}
                   ondragleave={() => { if (dragOverIndex === i) dragOverIndex = null; }}
                   ondrop={(e) => handleQueueDrop(e, i)}
-                  ondragend={handleQueueDragEnd}
+                  onclick={() => handlePlayTrack(track)}
                 >
-                  <div class="q-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div
+                    class="q-drag-handle"
+                    title="Drag to reorder"
+                    aria-label="Drag to reorder"
+                    draggable="true"
+                    ondragstart={(e) => {
+                      e.stopPropagation();
+                      handleQueueDragStart(e, i);
+                    }}
+                    ondragend={handleQueueDragEnd}
+                    onclick={(e) => e.stopPropagation()}
+                  >
                     <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.dragHandle}/></svg>
                   </div>
                   <div class="q-index">{i + 1}</div>
@@ -4344,7 +4463,8 @@
                     <div class="q-title">{track.title}</div>
                     <div class="q-sub">{track.artist || 'Unknown'} • {track.format_name} {Math.round(track.sample_rate / 1000)}kHz</div>
                   </div>
-                  <div class="q-reorder-actions">
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div class="q-reorder-actions" onclick={(e) => e.stopPropagation()}>
                     <button
                       class="q-mini-btn"
                       disabled={i === 0}
@@ -4365,10 +4485,22 @@
                     </button>
                   </div>
                   <div class="q-dur">{formatTime(track.duration_seconds)}</div>
-                  <button class="q-play-btn" onclick={() => handlePlayTrack(track)} title="Play track" aria-label="Play track">
-                    <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.play}/></svg>
+                  <button
+                    class="q-play-btn"
+                    onclick={(e) => { e.stopPropagation(); handlePlayTrack(track); }}
+                    title="Play track"
+                    aria-label="Play track"
+                  >
+                    <svg class="icon-sm" viewBox="0 0 24 24">
+                      <path fill="currentColor" d={currentTrack?.uri === track.uri && isPlaying ? ICONS.pause : ICONS.play}/>
+                    </svg>
                   </button>
-                  <button class="q-del-btn" onclick={() => removeQueueItem(i)} title="Remove from queue" aria-label="Remove from queue">
+                  <button
+                    class="q-del-btn"
+                    onclick={(e) => { e.stopPropagation(); removeQueueItem(i); }}
+                    title="Remove from queue"
+                    aria-label="Remove from queue"
+                  >
                     <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.close}/></svg>
                   </button>
                 </div>
@@ -4980,26 +5112,34 @@
 
   .brand-badge-btn {
     background: transparent;
-    border: none;
-    padding: 0;
+    border: 1px solid transparent;
+    padding: 4px;
     margin: 0;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 8px;
-    transition: transform 0.15s ease, opacity 0.15s ease;
+    border-radius: 10px;
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
   }
   .brand-badge-btn:hover {
-    transform: scale(1.05);
-    opacity: 0.9;
+    transform: scale(1.06);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+  .brand-badge-btn:active {
+    transform: scale(0.96);
+  }
+  .brand-badge-btn.active {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.18);
   }
 
   .brand-icon {
     width: 36px;
     height: 36px;
     object-fit: contain;
-    border-radius: 8px;
+    border-radius: 7px;
     display: block;
   }
 
@@ -5276,6 +5416,7 @@
   /* Left Floating Panel: "Your Library" */
   .sidebar {
     width: 340px;
+    min-width: 340px;
     background: #121212;
     border-radius: 8px;
     display: flex;
@@ -5284,18 +5425,120 @@
     padding: 12px 8px;
     gap: 6px;
     flex-shrink: 0;
-    transition: width 0.25s cubic-bezier(0.2, 0, 0, 1), padding 0.25s ease;
+    transition: width 0.25s cubic-bezier(0.2, 0, 0, 1), min-width 0.25s cubic-bezier(0.2, 0, 0, 1), padding 0.25s ease;
   }
   .sidebar.collapsed {
-    width: 0;
-    min-width: 0;
-    padding: 0;
-    margin: 0;
+    width: 68px;
+    min-width: 68px;
+    padding: 10px 6px;
+    align-items: center;
     border: none;
-    overflow: hidden;
-    opacity: 0;
-    pointer-events: none;
-    display: none;
+    overflow-y: auto;
+    overflow-x: hidden;
+    opacity: 1;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sidebar-mini-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .sidebar-mini-toggle-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    background: transparent;
+    border: none;
+    color: #b3b3b3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .sidebar-mini-toggle-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.08);
+    transform: scale(1.05);
+  }
+
+  .sidebar-mini-divider {
+    width: 32px;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 2px 0;
+  }
+
+  .sidebar-mini-list {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .sidebar-mini-item {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .sidebar-mini-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: scale(1.06);
+  }
+  .sidebar-mini-item.active {
+    border-color: #1ed760;
+    background: rgba(30, 215, 96, 0.12);
+  }
+
+  .mini-liked-tile {
+    width: 100%;
+    height: 100%;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #450af5, #c4efd9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sidebar-mini-art {
+    width: 100%;
+    height: 100%;
+    border-radius: 6px;
+    object-fit: cover;
+  }
+  .sidebar-mini-art.avatar-circle {
+    border-radius: 50%;
+  }
+
+  .sidebar-mini-placeholder {
+    width: 100%;
+    height: 100%;
+    border-radius: 6px;
+    background: #282828;
+    color: #b3b3b3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sidebar-mini-placeholder.avatar-circle {
+    border-radius: 50%;
   }
 
   .library-header {
@@ -6990,6 +7233,11 @@
     padding: 10px 14px;
     transition: all 0.15s ease;
     user-select: none;
+    cursor: pointer;
+  }
+  .queue-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--border-default);
   }
   .queue-item.active {
     border-color: var(--border-active);
@@ -6999,9 +7247,6 @@
     opacity: 0.35;
     border-style: dashed;
     border-color: var(--border-active);
-  }
-  .queue-item > *:not(.q-reorder-actions):not(.q-play-btn):not(.q-del-btn) {
-    pointer-events: none;
   }
   .queue-item.drag-over {
     border-color: #1ed760;
