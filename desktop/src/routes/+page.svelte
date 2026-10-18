@@ -7712,14 +7712,14 @@
     height: 4px;
     border-radius: 2px;
     background: #4d4d4d;
-    accent-color: #ffffff;
+    accent-color: #1ed760;
     cursor: pointer;
     outline: none;
     transition: height 0.12s ease;
   }
   .slider-box:hover input[type='range'] {
     height: 6px;
-    accent-color: #1ed760;
+    accent-color: #1fdf64;
   }
 
   /* Right: Telemetry, Lyrics, Queue, Volume & Fullscreen */
@@ -7824,13 +7824,15 @@
     height: 4px;
     border-radius: 2px;
     background: #4d4d4d;
-    accent-color: #ffffff;
+    accent-color: #1ed760;
     cursor: pointer;
+    outline: none;
     transition: height 0.12s ease;
     flex-shrink: 0;
   }
   .vol-cluster:hover .vol-slider {
-    accent-color: #1ed760;
+    height: 6px;
+    accent-color: #1fdf64;
   }
 
   .empty-state {
