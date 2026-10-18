@@ -610,6 +610,7 @@
 
   function handleQueueDragOver(e: DragEvent, index: number) {
     e.preventDefault();
+    e.stopPropagation();
     if (e.dataTransfer) {
       e.dataTransfer.dropEffect = 'move';
     }
@@ -618,15 +619,21 @@
 
   function handleQueueDrop(e: DragEvent, dropIndex: number) {
     e.preventDefault();
-    if (draggedQueueIndex === null || draggedQueueIndex === dropIndex) {
-      draggedQueueIndex = null;
-      dragOverIndex = null;
-      return;
+    e.stopPropagation();
+    let fromIndex = draggedQueueIndex;
+    if (fromIndex === null && e.dataTransfer) {
+      const text = e.dataTransfer.getData('text/plain');
+      if (text) {
+        const parsed = parseInt(text, 10);
+        if (!isNaN(parsed)) fromIndex = parsed;
+      }
     }
-    const newQueue = [...queue];
-    const [removed] = newQueue.splice(draggedQueueIndex, 1);
-    newQueue.splice(dropIndex, 0, removed);
-    queue = newQueue;
+    if (fromIndex !== null && fromIndex !== dropIndex && fromIndex >= 0 && fromIndex < queue.length && dropIndex >= 0 && dropIndex < queue.length) {
+      const newQueue = [...queue];
+      const [removed] = newQueue.splice(fromIndex, 1);
+      newQueue.splice(dropIndex, 0, removed);
+      queue = newQueue;
+    }
     draggedQueueIndex = null;
     dragOverIndex = null;
   }
@@ -1555,9 +1562,6 @@
         const newTracks = tracks.filter((t) => !existingUris.has(t.uri));
         libraryTracks = [...libraryTracks, ...newTracks];
         saveLibraryTracks();
-        if (!currentTrack && libraryTracks.length > 0) {
-          handlePlayTrack(libraryTracks[0]);
-        }
       }
     }
   }
@@ -1888,7 +1892,7 @@
   <!-- Top Navigation & Clean Workspace Header -->
   <!-- Top Navigation Bar: Spotify Centered Pill Search & Home -->
   <header class="top-bar">
-    <!-- Left: App Brand & Circular Home Button -->
+    <!-- Left: App Brand, Sidebar Toggle, & Circular Home Button -->
     <div class="top-bar-left">
       <button
         class="brand-badge-btn"
@@ -1901,7 +1905,18 @@
         }}
         title="Veyl Music"
       >
-        <img src="/favicon.png" alt="Veyl Logo" class="brand-icon" />
+        <img src="/logo.png" alt="Veyl Logo" class="brand-icon" />
+      </button>
+
+      <!-- Sidebar Toggle Pill in Top Bar -->
+      <button
+        class="home-circle-btn sidebar-toggle-btn"
+        class:active={!isSidebarCollapsed}
+        onclick={() => (isSidebarCollapsed = !isSidebarCollapsed)}
+        title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.sidebar}/></svg>
       </button>
 
       <!-- Circular Home Button (Exact Spotify desktop signature) -->
@@ -2083,9 +2098,9 @@
   <div class="workspace">
     <!-- Left Navigation: Spotify "Your Library" Container -->
     <nav class="sidebar" class:collapsed={isSidebarCollapsed}>
-      <!-- Your Library Header Row -->
-      <div class="library-header">
-        {#if !isSidebarCollapsed}
+      {#if !isSidebarCollapsed}
+        <!-- Your Library Header Row -->
+        <div class="library-header">
           <button
             class="library-title-btn"
             onclick={() => {
@@ -2099,10 +2114,8 @@
             <svg class="icon" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.library}/></svg>
             <span class="library-title">Your Library</span>
           </button>
-        {/if}
 
-        <div class="library-header-actions" class:actions-collapsed={isSidebarCollapsed}>
-          {#if !isSidebarCollapsed}
+          <div class="library-header-actions">
             <div class="relative-wrap">
               <button
                 class="icon-btn-ghost"
@@ -2161,24 +2174,22 @@
                 </div>
               {/if}
             </div>
-          {/if}
 
-          <!-- Collapse / Expand Sidebar Button -->
-          <button
-            class="icon-btn-ghost collapse-toggle-btn"
-            onclick={() => (isSidebarCollapsed = !isSidebarCollapsed)}
-            title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <svg class="icon" viewBox="0 0 24 24">
-              <path fill="currentColor" d={isSidebarCollapsed ? ICONS.chevronRight : ICONS.chevronLeft}/>
-            </svg>
-          </button>
+            <!-- Collapse Sidebar Button -->
+            <button
+              class="icon-btn-ghost collapse-toggle-btn"
+              onclick={() => (isSidebarCollapsed = true)}
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+            >
+              <svg class="icon" viewBox="0 0 24 24">
+                <path fill="currentColor" d={ICONS.chevronLeft}/>
+              </svg>
+            </button>
+          </div>
         </div>
-      </div>
 
-      <!-- Filter Chips Row: Playlists, Artists, Albums (Hidden in collapsed mode) -->
-      {#if !isSidebarCollapsed}
+        <!-- Filter Chips Row: Playlists, Artists, Albums -->
         <div class="sidebar-chips">
           <button
             class="sidebar-chip"
@@ -2264,7 +2275,6 @@
             <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.sort}/></svg>
           </button>
         </div>
-      {/if}
 
       <!-- Scrollable List of Library Items -->
       <div class="library-items-list" role="list">
@@ -2326,12 +2336,10 @@
               </div>
             {/if}
 
-            {#if !isSidebarCollapsed}
-              <div class="library-row-texts">
-                <div class="library-row-title">{item.title}</div>
-                <div class="library-row-sub">{item.subtitle}</div>
-              </div>
-            {/if}
+            <div class="library-row-texts">
+              <div class="library-row-title">{item.title}</div>
+              <div class="library-row-sub">{item.subtitle}</div>
+            </div>
           </button>
         {/each}
       </div>
@@ -2339,11 +2347,10 @@
       <!-- Sticky Hardware Spec Tag at bottom of sidebar -->
       <div class="sidebar-dac-pill">
         <span class="dot-live"></span>
-        {#if !isSidebarCollapsed}
-          <span class="dac-text">{formatBadge}</span>
-        {/if}
+        <span class="dac-text">{formatBadge}</span>
       </div>
-    </nav>
+    {/if}
+  </nav>
 
     <!-- Main View Panel Area -->
     <main class="content-panel">
@@ -2671,10 +2678,11 @@
             </div>
           </div>
 
-          <!-- Section 1: Popular albums and singles -->
-          <section class="shelf-section">
-            <div class="shelf-header">
-              <h2 class="shelf-title">Popular albums and singles</h2>
+          {#if selectedHomeCategory === 'all'}
+            <!-- Section 1: Popular albums and singles -->
+            <section class="shelf-section">
+              <div class="shelf-header">
+                <h2 class="shelf-title">Popular albums and singles</h2>
               <button
                 class="shelf-show-all-btn"
                 onclick={() => {
@@ -2835,8 +2843,7 @@
           {/if}
 
           <!-- Section 3: Editor's Picks: No-Skip Playlists -->
-          {#if selectedHomeCategory === 'all' || selectedHomeCategory === 'music'}
-            <section class="shelf-section">
+          <section class="shelf-section">
               <div class="shelf-header">
                 <h2 class="shelf-title">Editor's Picks: No-Skip Playlists</h2>
                 <button
@@ -2937,80 +2944,303 @@
                 {/each}
               </div>
             </section>
-          {/if}
 
           <!-- Dynamic Cloud Discovery Rows (Trending, Top Charts, Regional) -->
-          {#if selectedHomeCategory === 'all' || selectedHomeCategory === 'music'}
-            {#if isCloudLoading && cloudSections.length === 0}
-              <div class="cloud-loading-container">
-                <span class="spinner-large"></span>
-                <p class="loading-label">Curating your recommendations...</p>
+          {#if isCloudLoading && cloudSections.length === 0}
+            <div class="cloud-loading-container">
+              <span class="spinner-large"></span>
+              <p class="loading-label">Curating your recommendations...</p>
+            </div>
+          {:else}
+            {#each cloudSections as section (section.id)}
+              <section class="shelf-section">
+                <div class="shelf-header">
+                  <div>
+                    <h2 class="shelf-title">{section.title}</h2>
+                    {#if section.subtitle}
+                      <span class="shelf-sub-label">{section.subtitle}</span>
+                    {/if}
+                  </div>
+
+                  <button
+                    class="btn btn-secondary btn-sm shuffle-btn"
+                    onclick={() => handleShuffleSection(section)}
+                    title="Shuffle play section"
+                  >
+                    <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.shuffle}/></svg>
+                    <span>Shuffle</span>
+                  </button>
+                </div>
+
+                <div class="shelf-grid">
+                  {#each section.items.slice(0, 8) as track (track.id)}
+                    <div
+                      class="shelf-card"
+                      role="button"
+                      tabindex="0"
+                      onclick={() => handlePlayCloudTrack(track, section.items)}
+                      onkeydown={(e) => { if (e.key === 'Enter') handlePlayCloudTrack(track, section.items); }}
+                    >
+                      <div class="shelf-card-art-box">
+                        {#if track.thumbnail_url}
+                          <img src={track.thumbnail_url} alt={track.title} class="shelf-card-img" loading="lazy" />
+                        {:else}
+                          <div class="shelf-card-placeholder">
+                            <svg class="icon-lg" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.disc}/></svg>
+                          </div>
+                        {/if}
+                        <button
+                          type="button"
+                          class="card-hover-play-btn"
+                          onclick={(e) => {
+                            e.stopPropagation();
+                            handlePlayCloudTrack(track, section.items);
+                          }}
+                          title="Play {track.title}"
+                          aria-label="Play {track.title}"
+                        >
+                          <svg class="icon-play-white" viewBox="0 0 24 24">
+                            <path fill="currentColor" d={currentTrack?.title === track.title && isPlaying ? ICONS.pause : ICONS.play}/>
+                          </svg>
+                        </button>
+                      </div>
+
+                      <div class="shelf-card-info">
+                        <div class="shelf-card-title" title={track.title}>{track.title}</div>
+                        <div class="shelf-card-sub" title={track.artist}>{track.artist}</div>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </section>
+            {/each}
+          {/if}
+        {:else if selectedHomeCategory === 'music'}
+          <!-- MUSIC VIEW: Dedicated Local Music Workstation -->
+          <!-- Shelf 1: Albums in Library -->
+          <section class="shelf-section">
+            <div class="shelf-header">
+              <div>
+                <h2 class="shelf-title">Albums in Library</h2>
+                <span class="shelf-sub-label">{sortedHomeAlbums.length} albums</span>
               </div>
-            {:else}
-              {#each cloudSections as section (section.id)}
-                <section class="shelf-section">
-                  <div class="shelf-header">
-                    <div>
-                      <h2 class="shelf-title">{section.title}</h2>
-                      {#if section.subtitle}
-                        <span class="shelf-sub-label">{section.subtitle}</span>
+              <button
+                class="shelf-show-all-btn"
+                onclick={() => {
+                  activeTab = 'albums';
+                  selectedAlbum = null;
+                  selectedArtist = null;
+                }}
+              >
+                Show all
+              </button>
+            </div>
+
+            <div class="shelf-grid">
+              {#if sortedHomeAlbums.length > 0}
+                {#each sortedHomeAlbums as al (al.name)}
+                  <div
+                    class="shelf-card"
+                    role="button"
+                    tabindex="0"
+                    onclick={() => {
+                      selectedAlbum = al.name;
+                      selectedArtist = null;
+                      activeTab = 'songs';
+                    }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        selectedAlbum = al.name;
+                        activeTab = 'songs';
+                      }
+                    }}
+                  >
+                    <div class="shelf-card-art-box">
+                      {#if getAlbumCover(al)}
+                        <img src={getAlbumCover(al)} alt={al.name} class="shelf-card-img" loading="lazy" />
+                      {:else}
+                        <div class="shelf-card-placeholder">
+                          <svg class="icon-lg" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.disc}/></svg>
+                        </div>
+                      {/if}
+                      <button
+                        type="button"
+                        class="card-hover-play-btn"
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          handlePlayAlbum(al.name);
+                        }}
+                        title="Play {al.name}"
+                        aria-label="Play {al.name}"
+                      >
+                        <svg class="icon-play-white" viewBox="0 0 24 24">
+                          <path fill="currentColor" d={ICONS.play}/>
+                        </svg>
+                      </button>
+                    </div>
+
+                    <div class="shelf-card-info">
+                      <div class="shelf-card-title" title={al.name}>{al.name}</div>
+                      <div class="shelf-card-sub" title={al.artist}>{al.artist || 'Various Artists'}</div>
+                    </div>
+                  </div>
+                {/each}
+              {:else}
+                <div class="shelf-empty-state">
+                  <p>No albums scanned yet. Click "Import library" or browse folders above!</p>
+                </div>
+              {/if}
+            </div>
+          </section>
+
+          <!-- Shelf 2: Artists in Library -->
+          {#if artists.length > 0}
+            <section class="shelf-section">
+              <div class="shelf-header">
+                <div>
+                  <h2 class="shelf-title">Artists in Library</h2>
+                  <span class="shelf-sub-label">{artists.length} artists</span>
+                </div>
+                <button
+                  class="shelf-show-all-btn"
+                  onclick={() => {
+                    activeTab = 'artists';
+                    selectedAlbum = null;
+                    selectedArtist = null;
+                  }}
+                >
+                  Show all
+                </button>
+              </div>
+
+              <div class="shelf-grid">
+                {#each artists.slice(0, 12) as art (art.name)}
+                  <div
+                    class="shelf-card"
+                    role="button"
+                    tabindex="0"
+                    onclick={() => {
+                      selectedArtist = art.name;
+                      selectedAlbum = null;
+                      activeTab = 'songs';
+                    }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        selectedArtist = art.name;
+                        activeTab = 'songs';
+                      }
+                    }}
+                  >
+                    <div class="shelf-card-art-box artist-avatar-box">
+                      {#if getArtistAvatar(art)}
+                        <img src={getArtistAvatar(art)} alt={art.name} class="shelf-card-img artist-circle-img" loading="lazy" />
+                      {:else}
+                        <div class="shelf-card-placeholder artist-circle-img">
+                          <svg class="icon-lg" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.artist}/></svg>
+                        </div>
                       {/if}
                     </div>
 
-                    <button
-                      class="btn btn-secondary btn-sm shuffle-btn"
-                      onclick={() => handleShuffleSection(section)}
-                      title="Shuffle play section"
-                    >
-                      <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.shuffle}/></svg>
-                      <span>Shuffle</span>
-                    </button>
+                    <div class="shelf-card-info">
+                      <div class="shelf-card-title" title={art.name}>{art.name}</div>
+                      <div class="shelf-card-sub">{art.albumCount} albums • {art.trackCount} tracks</div>
+                    </div>
                   </div>
-
-                  <div class="shelf-grid">
-                    {#each section.items.slice(0, 8) as track (track.id)}
-                      <div
-                        class="shelf-card"
-                        role="button"
-                        tabindex="0"
-                        onclick={() => handlePlayCloudTrack(track, section.items)}
-                        onkeydown={(e) => { if (e.key === 'Enter') handlePlayCloudTrack(track, section.items); }}
-                      >
-                        <div class="shelf-card-art-box">
-                          {#if track.thumbnail_url}
-                            <img src={track.thumbnail_url} alt={track.title} class="shelf-card-img" loading="lazy" />
-                          {:else}
-                            <div class="shelf-card-placeholder">
-                              <svg class="icon-lg" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.disc}/></svg>
-                            </div>
-                          {/if}
-                          <button
-                            type="button"
-                            class="card-hover-play-btn"
-                            onclick={(e) => {
-                              e.stopPropagation();
-                              handlePlayCloudTrack(track, section.items);
-                            }}
-                            title="Play {track.title}"
-                            aria-label="Play {track.title}"
-                          >
-                            <svg class="icon-play-white" viewBox="0 0 24 24">
-                              <path fill="currentColor" d={currentTrack?.title === track.title && isPlaying ? ICONS.pause : ICONS.play}/>
-                            </svg>
-                          </button>
-                        </div>
-
-                        <div class="shelf-card-info">
-                          <div class="shelf-card-title" title={track.title}>{track.title}</div>
-                          <div class="shelf-card-sub" title={track.artist}>{track.artist}</div>
-                        </div>
-                      </div>
-                    {/each}
-                  </div>
-                </section>
-              {/each}
-            {/if}
+                {/each}
+              </div>
+            </section>
           {/if}
+
+          <!-- Shelf 3: Songs in Library -->
+          {#if libraryTracks.length > 0}
+            <section class="shelf-section">
+              <div class="shelf-header">
+                <div>
+                  <h2 class="shelf-title">Songs in Library</h2>
+                  <span class="shelf-sub-label">{libraryTracks.length} tracks</span>
+                </div>
+                <button
+                  class="shelf-show-all-btn"
+                  onclick={() => {
+                    activeTab = 'songs';
+                    selectedAlbum = null;
+                    selectedArtist = null;
+                  }}
+                >
+                  Show all
+                </button>
+              </div>
+
+              <div class="song-list">
+                {#each libraryTracks.slice(0, 15) as track, i (track.uri)}
+                  <div
+                    class="song-list-row"
+                    class:active={currentTrack?.uri === track.uri}
+                  >
+                    <div class="sl-prefix">
+                      <span class="sl-index">{i + 1}</span>
+                      <button
+                        type="button"
+                        class="sl-cover-box"
+                        onclick={() => handlePlayTrack(track)}
+                        aria-label="Play {track.title}"
+                      >
+                        {#if trackArtworkMap.has(track.uri) && trackArtworkMap.get(track.uri)}
+                          <img src={trackArtworkMap.get(track.uri)} alt="" class="sl-cover-img" />
+                        {:else}
+                          <div class="sl-cover-placeholder">
+                            <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.disc}/></svg>
+                          </div>
+                        {/if}
+                        {#if currentTrack?.uri === track.uri && isPlaying}
+                          <div class="sl-cover-overlay active">
+                            <span class="playing-bars"><span></span><span></span><span></span></span>
+                          </div>
+                        {:else}
+                          <div class="sl-cover-overlay hover-play">
+                            <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.play}/></svg>
+                          </div>
+                        {/if}
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      class="sl-main"
+                      onclick={() => handlePlayTrack(track)}
+                    >
+                      <div class="sl-title-line">
+                        <span class="sl-title" class:active-title={currentTrack?.uri === track.uri}>
+                          {track.title}
+                        </span>
+                        {#if track.sample_rate >= 88200 || (track.bit_depth && track.bit_depth >= 24)}
+                          <span class="sl-spec-pill hires">
+                            {track.format_name.toUpperCase()} {Math.round(track.sample_rate / 1000)}k{track.bit_depth ? `/${track.bit_depth}b` : ''}
+                          </span>
+                        {:else if track.format_name}
+                          <span class="sl-spec-pill">
+                            {track.format_name.toUpperCase()}
+                          </span>
+                        {/if}
+                      </div>
+                      <div class="sl-subtitle">
+                        <span class="sl-artist">{track.artist || 'Unknown Artist'}</span>
+                        {#if track.album}
+                          <span class="sl-dot">•</span>
+                          <span class="sl-album">{track.album}</span>
+                        {/if}
+                      </div>
+                    </button>
+
+                    <div class="sl-actions">
+                      <span class="sl-dur">{formatTime(track.duration_seconds)}</span>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </section>
+          {/if}
+        {/if}
         </div>
 
       <!-- 1. SONGS TAB / DRILL-DOWN -->
@@ -4487,32 +4717,14 @@
         <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.queueList}/></svg>
       </button>
 
-      <!-- Equalizer Quick Toggle -->
-      <button
-        class="dock-icon-action"
-        class:active={activeTab === 'equalizer' || (activeTab === 'now_playing' && isEqMode)}
-        onclick={() => {
-          if (activeTab === 'now_playing') {
-            isEqMode = !isEqMode;
-          } else {
-            activeTab = activeTab === 'equalizer' ? 'cloud' : 'equalizer';
-          }
-        }}
-        title="10-Band Equalizer"
-        aria-label="Equalizer"
-      >
-        <svg class="icon-sm" viewBox="0 0 24 24"><path fill="currentColor" d={ICONS.equalizer}/></svg>
-      </button>
-
-      <!-- Audiophile DAC Spec Badge -->
-      <button
-        class="dock-spec-btn"
-        onclick={() => (activeTab = 'settings')}
-        title="Audio Engine Settings: {formatBadge}"
+      <!-- Audiophile DAC Spec Badge (Informational Display) -->
+      <div
+        class="dock-spec-pill"
+        title="Hardware DAC Spec: {formatBadge}"
       >
         <span class="dot-live-sm"></span>
         <span>{formatBadge}</span>
-      </button>
+      </div>
 
       <!-- 16-band live spectrum visualizer -->
       <button
@@ -4759,9 +4971,41 @@
     gap: 16px;
   }
 
+  .top-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .brand-badge-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }
+  .brand-badge-btn:hover {
+    transform: scale(1.05);
+    opacity: 0.9;
+  }
+
+  .brand-icon {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+    border-radius: 8px;
+    display: block;
+  }
+
   .home-circle-btn {
-    width: 48px;
-    height: 48px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     background: #1f1f1f;
     color: #b3b3b3;
@@ -5040,10 +5284,18 @@
     padding: 12px 8px;
     gap: 6px;
     flex-shrink: 0;
-    transition: width 0.2s cubic-bezier(0.2, 0, 0, 1);
+    transition: width 0.25s cubic-bezier(0.2, 0, 0, 1), padding 0.25s ease;
   }
   .sidebar.collapsed {
-    width: 72px;
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    display: none;
   }
 
   .library-header {
@@ -6748,14 +7000,19 @@
     border-style: dashed;
     border-color: var(--border-active);
   }
+  .queue-item > *:not(.q-reorder-actions):not(.q-play-btn):not(.q-del-btn) {
+    pointer-events: none;
+  }
   .queue-item.drag-over {
-    border-color: #FFFFFF;
-    background: rgba(255, 255, 255, 0.08);
+    border-color: #1ed760;
+    box-shadow: 0 -2px 0 0 #1ed760;
+    background: rgba(30, 215, 96, 0.14);
     transform: translateY(-2px);
   }
   :global(:root.light) .queue-item.drag-over {
-    border-color: #18181B;
-    background: rgba(0, 0, 0, 0.06);
+    border-color: #1ed760;
+    box-shadow: 0 -2px 0 0 #1ed760;
+    background: rgba(30, 215, 96, 0.14);
   }
 
   .q-drag-handle {
@@ -7173,6 +7430,10 @@
     border-radius: 6px;
     display: block;
   }
+  .artist-avatar-box,
+  .artist-circle-img {
+    border-radius: 50% !important;
+  }
 
   .shelf-card-placeholder {
     width: 100%;
@@ -7493,7 +7754,7 @@
     color: #1ed760;
   }
 
-  .dock-spec-btn {
+  .dock-spec-pill {
     display: flex;
     align-items: center;
     gap: 5px;
@@ -7504,15 +7765,11 @@
     font-size: 10px;
     font-weight: 700;
     color: #1ed760;
-    border: none;
-    cursor: pointer;
-    transition: all 0.15s ease;
+    border: 1px solid rgba(30, 215, 96, 0.2);
     white-space: nowrap;
     flex-shrink: 0;
-  }
-  .dock-spec-btn:hover {
-    background: rgba(255, 255, 255, 0.14);
-    color: #ffffff;
+    user-select: none;
+    cursor: default;
   }
   .dot-live-sm {
     width: 5px;
