@@ -23,13 +23,35 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val keystoreFile = rootProject.file("keystore/veyl-release.jks")
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+                storePassword = "veylaudiophile"
+                keyAlias = "veyl"
+                keyPassword = "veylaudiophile"
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            val keystoreFile = rootProject.file("keystore/veyl-release.jks")
+            if (keystoreFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            val keystoreFile = rootProject.file("keystore/veyl-release.jks")
+            if (keystoreFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
