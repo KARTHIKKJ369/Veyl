@@ -1,0 +1,7 @@
+Version 2.2.0:
+• Interactive Equalizer Waveform: drag-and-drop frequency and gain nodes directly on the curve
+• Precise Gain Stepper Controls: +/- 0.5 dB adjustments and direct numerical gain input dialog
+• Fluid Queue Reordering: drag-and-drop to easily reorder upcoming tracks
+• Album Art Fix: individual track artwork is properly displayed instead of playlist artwork
+• Smart Spotify Import: enhanced offline library song resolution
+• Audio Stall Recovery: improved buffer management and seamless playback resumption

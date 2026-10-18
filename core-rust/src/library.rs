@@ -211,27 +211,57 @@ impl MetadataExtractor {
     pub fn extract_artwork<P: AsRef<Path>>(path: P) -> Result<Option<AlbumArtwork>, LibraryError> {
         let clean_buf = Self::clean_path(path);
         let path = clean_buf.as_path();
-        let tagged_file = match Probe::open(path).and_then(|p| p.read()) {
-            Ok(tf) => tf,
-            Err(_) => return Ok(None),
-        };
 
-        // Check primary tag, first tag, or any tag in file for pictures
-        let picture = tagged_file
-            .primary_tag()
-            .and_then(|t| t.pictures().first())
-            .or_else(|| tagged_file.first_tag().and_then(|t| t.pictures().first()))
-            .or_else(|| tagged_file.tags().iter().find_map(|t| t.pictures().first()));
+        if let Ok(tagged_file) = Probe::open(path).and_then(|p| p.read()) {
+            // Check primary tag, first tag, or any tag in file for pictures
+            let picture = tagged_file
+                .primary_tag()
+                .and_then(|t| t.pictures().first())
+                .or_else(|| tagged_file.first_tag().and_then(|t| t.pictures().first()))
+                .or_else(|| tagged_file.tags().iter().find_map(|t| t.pictures().first()));
 
-        if let Some(picture) = picture {
-            let mime_type = match picture.mime_type() {
-                Some(m) => m.as_str().to_string(),
-                None => "image/jpeg".to_string(),
-            };
-            return Ok(Some(AlbumArtwork {
-                mime_type,
-                data: picture.data().to_vec(),
-            }));
+            if let Some(picture) = picture {
+                let mime_type = match picture.mime_type() {
+                    Some(m) => m.as_str().to_string(),
+                    None => "image/jpeg".to_string(),
+                };
+                return Ok(Some(AlbumArtwork {
+                    mime_type,
+                    data: picture.data().to_vec(),
+                }));
+            }
+        }
+
+        // Fallback: check parent directory for common album artwork files (cover.jpg, folder.jpg, etc.)
+        if let Some(parent) = path.parent() {
+            let candidate_names = [
+                "cover.jpg", "cover.jpeg", "cover.png",
+                "folder.jpg", "folder.jpeg", "folder.png",
+                "front.jpg", "front.jpeg", "front.png",
+                "album.jpg", "album.jpeg", "album.png",
+                "art.jpg", "art.png",
+                "Cover.jpg", "Cover.jpeg", "Cover.png",
+                "Folder.jpg", "Folder.jpeg", "Folder.png",
+                "Front.jpg", "Front.png",
+            ];
+            for name in candidate_names {
+                let cand_path = parent.join(name);
+                if cand_path.is_file() {
+                    if let Ok(data) = fs::read(&cand_path) {
+                        if !data.is_empty() {
+                            let mime_type = if name.to_lowercase().ends_with(".png") {
+                                "image/png".to_string()
+                            } else {
+                                "image/jpeg".to_string()
+                            };
+                            return Ok(Some(AlbumArtwork {
+                                mime_type,
+                                data,
+                            }));
+                        }
+                    }
+                }
+            }
         }
 
         Ok(None)

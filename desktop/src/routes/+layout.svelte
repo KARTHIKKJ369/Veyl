@@ -6,31 +6,67 @@
 
 <style>
   :global(:root) {
-    --bg-void: #08090a;
-    --surface-panel: #111215;
-    --surface-card: #18191e;
-    --surface-card-hover: #212228;
-    --surface-pill: rgba(255, 255, 255, 0.06);
+    --signal-accent: #FFFFFF;
+    --signal-accent-bright: #FFFFFF;
+    --signal-accent-glow: rgba(255, 255, 255, 0.12);
+    --signal-accent-dim: rgba(255, 255, 255, 0.20);
 
-    --signal-green: #ccff00;
-    --signal-green-dim: rgba(204, 255, 0, 0.15);
-    --signal-green-glow: rgba(204, 255, 0, 0.35);
+    --bg-void: #000000;
+    --surface-panel: #121212;
+    --surface-card: #181818;
+    --surface-card-hover: #242424;
+    --surface-pill: rgba(255, 255, 255, 0.08);
+    --surface-highlight: #2a2a2a;
 
-    --text-primary: #ffffff;
-    --text-secondary: rgba(255, 255, 255, 0.68);
-    --text-muted: rgba(255, 255, 255, 0.38);
+    --favorite-pink: #1DB954;
+    --signal-amber: #E2E8F0;
+    --cyber-cyan: #B3B3B3;
+    --spectral-green: #1DB954;
+    --danger-red: #EF4444;
 
-    --border-hairline: rgba(255, 255, 255, 0.08);
-    --border-active: rgba(204, 255, 0, 0.5);
+    --text-primary: #FFFFFF;
+    --text-secondary: #B3B3B3;
+    --text-muted: #727272;
+
+    --border-hairline: rgba(255, 255, 255, 0.07);
+    --border-active: rgba(255, 255, 255, 0.25);
 
     --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 16px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
     --radius-pill: 9999px;
 
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
   }
+
+  :global(:root.light) {
+    --signal-accent: #18181B;
+    --signal-accent-bright: #000000;
+    --signal-accent-glow: rgba(0, 0, 0, 0.08);
+    --signal-accent-dim: rgba(0, 0, 0, 0.20);
+
+    --bg-void: #FAFAFA;
+    --surface-panel: #FFFFFF;
+    --surface-card: #F4F4F5;
+    --surface-card-hover: #E4E4E7;
+    --surface-pill: #E4E4E7;
+    --surface-highlight: #D4D4D8;
+
+    --favorite-pink: #18181B;
+    --signal-amber: #334155;
+    --cyber-cyan: #52525B;
+    --spectral-green: #52525B;
+    --danger-red: #DC2626;
+
+    --text-primary: #09090B;
+    --text-secondary: #52525B;
+    --text-muted: #71717A;
+
+    --border-hairline: rgba(0, 0, 0, 0.08);
+    --border-active: rgba(0, 0, 0, 0.40);
+  }
+
 
   :global(*, *::before, *::after) {
     box-sizing: border-box;

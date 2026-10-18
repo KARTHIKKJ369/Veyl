@@ -52,11 +52,13 @@ jobs:
           body: |
             ## 🎵 Veyl — Reference Audiophile Android Music Player
 
-            ### 🚀 Highlights in this release (v2.1.0):
-            - **Custom Equalizer Presets**: Create, save, load, and delete customized 10-band equalizer settings with persistent storage.
-            - **Sample Rate & Pitch Stability**: Fixed sample rate synchronization and Rubato resampler error recovery, eliminating unexpected pitch jumps across audio route changes.
-            - **Intelligent Phone Call Handling**: Paused songs strictly remain paused after phone calls end; audio focus recovery only resumes music if it was actively playing before the call.
-            - **Redesigned Playlists & Collections**: Pinned Favorites, Smart Collections, custom playlist artwork, and elevated bottom navigation bar tab.
+            ### 🚀 Highlights in this release (v2.2.0):
+            - **Interactive Equalizer Curve Editing**: Drag and drop frequency and gain nodes directly on the interactive waveform curve to customize your sound instantly.
+            - **Precision Gain Steppers & Numerical Input**: Direct numeric gain entry dialog and +/- 0.5 dB stepper buttons on every EQ band.
+            - **Fluid Queue Reordering**: Smooth drag-and-drop to organize and reorder upcoming tracks in your playback queue.
+            - **Individual Track Cover Fix**: Restored accurate track album artwork in Now Playing and throughout the queue instead of falling back to playlist covers.
+            - **Smart Local Track Matching & Offline Import**: Enhanced song matching for imported Spotify playlists and local audio libraries.
+            - **Playback Stall Recovery & Route Stability**: Ultra-fast audio resume with jitter-free buffer management.
             - **Bit-Perfect AAudio MMAP & Direct USB DAC Output**: Pure Rust audio engine (`audiophile-core`) bypassing Android system mixer audio degradation.
             - **100% Free & Open Source**: Licensed under the GNU General Public License v3.0 (GPL-3.0) with zero ads and zero telemetry.
 
