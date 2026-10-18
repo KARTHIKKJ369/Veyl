@@ -4735,12 +4735,6 @@
     flex-shrink: 0;
   }
 
-  .icon-play {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-  }
-
   .icon-lg {
     width: 36px;
     height: 36px;
@@ -4753,10 +4747,6 @@
     opacity: 0.5;
   }
 
-  .heart-accent {
-    color: var(--favorite-pink);
-  }
-
   /* Header: Spotify Void Top Bar (#000000) */
   .top-bar {
     display: flex;
@@ -4767,19 +4757,6 @@
     height: 64px;
     flex-shrink: 0;
     gap: 16px;
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    min-width: 200px;
-  }
-
-  .brand-icon {
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
   }
 
   .home-circle-btn {
@@ -7619,29 +7596,6 @@
     margin-bottom: 6px;
   }
 
-  /* ── Cloud / Online Streaming Discovery Styles ── */
-  .cloud-accent {
-    color: var(--signal-accent);
-  }
-
-  .cloud-header {
-    margin-bottom: 8px;
-  }
-
-  .icon-btn-round {
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 8px;
-  }
-
-  .spinning {
-    animation: spin 1s linear infinite;
-  }
-
   @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
@@ -7665,53 +7619,6 @@
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     display: inline-block;
-  }
-
-  .cloud-filter-rail {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    overflow-x: auto;
-    padding-bottom: 6px;
-    margin-bottom: 18px;
-  }
-
-  .filter-chip {
-    padding: 5px 14px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 500;
-    background: var(--bg-surface);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-subtle);
-    white-space: nowrap;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .filter-chip:hover {
-    color: var(--text-primary);
-    border-color: var(--border-strong);
-  }
-
-  .filter-chip.active {
-    background: var(--signal-accent);
-    color: #fff;
-    border-color: var(--signal-accent);
-    font-weight: 600;
-  }
-
-  .cloud-buffering-toast {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
-    border-radius: 8px;
-    background: rgba(224, 90, 43, 0.1);
-    border: 1px solid rgba(224, 90, 43, 0.3);
-    color: var(--text-primary);
-    font-size: 12px;
-    margin-bottom: 16px;
   }
 
   .section-title-bar {
