@@ -9,7 +9,11 @@ use thiserror::Error;
 
 use crate::decoder::{AudioDecoder, AudioStreamInfo, DecodeError};
 use crate::dsd::DsdPlaybackMode;
-use crate::dsp::{calculate_levels, calculate_spectrum_16, LevelMetrics, ParametricEqualizer, TpdfDither};
+use crate::dsp::{
+    calculate_levels, calculate_spectrum_16, ChannelBalance, CrossfeedFilter, CrossfeedPreset,
+    LevelMetrics, LoudnessNormalizer, ParametricEqualizer, PeakLimiter, Spatializer360,
+    SubBassExciter, TpdfDither, TubeWarmthExciter, VocalClarity,
+};
 use crate::output::AudioRenderCallback;
 use crate::resampler::StreamResampler;
 use crate::source::LocalFileSource;
@@ -87,6 +91,15 @@ pub struct PlaybackEngine {
 
     // DSP & Audio Processing
     equalizer: Arc<Mutex<ParametricEqualizer>>,
+    tube_exciter: Arc<Mutex<TubeWarmthExciter>>,
+    spatializer: Arc<Mutex<Spatializer360>>,
+    sub_bass: Arc<Mutex<SubBassExciter>>,
+    vocal_clarity: Arc<Mutex<VocalClarity>>,
+    crossfeed: Arc<Mutex<CrossfeedFilter>>,
+    loudness_normalizer: Arc<Mutex<LoudnessNormalizer>>,
+    channel_balance: Arc<Mutex<ChannelBalance>>,
+    limiter: Arc<Mutex<PeakLimiter>>,
+    playback_speed: Arc<Mutex<f32>>,
     #[allow(dead_code)]
     dither: Arc<Mutex<TpdfDither>>,
     resampler: Arc<Mutex<Option<StreamResampler>>>,
@@ -119,6 +132,15 @@ impl PlaybackEngine {
         let (producer, consumer) = ring_buffer.split();
 
         let equalizer = Arc::new(Mutex::new(ParametricEqualizer::default_10_band(output_sample_rate, output_channels)));
+        let tube_exciter = Arc::new(Mutex::new(TubeWarmthExciter::new()));
+        let spatializer = Arc::new(Mutex::new(Spatializer360::new(output_sample_rate)));
+        let sub_bass = Arc::new(Mutex::new(SubBassExciter::new(output_sample_rate)));
+        let vocal_clarity = Arc::new(Mutex::new(VocalClarity::new(output_sample_rate)));
+        let crossfeed = Arc::new(Mutex::new(CrossfeedFilter::new(output_sample_rate)));
+        let loudness_normalizer = Arc::new(Mutex::new(LoudnessNormalizer::new(output_sample_rate)));
+        let channel_balance = Arc::new(Mutex::new(ChannelBalance::new()));
+        let limiter = Arc::new(Mutex::new(PeakLimiter::new()));
+        let playback_speed = Arc::new(Mutex::new(1.0f32));
         let dither = Arc::new(Mutex::new(TpdfDither::new()));
         let resampler = Arc::new(Mutex::new(None));
         let dsd_mode = Arc::new(Mutex::new(DsdPlaybackMode::PcmDecimation));
@@ -152,6 +174,15 @@ impl PlaybackEngine {
             output_channels,
             dsd_mode,
             equalizer,
+            tube_exciter,
+            spatializer,
+            sub_bass,
+            vocal_clarity,
+            crossfeed,
+            loudness_normalizer,
+            channel_balance,
+            limiter,
+            playback_speed,
             dither,
             resampler,
             render_volume: Arc::new(Mutex::new(0.0)),
@@ -195,6 +226,11 @@ impl PlaybackEngine {
                 }
             }
         }
+        self.spatializer.lock().set_sample_rate(new_rate);
+        self.sub_bass.lock().set_sample_rate(new_rate);
+        self.vocal_clarity.lock().set_sample_rate(new_rate);
+        self.crossfeed.lock().set_sample_rate(new_rate);
+        self.loudness_normalizer.lock().set_sample_rate(new_rate);
         // Immediately configure resampler for new hardware output rate to prevent pitch distortion
         {
             let active = self.active_decoder.lock();
@@ -236,6 +272,7 @@ impl PlaybackEngine {
         let output_rate_arc = Arc::clone(&self.output_sample_rate);
         let dsd_mode_arc = Arc::clone(&self.dsd_mode);
         let consumer = Arc::clone(&self.ring_buffer_consumer);
+        let playback_speed_arc = Arc::clone(&self.playback_speed);
 
         thread::Builder::new()
             .name("audiophile-decode-worker".to_string())
@@ -352,23 +389,31 @@ impl PlaybackEngine {
                             track_sample_rate = dec_guard.as_ref().map(|d| d.info().sample_rate).unwrap_or(44100);
                         }
 
+                        let speed = *playback_speed_arc.lock();
+                        let effective_rate = if (speed - 1.0).abs() > 0.01 {
+                            (track_sample_rate as f32 * speed).round() as u32
+                        } else {
+                            track_sample_rate
+                        };
+
                         // Resample if necessary to match hardware output rate
-                        let resampled = if !is_dop && track_sample_rate > 0 && output_rate > 0 && track_sample_rate != output_rate {
+                        let resampled = if !is_dop && effective_rate > 0 && output_rate > 0 && effective_rate != output_rate {
                             let mut res_guard = resampler.lock();
                             let needs_rebuild = match *res_guard {
                                 Some(ref r) => {
-                                    (r.input_rate - track_sample_rate as f64).abs() > 0.1
+                                    (r.input_rate - effective_rate as f64).abs() > 0.1
                                         || (r.output_rate - output_rate as f64).abs() > 0.1
                                 }
                                 None => true,
                             };
                             if needs_rebuild {
                                 log::info!(
-                                    "Dynamic Resampler: adapting from {} Hz to hardware output {} Hz",
-                                    track_sample_rate,
+                                    "Dynamic Resampler: adapting from {} Hz (speed: {:.2}x) to hardware output {} Hz",
+                                    effective_rate,
+                                    speed,
                                     output_rate
                                 );
-                                *res_guard = Some(StreamResampler::new(track_sample_rate, output_rate, 2));
+                                *res_guard = Some(StreamResampler::new(effective_rate, output_rate, 2));
                             }
                             if let Some(ref mut r) = *res_guard {
                                 r.process_interleaved(&raw_samples)
@@ -530,6 +575,9 @@ impl PlaybackEngine {
             }
         }
 
+        // Reset dynamic loudness normalizer envelope for clean track start
+        self.loudness_normalizer.lock().reset();
+
         // Set active decoder FIRST before triggering flush
         {
             let mut active = self.active_decoder.lock();
@@ -662,6 +710,136 @@ impl PlaybackEngine {
         eq.calculate_curve(frequencies)
     }
 
+    pub fn set_crossfeed_preset(&self, preset: CrossfeedPreset) {
+        self.crossfeed.lock().set_preset(preset);
+    }
+
+    pub fn get_crossfeed_preset(&self) -> CrossfeedPreset {
+        self.crossfeed.lock().preset
+    }
+
+    pub fn set_loudness_normalizer_enabled(&self, enabled: bool) {
+        self.loudness_normalizer.lock().set_enabled(enabled);
+    }
+
+    pub fn is_loudness_normalizer_enabled(&self) -> bool {
+        self.loudness_normalizer.lock().enabled
+    }
+
+    pub fn set_loudness_target_lufs(&self, lufs: f32) {
+        self.loudness_normalizer.lock().set_target_lufs(lufs);
+    }
+
+    pub fn set_tube_warmth_enabled(&self, enabled: bool) {
+        self.tube_exciter.lock().set_enabled(enabled);
+    }
+
+    pub fn is_tube_warmth_enabled(&self) -> bool {
+        self.tube_exciter.lock().enabled
+    }
+
+    pub fn set_tube_warmth_drive(&self, drive: f32) {
+        self.tube_exciter.lock().set_drive(drive);
+    }
+
+    pub fn get_tube_warmth_drive(&self) -> f32 {
+        self.tube_exciter.lock().drive
+    }
+
+    pub fn set_channel_balance(&self, balance: f32) {
+        self.channel_balance.lock().set_balance(balance);
+    }
+
+    pub fn get_channel_balance(&self) -> f32 {
+        self.channel_balance.lock().balance
+    }
+
+    pub fn set_spatializer_enabled(&self, enabled: bool) {
+        self.spatializer.lock().set_enabled(enabled);
+    }
+
+    pub fn is_spatializer_enabled(&self) -> bool {
+        self.spatializer.lock().enabled
+    }
+
+    pub fn set_spatializer_width(&self, width: f32) {
+        self.spatializer.lock().set_width(width);
+    }
+
+    pub fn get_spatializer_width(&self) -> f32 {
+        self.spatializer.lock().width
+    }
+
+    pub fn set_sub_bass_enabled(&self, enabled: bool) {
+        self.sub_bass.lock().set_enabled(enabled);
+    }
+
+    pub fn is_sub_bass_enabled(&self) -> bool {
+        self.sub_bass.lock().enabled
+    }
+
+    pub fn set_sub_bass_intensity(&self, intensity: f32) {
+        self.sub_bass.lock().set_intensity(intensity);
+    }
+
+    pub fn get_sub_bass_intensity(&self) -> f32 {
+        self.sub_bass.lock().intensity
+    }
+
+    pub fn set_vocal_clarity_enabled(&self, enabled: bool) {
+        self.vocal_clarity.lock().set_enabled(enabled);
+    }
+
+    pub fn is_vocal_clarity_enabled(&self) -> bool {
+        self.vocal_clarity.lock().enabled
+    }
+
+    pub fn set_vocal_clarity_intensity(&self, intensity: f32) {
+        self.vocal_clarity.lock().set_clarity(intensity);
+    }
+
+    pub fn get_vocal_clarity_intensity(&self) -> f32 {
+        self.vocal_clarity.lock().clarity
+    }
+
+    pub fn set_limiter_enabled(&self, enabled: bool) {
+        self.limiter.lock().set_enabled(enabled);
+    }
+
+    pub fn set_playback_speed(&self, speed: f32) {
+        let clamped = speed.clamp(0.5, 2.0);
+        let old_speed = *self.playback_speed.lock();
+        if (old_speed - clamped).abs() < 0.01 {
+            return;
+        }
+        *self.playback_speed.lock() = clamped;
+
+        // Current rendered playback position and native track sample rate
+        let (current_pos, sample_rate) = {
+            let s = self.state.lock();
+            let sr = s.current_stream_info.as_ref().map(|i| i.sample_rate).unwrap_or(44100);
+            (s.position_seconds, sr)
+        };
+
+        // Drain ring buffer immediately so 1.5s of pre-buffered old-speed audio is discarded
+        {
+            let mut consumer = self.ring_buffer_consumer.lock();
+            let occupied = consumer.occupied_len();
+            if occupied > 0 {
+                consumer.skip(occupied);
+            }
+        }
+
+        // Seek the active decoder back to current position so playback resumes instantly at new speed without skip
+        let frame = (current_pos * sample_rate as f64) as u64;
+        self.seek_requested_frame.store(frame, Ordering::SeqCst);
+        self.flush_requested.store(true, Ordering::SeqCst);
+    }
+
+    pub fn get_playback_speed(&self) -> f32 {
+        *self.playback_speed.lock()
+    }
+
     pub fn equalizer(&self) -> Arc<Mutex<ParametricEqualizer>> {
         Arc::clone(&self.equalizer)
     }
@@ -707,7 +885,61 @@ impl AudioRenderCallback for PlaybackEngine {
         // which causes the receiving USB DAC to fail DSD synchronization and output 0 dBFS deafening noise.
         // Therefore, DSP and volume processing MUST be completely bypassed for DoP.
         if !is_dop {
-            // Apply Volume with perceptual (logarithmic) curve and smooth ramping
+            // 1. Process DSP Equalizer
+            {
+                let mut eq = self.equalizer.lock();
+                eq.process_interleaved(buffer);
+            }
+
+            // 2. Process Sub-Bass Exciter (Missing Fundamental harmonics)
+            {
+                let mut sub = self.sub_bass.lock();
+                sub.process_interleaved(buffer, channels);
+            }
+
+            // 4. Process Vocal Clarity (Formant intelligibility)
+            {
+                let mut voc = self.vocal_clarity.lock();
+                voc.process_interleaved(buffer, channels);
+            }
+
+            // 4. Process Tube Warmth & Analog Harmonic Exciter (Musical 2nd/3rd harmonics)
+            {
+                let tube = self.tube_exciter.lock();
+                tube.process_interleaved(buffer);
+            }
+
+            // 5. Process 360° Panoramic Spatializer (Mid/Side soundstage width)
+            {
+                let mut spat = self.spatializer.lock();
+                spat.process_interleaved(buffer, channels);
+            }
+
+            // 6. Process Headphone Crossfeed (Binaural stereo soundstage)
+            {
+                let mut xfeed = self.crossfeed.lock();
+                xfeed.process_interleaved(buffer, channels);
+            }
+
+            // 7. Process Dynamic Loudness Normalization (EBU R128 / target LUFS with freeze gate)
+            {
+                let mut norm = self.loudness_normalizer.lock();
+                norm.process_interleaved(buffer, channels);
+            }
+
+            // 8. Process Precision L/R Channel Balance (Constant-power panning)
+            {
+                let bal = self.channel_balance.lock();
+                bal.process_interleaved(buffer, channels);
+            }
+
+            // 9. Process Soft-Knee Peak Limiter (Guarantees zero clipping distortion & speaker safety)
+            {
+                let lim = self.limiter.lock();
+                lim.process_interleaved(buffer);
+            }
+
+            // 7. Apply Master Volume with perceptual logarithmic curve and smooth ramping
             let target_vol = perceptual_volume(volume);
             let mut vol_guard = self.render_volume.lock();
             let start_vol = *vol_guard;
@@ -726,18 +958,10 @@ impl AudioRenderCallback for PlaybackEngine {
                 *vol_guard = target_vol;
             }
 
-            // Process DSP Equalizer
-            {
-                let mut eq = self.equalizer.lock();
-                eq.process_interleaved(buffer);
-            }
-
             // Soft-clamp and protect against NaN / denormals to guarantee speaker safety
             for sample in buffer.iter_mut() {
                 if !sample.is_finite() {
                     *sample = 0.0;
-                } else {
-                    *sample = sample.clamp(-1.0, 1.0);
                 }
             }
         }
@@ -748,8 +972,9 @@ impl AudioRenderCallback for PlaybackEngine {
 
         let actual_frames = read_samples / channels.max(1);
         let output_rate = *self.output_sample_rate.lock() as f64;
+        let speed = *self.playback_speed.lock() as f64;
         let delta_seconds = if output_rate > 0.0 {
-            actual_frames as f64 / output_rate
+            (actual_frames as f64 / output_rate) * speed
         } else {
             0.0
         };

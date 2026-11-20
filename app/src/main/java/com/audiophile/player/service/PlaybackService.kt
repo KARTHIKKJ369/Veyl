@@ -179,8 +179,10 @@ class PlaybackService : MediaBrowserServiceCompat() {
     private val becomingNoisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
-                Log.i("PlaybackService", "Headphones disconnected (becoming noisy). Pausing playback.")
-                engineController.pause()
+                Log.i("PlaybackService", "Headphones disconnected (becoming noisy).")
+                if (engineController.pauseOnDisconnect.value) {
+                    engineController.pause()
+                }
             }
         }
     }

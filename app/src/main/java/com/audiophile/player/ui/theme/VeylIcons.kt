@@ -222,6 +222,32 @@ object VeylIcons {
         }.build()
     }
 
+    val Microphone: ImageVector by lazy {
+        ImageVector.Builder("VeylMicrophone", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(12f, 14f)
+                curveToRelative(1.66f, 0f, 3f, -1.34f, 3f, -3f)
+                verticalLineTo(5f)
+                curveToRelative(0f, -1.66f, -1.34f, -3f, -3f, -3f)
+                reflectiveCurveToRelative(-3f, 1.34f, -3f, 3f)
+                verticalLineToRelative(6f)
+                curveToRelative(0f, 1.66f, 1.34f, 3f, 3f, 3f)
+                close()
+                moveTo(17.3f, 11f)
+                curveToRelative(0f, 2.9f, -2.4f, 5.25f, -5.3f, 5.25f)
+                reflectiveCurveTo(6.7f, 13.9f, 6.7f, 11f)
+                horizontalLineTo(5f)
+                curveToRelative(0f, 3.42f, 2.72f, 6.23f, 6f, 6.72f)
+                verticalLineTo(21f)
+                horizontalLineToRelative(2f)
+                verticalLineToRelative(-3.28f)
+                curveToRelative(3.28f, -0.49f, 6f, -3.3f, 6f, -6.72f)
+                horizontalLineToRelative(-1.7f)
+                close()
+            }
+        }.build()
+    }
+
     val ArrowBack: ImageVector by lazy {
         ImageVector.Builder("VeylArrowBack", 24.dp, 24.dp, 24f, 24f).apply {
             path(fill = SolidColor(Color.White)) {
@@ -1266,6 +1292,8 @@ object VeylIcons {
     val RepeatOne: ImageVector get() = Repeat
     val Playlist: ImageVector get() = QueueList
     val Disc: ImageVector get() = StorageLocal
+    val Speed: ImageVector get() = Waveform
+    val Looper: ImageVector get() = Repeat
 
     val Upload: ImageVector by lazy {
         ImageVector.Builder("VeylUpload", 24.dp, 24.dp, 24f, 24f).apply {
@@ -1368,6 +1396,32 @@ object VeylIcons {
             }
         }.build()
     }
+
+    val Headphones: ImageVector by lazy {
+        ImageVector.Builder("VeylHeadphones", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(12f, 3f)
+                curveToRelative(-4.97f, 0f, -9f, 4.03f, -9f, 9f)
+                verticalLineToRelative(7f)
+                curveToRelative(0f, 1.66f, 1.34f, 3f, 3f, 3f)
+                horizontalLineToRelative(3f)
+                verticalLineToRelative(-8f)
+                horizontalLineTo(5f)
+                verticalLineToRelative(-2f)
+                curveToRelative(0f, -3.87f, 3.13f, -7f, 7f, -7f)
+                reflectiveCurveToRelative(7f, 3.13f, 7f, 7f)
+                verticalLineToRelative(2f)
+                horizontalLineToRelative(-4f)
+                verticalLineToRelative(8f)
+                horizontalLineToRelative(3f)
+                curveToRelative(1.66f, 0f, 3f, -1.34f, 3f, -3f)
+                verticalLineToRelative(-7f)
+                curveToRelative(0f, -4.97f, -4.03f, -9f, -9f, -9f)
+                close()
+            }
+        }.build()
+    }
 }
+
 
 

@@ -473,3 +473,776 @@ pub fn calculate_spectrum_16(buffer: &[f32], channels: usize) -> Vec<f32> {
 
     bands
 }
+
+/// Audiophile Headphone Crossfeed Presets (Bauer / Meier / Chu Moy binaural model)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CrossfeedPreset {
+    /// Bit-perfect direct bypass
+    Off,
+    /// Subtle (Jan Meier natural crossfeed, -9.5 dB cross-feed, 700 Hz cutoff)
+    Subtle,
+    /// Standard (Bauer / Chu Moy reference crossfeed, -6.0 dB cross-feed, 700 Hz cutoff)
+    Standard,
+    /// Vintage (Aggressive crossfeed for early 60s hard-panned stereo, -4.5 dB cross-feed, 650 Hz cutoff)
+    Vintage,
+}
+
+/// Headphone Crossfeed Filter
+/// Simulates natural speaker acoustic room response on headphones/IEMs by blending
+/// low-pass filtered and interaurally delayed acoustic crosstalk from contralateral channels.
+#[derive(Debug, Clone)]
+pub struct CrossfeedFilter {
+    pub preset: CrossfeedPreset,
+    sample_rate: f32,
+    alpha: f32,
+    g_direct: f32,
+    g_cross: f32,
+    state_l: f32,
+    state_r: f32,
+}
+
+impl CrossfeedFilter {
+    pub fn new(sample_rate: f32) -> Self {
+        let mut filter = Self {
+            preset: CrossfeedPreset::Off,
+            sample_rate,
+            alpha: 0.0,
+            g_direct: 1.0,
+            g_cross: 0.0,
+            state_l: 0.0,
+            state_r: 0.0,
+        };
+        filter.recalculate();
+        filter
+    }
+
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        if (self.sample_rate - sample_rate).abs() > 0.1 {
+            self.sample_rate = sample_rate;
+            self.recalculate();
+        }
+    }
+
+    pub fn set_preset(&mut self, preset: CrossfeedPreset) {
+        if self.preset != preset {
+            self.preset = preset;
+            self.recalculate();
+            self.reset();
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.state_l = 0.0;
+        self.state_r = 0.0;
+    }
+
+    fn recalculate(&mut self) {
+        let (cutoff, cross_gain_db) = match self.preset {
+            CrossfeedPreset::Off => {
+                self.alpha = 0.0;
+                self.g_direct = 1.0;
+                self.g_cross = 0.0;
+                return;
+            }
+            CrossfeedPreset::Subtle => (700.0, -9.5),
+            CrossfeedPreset::Standard => (700.0, -6.0),
+            CrossfeedPreset::Vintage => (650.0, -4.5),
+        };
+
+        let fs = self.sample_rate.max(8000.0);
+        let w_c = 2.0 * PI * cutoff / fs;
+        // 1-pole low-pass filter coefficient alpha = 1 - exp(-w_c)
+        self.alpha = (1.0 - (-w_c).exp()).clamp(0.0001, 0.9999);
+
+        // Calculate direct vs cross gains so mono / center-panned signals maintain 0 dB unity gain at DC
+        self.g_cross = 10.0f32.powf(cross_gain_db / 20.0);
+        self.g_direct = (1.0 - self.g_cross).max(0.1);
+    }
+
+    #[inline(always)]
+    pub fn process_sample(&mut self, left: f32, right: f32) -> (f32, f32) {
+        if self.preset == CrossfeedPreset::Off {
+            return (left, right);
+        }
+
+        // Low-pass filter for contralateral acoustic delay & head-shadow attenuation
+        self.state_l += self.alpha * (left - self.state_l);
+        self.state_r += self.alpha * (right - self.state_r);
+
+        // Denormal protection
+        if !self.state_l.is_finite() || self.state_l.abs() < 1e-15 { self.state_l = 0.0; }
+        if !self.state_r.is_finite() || self.state_r.abs() < 1e-15 { self.state_r = 0.0; }
+
+        let out_l = self.g_direct * left + self.g_cross * self.state_r;
+        let out_r = self.g_direct * right + self.g_cross * self.state_l;
+
+        (out_l, out_r)
+    }
+
+    pub fn process_interleaved(&mut self, buffer: &mut [f32], channels: usize) {
+        if self.preset == CrossfeedPreset::Off || channels != 2 {
+            return;
+        }
+
+        let frames = buffer.len() / 2;
+        for frame in 0..frames {
+            let idx = frame * 2;
+            let l = buffer[idx];
+            let r = buffer[idx + 1];
+            let (out_l, out_r) = self.process_sample(l, r);
+            buffer[idx] = out_l;
+            buffer[idx + 1] = out_r;
+        }
+    }
+}
+
+/// Audiophile transparent soft-knee peak limiter.
+///
+/// Prevents harsh digital clipping (0 dBFS intersample overs) when EQ or ReplayGain
+/// boosts signal above unity, while maintaining 0.000% THD under 0.95 peak amplitude.
+#[derive(Debug, Clone)]
+pub struct PeakLimiter {
+    pub enabled: bool,
+    pub threshold: f32,
+}
+
+impl PeakLimiter {
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            threshold: 0.95,
+        }
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    #[inline(always)]
+    pub fn process_sample(&self, sample: f32) -> f32 {
+        if !self.enabled {
+            return sample;
+        }
+
+        let abs = sample.abs();
+        if abs <= self.threshold {
+            sample
+        } else {
+            let over = abs - self.threshold;
+            let head = 1.0 - self.threshold;
+            let saturated = self.threshold + head * (over / head).tanh();
+            sample.signum() * saturated.min(0.9999)
+        }
+    }
+
+    pub fn process_interleaved(&self, buffer: &mut [f32]) {
+        if !self.enabled {
+            return;
+        }
+        for s in buffer.iter_mut() {
+            *s = self.process_sample(*s);
+        }
+    }
+}
+
+/// Dynamic Loudness Normalizer (EBU R128 RMS target with smooth envelope).
+///
+/// Automatically balances perceived volume across different audio files, albums,
+/// and streaming tracks without abrupt volume shifts or audible compression artifacts.
+#[derive(Debug, Clone)]
+pub struct LoudnessNormalizer {
+    pub enabled: bool,
+    pub target_lufs: f32,
+    pub current_gain: f32,
+    envelope: f32,
+    sample_rate: f32,
+}
+
+impl LoudnessNormalizer {
+    pub fn new(sample_rate: f32) -> Self {
+        let target_lufs = -14.0;
+        let initial_target_rms = 10.0f32.powf((target_lufs + 0.691) / 20.0);
+        Self {
+            enabled: false,
+            target_lufs,
+            current_gain: 1.0,
+            envelope: initial_target_rms,
+            sample_rate: sample_rate.max(8000.0),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        let target_rms = 10.0f32.powf((self.target_lufs + 0.691) / 20.0);
+        self.envelope = target_rms;
+        self.current_gain = 1.0;
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        if !enabled {
+            self.current_gain = 1.0;
+        }
+    }
+
+    pub fn set_target_lufs(&mut self, lufs: f32) {
+        self.target_lufs = lufs.clamp(-24.0, -9.0);
+    }
+
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate.max(8000.0);
+    }
+
+    pub fn process_interleaved(&mut self, buffer: &mut [f32], channels: usize) {
+        if !self.enabled || buffer.is_empty() || channels == 0 {
+            return;
+        }
+
+        let frames = buffer.len() / channels;
+
+        let mut sum_sq = 0.0f32;
+        for s in buffer.iter() {
+            sum_sq += s * s;
+        }
+        let rms = (sum_sq / buffer.len() as f32).sqrt();
+
+        // Silence / Ducking Gate (-42 dBFS threshold = 0.008)
+        // During quiet interludes, pauses, or notification ducking:
+        // FREEZE the gain and envelope at the current steady-state value!
+        // Never decay towards 1.0 and never ramp up.
+        // This guarantees zero audio burst when notifications or quiet sections end.
+        let silence_threshold = 0.008f32;
+        if rms < silence_threshold {
+            let start_gain = self.current_gain;
+            for f in 0..frames {
+                for ch in 0..channels {
+                    buffer[f * channels + ch] *= start_gain;
+                }
+            }
+            return;
+        }
+
+        let target_rms = 10.0f32.powf((self.target_lufs + 0.691) / 20.0);
+
+        // Slow musical envelope tracking (tau = 2.5 seconds, matching EBU R128 short-term window)
+        let alpha = (buffer.len() as f32 / (2.5 * self.sample_rate * channels as f32)).clamp(0.0005, 0.05);
+        self.envelope += alpha * (rms - self.envelope);
+
+        // Safe bounds: max boost +3.0 dB (1.41x) to prevent noise amplification and bursts;
+        // max attenuation -12.0 dB (0.25x) for hot masters.
+        let desired_gain = (target_rms / self.envelope.max(1e-4)).clamp(0.25, 1.41);
+
+        // Asymmetric gain smoothing (sample-rate & buffer-size invariant):
+        // Fast reaction (tau = 0.35s) when reducing loud passages to avoid harsh peaks;
+        // Ultra-gentle reaction (tau = 5.0s) when boosting quiet audio to completely eliminate pumping artifacts.
+        let buffer_sec = frames as f32 / self.sample_rate;
+        let tau = if desired_gain < self.current_gain { 0.35 } else { 5.0 };
+        let gain_alpha = (buffer_sec / tau).clamp(0.0001, 0.1);
+        let new_gain = self.current_gain + gain_alpha * (desired_gain - self.current_gain);
+
+        // Smoothly interpolate gain across frames to eliminate any step pops
+        let start_gain = self.current_gain;
+        let gain_step = (new_gain - start_gain) / frames.max(1) as f32;
+        let mut cur_g = start_gain;
+
+        for f in 0..frames {
+            cur_g += gain_step;
+            for ch in 0..channels {
+                buffer[f * channels + ch] *= cur_g;
+            }
+        }
+
+        self.current_gain = new_gain;
+    }
+}
+
+/// Audiophile Triode Tube Warmth & Harmonic Exciter
+///
+/// Adds musical 2nd-order (warmth) and 3rd-order (presence) harmonics
+/// typical of single-ended Class-A vacuum tube preamps.
+#[derive(Debug, Clone)]
+pub struct TubeWarmthExciter {
+    pub enabled: bool,
+    /// Warmth drive amount: 0.0 (clean/transparent) to 1.0 (warm vintage saturation)
+    pub drive: f32,
+}
+
+impl TubeWarmthExciter {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            drive: 0.35,
+        }
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    pub fn set_drive(&mut self, drive: f32) {
+        self.drive = drive.clamp(0.0, 1.0);
+    }
+
+    #[inline(always)]
+    pub fn process_sample(&self, sample: f32) -> f32 {
+        if !self.enabled || self.drive < 0.01 {
+            return sample;
+        }
+
+        let d = self.drive;
+        // Input gain drive: 1.0 to 2.8x so signal reaches the musical non-linear saturation curve
+        let in_gain = 1.0 + d * 1.8;
+        let x = (sample * in_gain).clamp(-2.5, 2.5);
+
+        // Class-A asymmetrical triode saturation:
+        // Even harmonics: 0.25 * d * (x^2 - 0.35 * |x|)
+        let even = 0.25 * d * (x * x - 0.35 * x.abs());
+        let saturated = if x >= 0.0 {
+            (x + even) / (1.0 + 0.35 * d * x)
+        } else {
+            (x + even) / (1.0 - 0.25 * d * x)
+        };
+
+        // Makeup gain compensation so perceived loudness stays balanced
+        let makeup = 1.0 / (1.0 + d * 0.40);
+        (saturated * makeup).clamp(-1.0, 1.0)
+    }
+
+    pub fn process_interleaved(&self, buffer: &mut [f32]) {
+        if !self.enabled || self.drive < 0.01 {
+            return;
+        }
+        for s in buffer.iter_mut() {
+            *s = self.process_sample(*s);
+        }
+    }
+}
+
+/// Precision L/R Channel Balance
+#[derive(Debug, Clone, Copy)]
+pub struct ChannelBalance {
+    /// -1.0 (Full Left) to 0.0 (Center) to +1.0 (Full Right)
+    pub balance: f32,
+    gain_l: f32,
+    gain_r: f32,
+}
+
+impl ChannelBalance {
+    pub fn new() -> Self {
+        Self {
+            balance: 0.0,
+            gain_l: 1.0,
+            gain_r: 1.0,
+        }
+    }
+
+    pub fn set_balance(&mut self, balance: f32) {
+        self.balance = balance.clamp(-1.0, 1.0);
+        if self.balance.abs() < 0.001 {
+            self.gain_l = 1.0;
+            self.gain_r = 1.0;
+        } else if self.balance < 0.0 {
+            // Panning left: attenuate right channel
+            self.gain_l = 1.0;
+            self.gain_r = (1.0 + self.balance).clamp(0.0, 1.0);
+        } else {
+            // Panning right: attenuate left channel
+            self.gain_l = (1.0 - self.balance).clamp(0.0, 1.0);
+            self.gain_r = 1.0;
+        }
+    }
+
+    pub fn process_interleaved(&self, buffer: &mut [f32], channels: usize) {
+        if self.balance.abs() < 0.001 || channels != 2 {
+            return;
+        }
+        let frames = buffer.len() / 2;
+        for f in 0..frames {
+            buffer[f * 2] *= self.gain_l;
+            buffer[f * 2 + 1] *= self.gain_r;
+        }
+    }
+}
+
+/// 360° Panoramic Spatializer
+/// Expands stereo soundstage into a wide 3D acoustic bubble using:
+/// 1. Bass-Anchored Mid/Side Crossover (keeping <140 Hz mono so kick and bass remain locked center)
+/// 2. Schroeder All-Pass Diffusers on Side channel (creates natural 3D room depth without metallic comb-filtering)
+/// 3. HRTF Head-Shadowed ITD Crossfeed (~0.32 ms delay, 1.8 kHz LPF to simulate human head diffraction)
+#[derive(Debug, Clone)]
+pub struct Spatializer360 {
+    pub enabled: bool,
+    /// Stereo width multiplier: 0.5 (Narrow) to 1.0 (Natural) to 2.2 (Wide 360°)
+    pub width: f32,
+    sample_rate: f32,
+    side_hp_l: f32,
+    side_hp_alpha: f32,
+    // ITD delay buffers (~0.32 ms)
+    delay_l: Vec<f32>,
+    delay_r: Vec<f32>,
+    write_idx: usize,
+    // Prime-length Schroeder All-Pass buffers (~4.3 ms L, ~5.9 ms R) for 3D room depth
+    ap_buf_l: Vec<f32>,
+    ap_buf_r: Vec<f32>,
+    ap_idx_l: usize,
+    ap_idx_r: usize,
+    // HRTF head-shadow low-pass for crossfeed
+    cross_lp_l: f32,
+    cross_lp_r: f32,
+    cross_alpha: f32,
+}
+
+impl Spatializer360 {
+    pub fn new(sample_rate: f32) -> Self {
+        let mut spat = Self {
+            enabled: false,
+            width: 1.35,
+            sample_rate: sample_rate.max(8000.0),
+            side_hp_l: 0.0,
+            side_hp_alpha: 0.0,
+            delay_l: Vec::new(),
+            delay_r: Vec::new(),
+            write_idx: 0,
+            ap_buf_l: Vec::new(),
+            ap_buf_r: Vec::new(),
+            ap_idx_l: 0,
+            ap_idx_r: 0,
+            cross_lp_l: 0.0,
+            cross_lp_r: 0.0,
+            cross_alpha: 0.0,
+        };
+        spat.set_sample_rate(sample_rate);
+        spat
+    }
+
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        let sr = sample_rate.max(8000.0);
+        self.sample_rate = sr;
+
+        let dt = 1.0 / sr;
+        // 140 Hz crossover so spatial widening never thins out bass
+        let rc_side = 1.0 / (2.0 * PI * 140.0);
+        self.side_hp_alpha = dt / (rc_side + dt);
+
+        // 1.8 kHz head-shadow LPF for HRTF crossfeed
+        let rc_cross = 1.0 / (2.0 * PI * 1800.0);
+        self.cross_alpha = dt / (rc_cross + dt);
+
+        // ITD delay (~0.32 ms)
+        let itd_samples = ((0.00032 * sr) as usize).max(4);
+        self.delay_l.resize(itd_samples, 0.0);
+        self.delay_r.resize(itd_samples, 0.0);
+        self.write_idx = 0;
+
+        // Prime Schroeder All-Pass buffers (~4.3 ms L, ~5.9 ms R) for 3D room depth
+        let ap_l_len = ((0.0043 * sr) as usize).max(17);
+        let ap_r_len = ((0.0059 * sr) as usize).max(23);
+        self.ap_buf_l.resize(ap_l_len, 0.0);
+        self.ap_buf_r.resize(ap_r_len, 0.0);
+        self.ap_idx_l = 0;
+        self.ap_idx_r = 0;
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    pub fn set_width(&mut self, width: f32) {
+        self.width = width.clamp(0.5, 2.2);
+    }
+
+    #[inline(always)]
+    pub fn process_interleaved(&mut self, buffer: &mut [f32], channels: usize) {
+        if !self.enabled || channels != 2 {
+            return;
+        }
+
+        // Map width (0.5..2.2) into spatial strength (0.0..1.0)
+        let s = ((self.width - 0.5) / 1.5).clamp(0.0, 1.0);
+        if s < 0.001 {
+            return;
+        }
+
+        let frames = buffer.len() / 2;
+        let g = 0.5;
+
+        for f in 0..frames {
+            let idx = f * 2;
+            let l = buffer[idx];
+            let r = buffer[idx + 1];
+
+            // 1. Mid/Side decomposition
+            let mid = (l + r) * 0.5;
+            let side = (l - r) * 0.5;
+
+            // 2. Bass-anchored crossover: keep <140 Hz strictly mono in center
+            self.side_hp_l += self.side_hp_alpha * (side - self.side_hp_l);
+            let side_highs = side - self.side_hp_l;
+
+            // 3. Schroeder All-Pass Diffusers on Side channel for 3D room envelope
+            let delayed_ap_l = self.ap_buf_l[self.ap_idx_l];
+            let ap_in_l = side_highs + g * delayed_ap_l;
+            self.ap_buf_l[self.ap_idx_l] = ap_in_l;
+            self.ap_idx_l = (self.ap_idx_l + 1) % self.ap_buf_l.len();
+            let diff_l = delayed_ap_l - g * ap_in_l;
+
+            let delayed_ap_r = self.ap_buf_r[self.ap_idx_r];
+            let ap_in_r = -side_highs + g * delayed_ap_r;
+            self.ap_buf_r[self.ap_idx_r] = ap_in_r;
+            self.ap_idx_r = (self.ap_idx_r + 1) % self.ap_buf_r.len();
+            let diff_r = delayed_ap_r - g * ap_in_r;
+
+            // 4. HRTF Head-Shadowed ITD Crossfeed
+            let itd_l = self.delay_l[self.write_idx];
+            let itd_r = self.delay_r[self.write_idx];
+            self.delay_l[self.write_idx] = l;
+            self.delay_r[self.write_idx] = r;
+            self.write_idx = (self.write_idx + 1) % self.delay_l.len();
+
+            self.cross_lp_l += self.cross_alpha * (itd_l - self.cross_lp_l);
+            self.cross_lp_r += self.cross_alpha * (itd_r - self.cross_lp_r);
+
+            // 5. Recombine: Mid slightly recessed for front stage depth + widened side highs + 3D diffuser + crossfeed
+            let mid_scaled = mid * (1.0 - 0.12 * s);
+            let wide_side = self.side_hp_l + side_highs * (1.0 + 0.75 * s);
+
+            let out_l = mid_scaled + wide_side + (diff_l * 0.28 * s) - (self.cross_lp_r * 0.18 * s);
+            let out_r = mid_scaled - wide_side + (diff_r * 0.28 * s) - (self.cross_lp_l * 0.18 * s);
+
+            buffer[idx] = out_l;
+            buffer[idx + 1] = out_r;
+        }
+    }
+}
+
+/// Audiophile Psychoacoustic Sub-Bass Exciter
+/// Combines a resonant sub-bass shelf (40–90 Hz) with missing-fundamental
+/// harmonic generation (even/odd overtones) so sub-bass hits hard on both IEMs and speakers.
+#[derive(Debug, Clone)]
+pub struct SubBassExciter {
+    pub enabled: bool,
+    /// Exciter intensity: 0.0 (Bypass) to 1.0 (Maximum sub-bass slam)
+    pub intensity: f32,
+    sample_rate: f32,
+    shelf_l: BiquadChannelState,
+    shelf_r: BiquadChannelState,
+    coeffs: BiquadCoefficients,
+    // 85 Hz sub-bass extractor LPF
+    sub_lp_l: f32,
+    sub_lp_r: f32,
+    sub_alpha: f32,
+}
+
+impl SubBassExciter {
+    pub fn new(sample_rate: f32) -> Self {
+        let sr = sample_rate.max(8000.0);
+        let mut exciter = Self {
+            enabled: false,
+            intensity: 0.50,
+            sample_rate: sr,
+            shelf_l: BiquadChannelState::default(),
+            shelf_r: BiquadChannelState::default(),
+            coeffs: BiquadCoefficients::identity(),
+            sub_lp_l: 0.0,
+            sub_lp_r: 0.0,
+            sub_alpha: 0.0,
+        };
+        exciter.recalculate();
+        exciter
+    }
+
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate.max(8000.0);
+        self.recalculate();
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    pub fn set_intensity(&mut self, intensity: f32) {
+        self.intensity = intensity.clamp(0.0, 1.0);
+        self.recalculate();
+    }
+
+    fn recalculate(&mut self) {
+        let sr = self.sample_rate.max(8000.0);
+        let dt = 1.0 / sr;
+        let rc_sub = 1.0 / (2.0 * PI * 85.0);
+        self.sub_alpha = dt / (rc_sub + dt);
+
+        // Resonant low-shelf boost at 75 Hz: up to +9.5 dB with Q = 0.85
+        let gain_db = self.intensity * 9.5;
+        self.coeffs = BiquadCoefficients::calculate(
+            FilterType::LowShelf,
+            75.0,
+            gain_db,
+            0.85,
+            sr,
+        );
+    }
+
+    #[inline(always)]
+    pub fn process_interleaved(&mut self, buffer: &mut [f32], channels: usize) {
+        if !self.enabled || self.intensity < 0.01 {
+            return;
+        }
+
+        let intensity = self.intensity;
+        // Headroom attenuation so boosted sub-bass doesn't hard-clip into distortion
+        let headroom = 1.0 / (1.0 + intensity * 0.45);
+        let frames = buffer.len() / channels;
+
+        let soft_clip = |x: f32| -> f32 {
+            if x.abs() <= 0.85 {
+                x
+            } else {
+                x.signum() * (0.85 + 0.15 * ((x.abs() - 0.85) / 0.15).tanh())
+            }
+        };
+
+        for f in 0..frames {
+            let l_idx = f * channels;
+            let l = buffer[l_idx] * headroom;
+
+            // 1. Resonant low-shelf boost on sub-bass fundamental
+            let bl = self.shelf_l.process(l, &self.coeffs);
+
+            // 2. Sub-bass harmonic exciter (adds warm 2nd/3rd harmonics to <85Hz)
+            self.sub_lp_l += self.sub_alpha * (l - self.sub_lp_l);
+            let harm_l = (self.sub_lp_l * 2.5).tanh() * 0.22 * intensity;
+
+            buffer[l_idx] = soft_clip(bl + harm_l);
+
+            if channels > 1 {
+                let r_idx = l_idx + 1;
+                let r = buffer[r_idx] * headroom;
+
+                let br = self.shelf_r.process(r, &self.coeffs);
+
+                self.sub_lp_r += self.sub_alpha * (r - self.sub_lp_r);
+                let harm_r = (self.sub_lp_r * 2.5).tanh() * 0.22 * intensity;
+
+                buffer[r_idx] = soft_clip(br + harm_r);
+            }
+        }
+    }
+}
+
+/// Audiophile Vocal Clarity & Formant Intelligibility Enhancer
+/// Multi-band acoustic processing:
+/// 1. Formant presence peaking filter at 2.8 kHz (+2.0 dB to +8.5 dB)
+/// 2. Breath & air articulation high-shelf at 8.5 kHz (+1.0 dB to +5.0 dB)
+/// 3. Mud/boxiness scoop at 380 Hz (-1.0 dB to -3.0 dB)
+#[derive(Debug, Clone)]
+pub struct VocalClarity {
+    pub enabled: bool,
+    /// Clarity intensity: 0.0 (Bypass) to 1.0 (Maximum vocal presence)
+    pub clarity: f32,
+    sample_rate: f32,
+    coeffs_presence: BiquadCoefficients,
+    coeffs_air: BiquadCoefficients,
+    coeffs_mud: BiquadCoefficients,
+    state_presence_l: BiquadChannelState,
+    state_presence_r: BiquadChannelState,
+    state_air_l: BiquadChannelState,
+    state_air_r: BiquadChannelState,
+    state_mud_l: BiquadChannelState,
+    state_mud_r: BiquadChannelState,
+}
+
+impl VocalClarity {
+    pub fn new(sample_rate: f32) -> Self {
+        let sr = sample_rate.max(8000.0);
+        let mut filter = Self {
+            enabled: false,
+            clarity: 0.50,
+            sample_rate: sr,
+            coeffs_presence: BiquadCoefficients::identity(),
+            coeffs_air: BiquadCoefficients::identity(),
+            coeffs_mud: BiquadCoefficients::identity(),
+            state_presence_l: BiquadChannelState::default(),
+            state_presence_r: BiquadChannelState::default(),
+            state_air_l: BiquadChannelState::default(),
+            state_air_r: BiquadChannelState::default(),
+            state_mud_l: BiquadChannelState::default(),
+            state_mud_r: BiquadChannelState::default(),
+        };
+        filter.recalculate();
+        filter
+    }
+
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate.max(8000.0);
+        self.recalculate();
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    pub fn set_clarity(&mut self, clarity: f32) {
+        self.clarity = clarity.clamp(0.0, 1.0);
+        self.recalculate();
+    }
+
+    fn recalculate(&mut self) {
+        let c = self.clarity;
+        // 1. Presence peaking boost at 2800 Hz: up to +8.5 dB
+        let presence_gain = c * 8.5;
+        self.coeffs_presence = BiquadCoefficients::calculate(
+            FilterType::Peaking,
+            2800.0,
+            presence_gain,
+            1.2,
+            self.sample_rate,
+        );
+
+        // 2. Air articulation high-shelf at 8500 Hz: up to +5.0 dB
+        let air_gain = c * 5.0;
+        self.coeffs_air = BiquadCoefficients::calculate(
+            FilterType::HighShelf,
+            8500.0,
+            air_gain,
+            0.75,
+            self.sample_rate,
+        );
+
+        // 3. Gentle boxy mud dip at 380 Hz: down to -3.0 dB
+        let mud_gain = -c * 3.0;
+        self.coeffs_mud = BiquadCoefficients::calculate(
+            FilterType::Peaking,
+            380.0,
+            mud_gain,
+            1.0,
+            self.sample_rate,
+        );
+    }
+
+    #[inline(always)]
+    pub fn process_interleaved(&mut self, buffer: &mut [f32], channels: usize) {
+        if !self.enabled || self.clarity < 0.01 {
+            return;
+        }
+
+        let frames = buffer.len() / channels;
+        for f in 0..frames {
+            let l_idx = f * channels;
+            let mut s_l = buffer[l_idx];
+            s_l = self.state_mud_l.process(s_l, &self.coeffs_mud);
+            s_l = self.state_presence_l.process(s_l, &self.coeffs_presence);
+            s_l = self.state_air_l.process(s_l, &self.coeffs_air);
+            buffer[l_idx] = s_l;
+
+            if channels > 1 {
+                let r_idx = l_idx + 1;
+                let mut s_r = buffer[r_idx];
+                s_r = self.state_mud_r.process(s_r, &self.coeffs_mud);
+                s_r = self.state_presence_r.process(s_r, &self.coeffs_presence);
+                s_r = self.state_air_r.process(s_r, &self.coeffs_air);
+                buffer[r_idx] = s_r;
+            }
+        }
+    }
+}
+
+

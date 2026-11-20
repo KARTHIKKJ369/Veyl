@@ -231,7 +231,41 @@ impl AudioDecoder {
             0.0
         };
 
-        let codec_name = format!("{:?}", track.codec_params.codec);
+        let codec_name = match track.codec_params.codec {
+            symphonia::core::codecs::CODEC_TYPE_FLAC => "FLAC".to_string(),
+            symphonia::core::codecs::CODEC_TYPE_MP3 => "MP3".to_string(),
+            symphonia::core::codecs::CODEC_TYPE_AAC => "AAC".to_string(),
+            symphonia::core::codecs::CODEC_TYPE_VORBIS => "Vorbis".to_string(),
+            symphonia::core::codecs::CODEC_TYPE_OPUS => "Opus".to_string(),
+            symphonia::core::codecs::CODEC_TYPE_ALAC => "ALAC".to_string(),
+            symphonia::core::codecs::CODEC_TYPE_PCM_S16LE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_S16BE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_S24LE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_S24BE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_S32LE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_S32BE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_F32LE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_F32BE => "PCM".to_string(),
+            symphonia::core::codecs::CODEC_TYPE_WAVPACK => "WavPack".to_string(),
+            _ => {
+                let uri_lower = source.uri().to_lowercase();
+                if uri_lower.ends_with(".flac") {
+                    "FLAC".to_string()
+                } else if uri_lower.ends_with(".mp3") {
+                    "MP3".to_string()
+                } else if uri_lower.ends_with(".wav") {
+                    "WAV".to_string()
+                } else if uri_lower.ends_with(".m4a") || uri_lower.ends_with(".aac") {
+                    "AAC".to_string()
+                } else if uri_lower.ends_with(".ogg") {
+                    "OGG".to_string()
+                } else if uri_lower.ends_with(".opus") {
+                    "Opus".to_string()
+                } else {
+                    "PCM".to_string()
+                }
+            }
+        };
         let container_name = "Container".to_string();
 
         let decoder_opts = DecoderOptions {

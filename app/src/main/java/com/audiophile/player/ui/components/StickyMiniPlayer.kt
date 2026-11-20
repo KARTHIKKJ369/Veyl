@@ -65,26 +65,7 @@ fun StickyMiniPlayer(
     val isVisible = currentTrack != null
     val isPlaying = playbackState == PlaybackStateEnum.PLAYING
 
-    val formatBadge = remember(currentTrack) {
-        if (currentTrack == null) ""
-        else {
-            var fmt = currentTrack.formatName.uppercase()
-            if (fmt.startsWith("CODECTYPE") || fmt.contains("(")) {
-                val uriLower = currentTrack.uri.lowercase()
-                fmt = when {
-                    uriLower.endsWith(".flac") -> "FLAC"
-                    uriLower.endsWith(".mp3") -> "MP3"
-                    uriLower.endsWith(".wav") -> "WAV"
-                    uriLower.endsWith(".dsf") || uriLower.endsWith(".dff") -> "DSD"
-                    uriLower.endsWith(".m4a") || uriLower.endsWith(".aac") -> "AAC"
-                    uriLower.endsWith(".ogg") || uriLower.endsWith(".opus") -> "OPUS"
-                    else -> "PCM"
-                }
-            }
-            val rateKhz = currentTrack.sampleRate.toDouble() / 1000.0
-            if (fmt.contains("DSD")) "DSD" else "$fmt ${"%.0fk".format(rateKhz)}"
-        }
-    }
+
 
     AnimatedVisibility(
         visible = isVisible,
@@ -147,27 +128,13 @@ fun StickyMiniPlayer(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = currentTrack.artist ?: "Unknown Artist",
-                                        style = VeylTypography.BodySmall,
-                                        color = colors.textSecondary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f, fill = false)
-                                    )
-                                    if (formatBadge.isNotEmpty()) {
-                                        Text(
-                                            text = "• $formatBadge",
-                                            style = VeylTypography.MonoSpec,
-                                            color = colors.accentSignal,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = currentTrack.artist ?: "Unknown Artist",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
 

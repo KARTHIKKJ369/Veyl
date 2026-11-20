@@ -58,6 +58,14 @@ pub enum DsdModeEnum {
     DoP,
 }
 
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CrossfeedPresetEnum {
+    Off,
+    Subtle,
+    Standard,
+    Vintage,
+}
+
 #[derive(uniffi::Record, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AudioMetrics {
     pub rms_left: f32,
@@ -427,6 +435,121 @@ impl AudiophileEngineHandle {
             .zip(curve_gains.into_iter())
             .map(|(frequency, gain_db)| FrequencyPoint { frequency, gain_db })
             .collect()
+    }
+
+    pub fn set_crossfeed_preset(&self, preset: CrossfeedPresetEnum) {
+        let rust_preset = match preset {
+            CrossfeedPresetEnum::Off => dsp::CrossfeedPreset::Off,
+            CrossfeedPresetEnum::Subtle => dsp::CrossfeedPreset::Subtle,
+            CrossfeedPresetEnum::Standard => dsp::CrossfeedPreset::Standard,
+            CrossfeedPresetEnum::Vintage => dsp::CrossfeedPreset::Vintage,
+        };
+        self.engine.set_crossfeed_preset(rust_preset);
+    }
+
+    pub fn get_crossfeed_preset(&self) -> CrossfeedPresetEnum {
+        match self.engine.get_crossfeed_preset() {
+            dsp::CrossfeedPreset::Off => CrossfeedPresetEnum::Off,
+            dsp::CrossfeedPreset::Subtle => CrossfeedPresetEnum::Subtle,
+            dsp::CrossfeedPreset::Standard => CrossfeedPresetEnum::Standard,
+            dsp::CrossfeedPreset::Vintage => CrossfeedPresetEnum::Vintage,
+        }
+    }
+
+    pub fn set_loudness_normalizer_enabled(&self, enabled: bool) {
+        self.engine.set_loudness_normalizer_enabled(enabled);
+    }
+
+    pub fn is_loudness_normalizer_enabled(&self) -> bool {
+        self.engine.is_loudness_normalizer_enabled()
+    }
+
+    pub fn set_loudness_target_lufs(&self, lufs: f32) {
+        self.engine.set_loudness_target_lufs(lufs);
+    }
+
+    pub fn set_tube_warmth_enabled(&self, enabled: bool) {
+        self.engine.set_tube_warmth_enabled(enabled);
+    }
+
+    pub fn is_tube_warmth_enabled(&self) -> bool {
+        self.engine.is_tube_warmth_enabled()
+    }
+
+    pub fn set_tube_warmth_drive(&self, drive: f32) {
+        self.engine.set_tube_warmth_drive(drive);
+    }
+
+    pub fn get_tube_warmth_drive(&self) -> f32 {
+        self.engine.get_tube_warmth_drive()
+    }
+
+    pub fn set_channel_balance(&self, balance: f32) {
+        self.engine.set_channel_balance(balance);
+    }
+
+    pub fn get_channel_balance(&self) -> f32 {
+        self.engine.get_channel_balance()
+    }
+
+    pub fn set_limiter_enabled(&self, enabled: bool) {
+        self.engine.set_limiter_enabled(enabled);
+    }
+
+    pub fn set_spatializer_enabled(&self, enabled: bool) {
+        self.engine.set_spatializer_enabled(enabled);
+    }
+
+    pub fn is_spatializer_enabled(&self) -> bool {
+        self.engine.is_spatializer_enabled()
+    }
+
+    pub fn set_spatializer_width(&self, width: f32) {
+        self.engine.set_spatializer_width(width);
+    }
+
+    pub fn get_spatializer_width(&self) -> f32 {
+        self.engine.get_spatializer_width()
+    }
+
+    pub fn set_sub_bass_enabled(&self, enabled: bool) {
+        self.engine.set_sub_bass_enabled(enabled);
+    }
+
+    pub fn is_sub_bass_enabled(&self) -> bool {
+        self.engine.is_sub_bass_enabled()
+    }
+
+    pub fn set_sub_bass_intensity(&self, intensity: f32) {
+        self.engine.set_sub_bass_intensity(intensity);
+    }
+
+    pub fn get_sub_bass_intensity(&self) -> f32 {
+        self.engine.get_sub_bass_intensity()
+    }
+
+    pub fn set_vocal_clarity_enabled(&self, enabled: bool) {
+        self.engine.set_vocal_clarity_enabled(enabled);
+    }
+
+    pub fn is_vocal_clarity_enabled(&self) -> bool {
+        self.engine.is_vocal_clarity_enabled()
+    }
+
+    pub fn set_vocal_clarity_intensity(&self, intensity: f32) {
+        self.engine.set_vocal_clarity_intensity(intensity);
+    }
+
+    pub fn get_vocal_clarity_intensity(&self) -> f32 {
+        self.engine.get_vocal_clarity_intensity()
+    }
+
+    pub fn set_playback_speed(&self, speed: f32) {
+        self.engine.set_playback_speed(speed);
+    }
+
+    pub fn get_playback_speed(&self) -> f32 {
+        self.engine.get_playback_speed()
     }
 }
 

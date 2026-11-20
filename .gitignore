@@ -77,3 +77,7 @@ Thumbs.db
 *.swp
 *~
 .vscode/
+
+# Agent artifacts
+.agents/
+skills-lock.json

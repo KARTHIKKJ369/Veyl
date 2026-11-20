@@ -93,7 +93,7 @@ fun VeylQueueScreen(
     val density = LocalDensity.current
     val itemHeightPx = with(density) { 68.dp.toPx() }
 
-    var draggingItemIndex by remember { mutableStateOf<Int?>(null) }
+    var draggingItemKey by remember { mutableStateOf<String?>(null) }
     var dragOffsetY by remember { mutableStateOf(0f) }
 
     // Calculate total remaining queue duration without O(N) recalculation on position ticks
@@ -101,16 +101,6 @@ fun VeylQueueScreen(
         queue.filter { it.uri != currentTrack?.uri }.sumOf { it.durationSeconds }
     }
     val totalRemainingSeconds = (durationSec - positionSec).coerceAtLeast(0.0) + restQueueSec
-
-    val queueKeys = remember(queue) {
-        val seen = mutableMapOf<String, Int>()
-        queue.map { track ->
-            val base = "${track.uri}_${System.identityHashCode(track)}"
-            val count = seen.getOrDefault(base, 0)
-            seen[base] = count + 1
-            if (count == 0) base else "${base}_$count"
-        }
-    }
 
     val formattedRemainingTime = remember(totalRemainingSeconds.toInt()) {
         val totalSec = totalRemainingSeconds.toInt()
@@ -348,16 +338,16 @@ fun VeylQueueScreen(
             } else {
                 itemsIndexed(
                     items = queue,
-                    key = { index, _ -> if (index in queueKeys.indices) queueKeys[index] else index }
+                    key = { _, track -> "${track.uri}_${System.identityHashCode(track)}" }
                 ) { index, track ->
+                    val trackKey = "${track.uri}_${System.identityHashCode(track)}"
                     val isCurrent = currentTrack?.uri == track.uri
-                    val isDragging = draggingItemIndex == index
+                    val isDragging = draggingItemKey == trackKey
 
-                    val dragHandleModifier = Modifier.pointerInput(track) {
+                    val dragHandleModifier = Modifier.pointerInput(trackKey) {
                         detectDragGestures(
                             onDragStart = {
-                                val curIdx = queue.indexOfFirst { it === track }.takeIf { it != -1 } ?: index
-                                draggingItemIndex = curIdx
+                                draggingItemKey = trackKey
                                 dragOffsetY = 0f
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             },
@@ -365,31 +355,30 @@ fun VeylQueueScreen(
                                 change.consume()
                                 dragOffsetY += dragAmount.y
                                 val threshold = itemHeightPx * 0.55f
-                                var cur = draggingItemIndex ?: queue.indexOfFirst { it === track }
+                                val curQ = controller.queue.value
+                                var cur = curQ.indexOfFirst { "${it.uri}_${System.identityHashCode(it)}" == trackKey }
                                 if (cur != -1) {
-                                    while (dragOffsetY > threshold && cur < queue.size - 1) {
+                                    while (dragOffsetY > threshold && cur < curQ.size - 1) {
                                         controller.moveInQueue(cur, cur + 1)
                                         cur += 1
-                                        draggingItemIndex = cur
                                         dragOffsetY -= itemHeightPx
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     }
                                     while (dragOffsetY < -threshold && cur > 0) {
                                         controller.moveInQueue(cur, cur - 1)
                                         cur -= 1
-                                        draggingItemIndex = cur
                                         dragOffsetY += itemHeightPx
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     }
                                 }
                             },
                             onDragEnd = {
-                                draggingItemIndex = null
+                                draggingItemKey = null
                                 dragOffsetY = 0f
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             },
                             onDragCancel = {
-                                draggingItemIndex = null
+                                draggingItemKey = null
                                 dragOffsetY = 0f
                             }
                         )

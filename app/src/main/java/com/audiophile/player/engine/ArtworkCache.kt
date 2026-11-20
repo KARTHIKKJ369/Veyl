@@ -83,6 +83,18 @@ object ArtworkCache {
         }
     }
 
+    fun clearDiskCache() {
+        memoryCache.evictAll()
+        noArtworkSet.clear()
+        diskCacheDir?.listFiles()?.forEach { file ->
+            try { file.delete() } catch (_: Exception) {}
+        }
+    }
+
+    fun getDiskCacheSizeBytes(): Long {
+        return diskCacheDir?.listFiles()?.sumOf { it.length() } ?: 0L
+    }
+
     fun registerOnlineArtwork(trackUri: String, imageUrl: String) {
         if (trackUri.isNotBlank() && imageUrl.isNotBlank()) {
             val previous = onlineArtMapping[trackUri]

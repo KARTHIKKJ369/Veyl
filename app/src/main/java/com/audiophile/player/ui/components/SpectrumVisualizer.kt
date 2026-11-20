@@ -20,34 +20,14 @@ import com.audiophile.player.ui.theme.SignalAmber
 
 @Composable
 fun SpectrumVisualizer(
-    spectrum: List<Float>,
+    spectrumProvider: () -> List<Float>,
     modifier: Modifier = Modifier
         .fillMaxWidth()
         .height(48.dp)
 ) {
-    val bandsCount = if (spectrum.isNotEmpty()) spectrum.size else 16
-    val animatables = remember(bandsCount) {
-        List(bandsCount) { Animatable(0f) }
-    }
-
-    LaunchedEffect(spectrum) {
-        if (spectrum.isNotEmpty()) {
-            spectrum.forEachIndexed { index, value ->
-                if (index < animatables.size) {
-                    launch {
-                        animatables[index].animateTo(
-                            targetValue = value.coerceIn(0f, 1f),
-                            animationSpec = tween(durationMillis = 40)
-                        )
-                    }
-                }
-            }
-        } else {
-            animatables.forEach { it.snapTo(0f) }
-        }
-    }
-
     Canvas(modifier = modifier) {
+        val spectrum = spectrumProvider()
+        val bandsCount = if (spectrum.isNotEmpty()) spectrum.size else 16
         val width = size.width
         val height = size.height
         val barSpacing = 4.dp.toPx()
@@ -61,7 +41,8 @@ fun SpectrumVisualizer(
         )
 
         for (i in 0 until bandsCount) {
-            val barHeight = (animatables[i].value * height).coerceAtLeast(2.dp.toPx())
+            val value = if (i < spectrum.size) spectrum[i].coerceIn(0f, 1f) else 0f
+            val barHeight = (value * height).coerceAtLeast(2.dp.toPx())
             val x = i * (barWidth + barSpacing)
             val y = height - barHeight
 
@@ -73,4 +54,17 @@ fun SpectrumVisualizer(
             )
         }
     }
+}
+
+@Composable
+fun SpectrumVisualizer(
+    spectrum: List<Float>,
+    modifier: Modifier = Modifier
+        .fillMaxWidth()
+        .height(48.dp)
+) {
+    SpectrumVisualizer(
+        spectrumProvider = { spectrum },
+        modifier = modifier
+    )
 }

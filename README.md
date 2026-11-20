@@ -12,7 +12,7 @@
   [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
   [![Audio Engine](https://img.shields.io/badge/Engine-Bit--Perfect%20AAudio%20MMAP-00E5FF?style=flat-square)](https://developer.android.com/ndk/guides/audio/aaudio/aaudio)
   [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-  [![Download APK](https://img.shields.io/badge/Download-APK%20(v2.0.0)-FFB300?style=flat-square&logo=android&logoColor=black)](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)
+  [![Download APK](https://img.shields.io/badge/Download-APK%20(v2.3.0)-FFB300?style=flat-square&logo=android&logoColor=black)](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)
 
   ⭐ If you find Veyl useful, star the repository on GitHub!
 

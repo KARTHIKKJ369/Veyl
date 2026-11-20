@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -13,8 +15,8 @@ android {
         applicationId = "com.audiophile.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "2.2.0"
+        versionCode = 8
+        versionName = "2.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
@@ -113,4 +115,35 @@ dependencies {
 
     debugImplementation(libs.androidx.ui.tooling)
     testImplementation("junit:junit:4.13.2")
+}
+
+tasks.register<Exec>("buildRustCore") {
+    description = "Compiles core-rust for Android target ABIs using cargo-ndk"
+    group = "build"
+    workingDir = file("../core-rust")
+
+    val ndkPath = project.rootProject.file("local.properties").let { propFile ->
+        if (propFile.exists()) {
+            Properties().apply { propFile.inputStream().use { stream -> load(stream) } }.getProperty("ndk.dir")
+        } else null
+    } ?: System.getenv("ANDROID_NDK_HOME") ?: System.getenv("NDK_HOME")
+
+    if (ndkPath != null) {
+        environment("ANDROID_NDK_HOME", ndkPath)
+    }
+
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-t", "armeabi-v7a",
+        "-t", "x86_64",
+        "-o", "../app/src/main/jniLibs",
+        "build", "--release"
+    )
+}
+
+if (project.hasProperty("buildRust") || project.findProperty("autoBuildRust") == "true") {
+    tasks.named("preBuild") {
+        dependsOn("buildRustCore")
+    }
 }

@@ -490,7 +490,7 @@ class OnlineStreamManager(private val context: Context) {
         } catch (_: Exception) {}
     }
 
-    private fun cleanOldStreamCaches() {
+    fun cleanOldStreamCaches() {
         try {
             val cacheDir = context.cacheDir
             cacheDir.listFiles { _, name ->
@@ -505,6 +505,34 @@ class OnlineStreamManager(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Could not clean old stream caches", e)
+        }
+    }
+
+    fun cleanAllStreamCaches() {
+        try {
+            val cacheDir = context.cacheDir
+            cacheDir.listFiles { _, name ->
+                name.startsWith("veyl_online_stream_") ||
+                name.startsWith("veyl_next_prefetch_")
+            }?.forEach { file ->
+                if (file.absolutePath != currentStreamFile?.absolutePath) {
+                    file.delete()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not clean all stream caches", e)
+        }
+    }
+
+    fun getStreamCacheSizeBytes(): Long {
+        return try {
+            val cacheDir = context.cacheDir
+            cacheDir.listFiles { _, name ->
+                name.startsWith("veyl_online_stream_") ||
+                name.startsWith("veyl_next_prefetch_")
+            }?.sumOf { it.length() } ?: 0L
+        } catch (_: Exception) {
+            0L
         }
     }
 

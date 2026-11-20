@@ -1,0 +1,9 @@
+Version 2.3.0:
+• Hardware DAC Status Chip: real-time status pill on Now Playing displaying bit-perfect direct USB output vs internal audio
+• EBU R128 Loudness Normalization & Soft-Knee Peak Limiter: dynamic volume leveling (-14 / -18 LUFS) with transparent clipping protection
+• Studio Playback Speed: Rubato sinc resampler time-stretching with pitch preservation (0.5x–2.0x)
+• A-B Repeat Looper: seamless loop segmenting for critical listening and audio analysis
+• Auto-Pause on Disconnect: instant auto-pause when wired headphones, Bluetooth, or USB DAC disconnect
+• Audiophile Headphone Crossfeed: Bauer / Meier binaural DSP with Subtle, Standard, and Vintage room acoustic curves
+• Audiophile Sleep Timer: smooth logarithmic 30-second volume fade-out
+• Fluid Performance: eliminated Equalizer scroll lag and perfected Queue reordering

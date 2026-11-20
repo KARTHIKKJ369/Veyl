@@ -760,6 +760,58 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -785,15 +837,39 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_audiophile_core_fn_constructor_audiophileenginehandle_new(`sampleRate`: Float,`channels`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_channel_balance(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Float
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_crossfeed_preset(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_eq_bands(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_eq_curve(`ptr`: Pointer,`numPoints`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_output_sample_rate(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Int
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_playback_speed(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Float
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_spatializer_width(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Float
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_status(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_sub_bass_intensity(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Float
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_tube_warmth_drive(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Float
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_get_vocal_clarity_intensity(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Float
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_exclusive_mmap(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_loudness_normalizer_enabled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_spatializer_enabled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_sub_bass_enabled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_tube_warmth_enabled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_vocal_clarity_enabled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_pause(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -807,6 +883,10 @@ internal interface UniffiLib : Library {
     ): Byte
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_seek(`ptr`: Pointer,`seconds`: Double,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_channel_balance(`ptr`: Pointer,`balance`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_crossfeed_preset(`ptr`: Pointer,`preset`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_dsd_mode(`ptr`: Pointer,`mode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_eq_band(`ptr`: Pointer,`index`: Int,`gainDb`: Float,`freq`: Float,`q`: Float,uniffi_out_err: UniffiRustCallStatus, 
@@ -814,6 +894,30 @@ internal interface UniffiLib : Library {
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_eq_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_eq_preamp(`ptr`: Pointer,`gainDb`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_limiter_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_loudness_normalizer_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_loudness_target_lufs(`ptr`: Pointer,`lufs`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_playback_speed(`ptr`: Pointer,`speed`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_spatializer_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_spatializer_width(`ptr`: Pointer,`width`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_sub_bass_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_sub_bass_intensity(`ptr`: Pointer,`intensity`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_tube_warmth_drive(`ptr`: Pointer,`drive`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_tube_warmth_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_vocal_clarity_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_vocal_clarity_intensity(`ptr`: Pointer,`intensity`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_volume(`ptr`: Pointer,`volume`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -943,15 +1047,39 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_audiophile_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_channel_balance(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_crossfeed_preset(
+    ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_eq_bands(
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_eq_curve(
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_output_sample_rate(
     ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_playback_speed(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_spatializer_width(
+    ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_status(
     ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_sub_bass_intensity(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_tube_warmth_drive(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_vocal_clarity_intensity(
+    ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_exclusive_mmap(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_loudness_normalizer_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_spatializer_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_sub_bass_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_tube_warmth_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_vocal_clarity_enabled(
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_pause(
     ): Short
@@ -965,6 +1093,10 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_seek(
     ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_channel_balance(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_crossfeed_preset(
+    ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_dsd_mode(
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_eq_band(
@@ -972,6 +1104,30 @@ internal interface UniffiLib : Library {
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_eq_enabled(
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_eq_preamp(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_limiter_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_loudness_normalizer_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_loudness_target_lufs(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_playback_speed(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_width(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_sub_bass_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_sub_bass_intensity(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_tube_warmth_drive(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_tube_warmth_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_vocal_clarity_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_vocal_clarity_intensity(
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_volume(
     ): Short
@@ -1004,6 +1160,12 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_channel_balance() != 17522.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_crossfeed_preset() != 38937.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_eq_bands() != 13564.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1013,10 +1175,40 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_output_sample_rate() != 46236.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_playback_speed() != 41919.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_spatializer_width() != 16164.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_status() != 19637.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_sub_bass_intensity() != 14664.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_tube_warmth_drive() != 17597.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_get_vocal_clarity_intensity() != 24290.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_exclusive_mmap() != 22792.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_loudness_normalizer_enabled() != 19619.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_spatializer_enabled() != 27955.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_sub_bass_enabled() != 51631.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_tube_warmth_enabled() != 56655.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_vocal_clarity_enabled() != 27295.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_pause() != 36109.toShort()) {
@@ -1037,6 +1229,12 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_seek() != 54037.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_channel_balance() != 31096.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_crossfeed_preset() != 37659.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_dsd_mode() != 22.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1047,6 +1245,42 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_eq_preamp() != 43544.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_limiter_enabled() != 49880.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_loudness_normalizer_enabled() != 63116.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_loudness_target_lufs() != 49783.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_playback_speed() != 11346.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_enabled() != 54272.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_width() != 39188.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_sub_bass_enabled() != 60978.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_sub_bass_intensity() != 29012.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_tube_warmth_drive() != 7213.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_tube_warmth_enabled() != 40134.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_vocal_clarity_enabled() != 28356.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_vocal_clarity_intensity() != 59399.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_volume() != 15743.toShort()) {
@@ -1476,12 +1710,11 @@ private fun UniffiCleaner.Companion.create(): UniffiCleaner =
         // So we check if java.lang.ref.Cleaner is there, and use that…
         java.lang.Class.forName("java.lang.ref.Cleaner")
         JavaLangRefCleaner()
-    } catch (e: Throwable) {
+    } catch (e: ClassNotFoundException) {
         // … otherwise, fallback to the JNA cleaner.
         UniffiJnaCleaner()
     }
 
-@android.annotation.TargetApi(33)
 private class JavaLangRefCleaner : UniffiCleaner {
     val cleaner = java.lang.ref.Cleaner.create()
 
@@ -1489,13 +1722,16 @@ private class JavaLangRefCleaner : UniffiCleaner {
         JavaLangRefCleanable(cleaner.register(value, cleanUpTask))
 }
 
-@android.annotation.TargetApi(33)
 private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
 }
 public interface AudiophileEngineHandleInterface {
+    
+    fun `getChannelBalance`(): kotlin.Float
+    
+    fun `getCrossfeedPreset`(): CrossfeedPresetEnum
     
     fun `getEqBands`(): List<EqBandInfo>
     
@@ -1506,9 +1742,29 @@ public interface AudiophileEngineHandleInterface {
     
     fun `getOutputSampleRate`(): kotlin.UInt
     
+    fun `getPlaybackSpeed`(): kotlin.Float
+    
+    fun `getSpatializerWidth`(): kotlin.Float
+    
     fun `getStatus`(): EngineStatus
     
+    fun `getSubBassIntensity`(): kotlin.Float
+    
+    fun `getTubeWarmthDrive`(): kotlin.Float
+    
+    fun `getVocalClarityIntensity`(): kotlin.Float
+    
     fun `isExclusiveMmap`(): kotlin.Boolean
+    
+    fun `isLoudnessNormalizerEnabled`(): kotlin.Boolean
+    
+    fun `isSpatializerEnabled`(): kotlin.Boolean
+    
+    fun `isSubBassEnabled`(): kotlin.Boolean
+    
+    fun `isTubeWarmthEnabled`(): kotlin.Boolean
+    
+    fun `isVocalClarityEnabled`(): kotlin.Boolean
     
     fun `pause`()
     
@@ -1522,6 +1778,10 @@ public interface AudiophileEngineHandleInterface {
     
     fun `seek`(`seconds`: kotlin.Double)
     
+    fun `setChannelBalance`(`balance`: kotlin.Float)
+    
+    fun `setCrossfeedPreset`(`preset`: CrossfeedPresetEnum)
+    
     fun `setDsdMode`(`mode`: DsdModeEnum)
     
     fun `setEqBand`(`index`: kotlin.UInt, `gainDb`: kotlin.Float, `freq`: kotlin.Float, `q`: kotlin.Float)
@@ -1529,6 +1789,30 @@ public interface AudiophileEngineHandleInterface {
     fun `setEqEnabled`(`enabled`: kotlin.Boolean)
     
     fun `setEqPreamp`(`gainDb`: kotlin.Float)
+    
+    fun `setLimiterEnabled`(`enabled`: kotlin.Boolean)
+    
+    fun `setLoudnessNormalizerEnabled`(`enabled`: kotlin.Boolean)
+    
+    fun `setLoudnessTargetLufs`(`lufs`: kotlin.Float)
+    
+    fun `setPlaybackSpeed`(`speed`: kotlin.Float)
+    
+    fun `setSpatializerEnabled`(`enabled`: kotlin.Boolean)
+    
+    fun `setSpatializerWidth`(`width`: kotlin.Float)
+    
+    fun `setSubBassEnabled`(`enabled`: kotlin.Boolean)
+    
+    fun `setSubBassIntensity`(`intensity`: kotlin.Float)
+    
+    fun `setTubeWarmthDrive`(`drive`: kotlin.Float)
+    
+    fun `setTubeWarmthEnabled`(`enabled`: kotlin.Boolean)
+    
+    fun `setVocalClarityEnabled`(`enabled`: kotlin.Boolean)
+    
+    fun `setVocalClarityIntensity`(`intensity`: kotlin.Float)
     
     fun `setVolume`(`volume`: kotlin.Float)
     
@@ -1625,6 +1909,30 @@ open class AudiophileEngineHandle: Disposable, AutoCloseable, AudiophileEngineHa
         }
     }
 
+    override fun `getChannelBalance`(): kotlin.Float {
+            return FfiConverterFloat.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_get_channel_balance(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `getCrossfeedPreset`(): CrossfeedPresetEnum {
+            return FfiConverterTypeCrossfeedPresetEnum.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_get_crossfeed_preset(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
     override fun `getEqBands`(): List<EqBandInfo> {
             return FfiConverterSequenceTypeEqBandInfo.lift(
     callWithPointer {
@@ -1664,6 +1972,30 @@ open class AudiophileEngineHandle: Disposable, AutoCloseable, AudiophileEngineHa
     }
     
 
+    override fun `getPlaybackSpeed`(): kotlin.Float {
+            return FfiConverterFloat.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_get_playback_speed(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `getSpatializerWidth`(): kotlin.Float {
+            return FfiConverterFloat.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_get_spatializer_width(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
     override fun `getStatus`(): EngineStatus {
             return FfiConverterTypeEngineStatus.lift(
     callWithPointer {
@@ -1676,11 +2008,107 @@ open class AudiophileEngineHandle: Disposable, AutoCloseable, AudiophileEngineHa
     }
     
 
+    override fun `getSubBassIntensity`(): kotlin.Float {
+            return FfiConverterFloat.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_get_sub_bass_intensity(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `getTubeWarmthDrive`(): kotlin.Float {
+            return FfiConverterFloat.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_get_tube_warmth_drive(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `getVocalClarityIntensity`(): kotlin.Float {
+            return FfiConverterFloat.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_get_vocal_clarity_intensity(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
     override fun `isExclusiveMmap`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_is_exclusive_mmap(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `isLoudnessNormalizerEnabled`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_is_loudness_normalizer_enabled(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `isSpatializerEnabled`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_is_spatializer_enabled(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `isSubBassEnabled`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_is_sub_bass_enabled(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `isTubeWarmthEnabled`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_is_tube_warmth_enabled(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `isVocalClarityEnabled`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_is_vocal_clarity_enabled(
         it, _status)
 }
     }
@@ -1757,6 +2185,28 @@ open class AudiophileEngineHandle: Disposable, AutoCloseable, AudiophileEngineHa
     
     
 
+    override fun `setChannelBalance`(`balance`: kotlin.Float)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_channel_balance(
+        it, FfiConverterFloat.lower(`balance`),_status)
+}
+    }
+    
+    
+
+    override fun `setCrossfeedPreset`(`preset`: CrossfeedPresetEnum)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_crossfeed_preset(
+        it, FfiConverterTypeCrossfeedPresetEnum.lower(`preset`),_status)
+}
+    }
+    
+    
+
     override fun `setDsdMode`(`mode`: DsdModeEnum)
         = 
     callWithPointer {
@@ -1796,6 +2246,138 @@ open class AudiophileEngineHandle: Disposable, AutoCloseable, AudiophileEngineHa
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_eq_preamp(
         it, FfiConverterFloat.lower(`gainDb`),_status)
+}
+    }
+    
+    
+
+    override fun `setLimiterEnabled`(`enabled`: kotlin.Boolean)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_limiter_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    
+    
+
+    override fun `setLoudnessNormalizerEnabled`(`enabled`: kotlin.Boolean)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_loudness_normalizer_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    
+    
+
+    override fun `setLoudnessTargetLufs`(`lufs`: kotlin.Float)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_loudness_target_lufs(
+        it, FfiConverterFloat.lower(`lufs`),_status)
+}
+    }
+    
+    
+
+    override fun `setPlaybackSpeed`(`speed`: kotlin.Float)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_playback_speed(
+        it, FfiConverterFloat.lower(`speed`),_status)
+}
+    }
+    
+    
+
+    override fun `setSpatializerEnabled`(`enabled`: kotlin.Boolean)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_spatializer_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    
+    
+
+    override fun `setSpatializerWidth`(`width`: kotlin.Float)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_spatializer_width(
+        it, FfiConverterFloat.lower(`width`),_status)
+}
+    }
+    
+    
+
+    override fun `setSubBassEnabled`(`enabled`: kotlin.Boolean)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_sub_bass_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    
+    
+
+    override fun `setSubBassIntensity`(`intensity`: kotlin.Float)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_sub_bass_intensity(
+        it, FfiConverterFloat.lower(`intensity`),_status)
+}
+    }
+    
+    
+
+    override fun `setTubeWarmthDrive`(`drive`: kotlin.Float)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_tube_warmth_drive(
+        it, FfiConverterFloat.lower(`drive`),_status)
+}
+    }
+    
+    
+
+    override fun `setTubeWarmthEnabled`(`enabled`: kotlin.Boolean)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_tube_warmth_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    
+    
+
+    override fun `setVocalClarityEnabled`(`enabled`: kotlin.Boolean)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_vocal_clarity_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    
+    
+
+    override fun `setVocalClarityIntensity`(`intensity`: kotlin.Float)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_vocal_clarity_intensity(
+        it, FfiConverterFloat.lower(`intensity`),_status)
 }
     }
     
@@ -2448,6 +3030,38 @@ public object FfiConverterTypeTrackInfo: FfiConverterRustBuffer<TrackInfo> {
             FfiConverterBoolean.write(value.`hasArtwork`, buf)
     }
 }
+
+
+
+
+enum class CrossfeedPresetEnum {
+    
+    OFF,
+    SUBTLE,
+    STANDARD,
+    VINTAGE;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCrossfeedPresetEnum: FfiConverterRustBuffer<CrossfeedPresetEnum> {
+    override fun read(buf: ByteBuffer) = try {
+        CrossfeedPresetEnum.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: CrossfeedPresetEnum) = 4UL
+
+    override fun write(value: CrossfeedPresetEnum, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 

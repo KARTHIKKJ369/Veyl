@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
@@ -81,6 +82,13 @@ enum class AppExperienceMode {
     CLOUD_FIRST
 }
 
+enum class CrossfadeCurve(val id: String, val title: String, val description: String) {
+    EQUAL_POWER("equal_power", "Equal Power (-3 dB)", "Constant acoustic power across transition with zero center sag"),
+    LINEAR("linear", "Linear", "Direct linear volume slope between tracks"),
+    EXPONENTIAL("exponential", "Exponential", "Smooth logarithmic curve for ambient & classical transitions")
+}
+
+
 class AudioEngineController private constructor(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.Default + Job())
@@ -97,6 +105,9 @@ class AudioEngineController private constructor(private val context: Context) {
     // USB DAC Hardware Manager
     val usbDacManager = UsbDacManager(context)
     val connectedDac: StateFlow<UsbDacInfo?> = usbDacManager.connectedDac
+
+    // DAC Diagnostic Tone Generator
+    val toneGenerator = DacDiagnosticToneGenerator()
 
     // Playlist & Favorites Manager
     val playlistManager = PlaylistManager(context)
@@ -141,6 +152,89 @@ class AudioEngineController private constructor(private val context: Context) {
     data class EqState(val enabled: Boolean = false, val bands: List<EqBandInfo> = emptyList())
     private val _eqState = MutableStateFlow(EqState(enabled = prefs.getBoolean("eq_enabled", false)))
     val eqState: StateFlow<EqState> = _eqState.asStateFlow()
+
+    // Headphone Crossfeed (Bauer / Meier / Chu Moy binaural model)
+    private val _crossfeedPreset = MutableStateFlow(
+        when (prefs.getString("crossfeed_preset", "OFF")) {
+            "SUBTLE" -> uniffi.audiophile_core.CrossfeedPresetEnum.SUBTLE
+            "STANDARD" -> uniffi.audiophile_core.CrossfeedPresetEnum.STANDARD
+            "VINTAGE" -> uniffi.audiophile_core.CrossfeedPresetEnum.VINTAGE
+            else -> uniffi.audiophile_core.CrossfeedPresetEnum.OFF
+        }
+    )
+    val crossfeedPreset: StateFlow<uniffi.audiophile_core.CrossfeedPresetEnum> = _crossfeedPreset.asStateFlow()
+
+    // Audiophile Sleep Timer with Smooth Logarithmic Fade-Out
+    private val _sleepTimerActiveOption = MutableStateFlow<String?>(null)
+    val sleepTimerActiveOption: StateFlow<String?> = _sleepTimerActiveOption.asStateFlow()
+
+    private val _sleepTimerRemainingSeconds = MutableStateFlow<Int?>(null)
+    val sleepTimerRemainingSeconds: StateFlow<Int?> = _sleepTimerRemainingSeconds.asStateFlow()
+
+    private var sleepTimerJob: Job? = null
+    private var sleepTimerPreFadeVolume: Float = 1.0f
+    private var isSleepTimerFading: Boolean = false
+
+    // Auto-Pause on Disconnect (Headphones, Bluetooth, USB DAC)
+    private val _pauseOnDisconnect = MutableStateFlow(prefs.getBoolean("pause_on_disconnect", true))
+    val pauseOnDisconnect: StateFlow<Boolean> = _pauseOnDisconnect.asStateFlow()
+
+    // Loudness Normalizer (EBU R128 / RMS target) & Soft-Knee Peak Limiter
+    private val _loudnessNormalizerEnabled = MutableStateFlow(prefs.getBoolean("loudness_normalizer_enabled", false))
+    val loudnessNormalizerEnabled: StateFlow<Boolean> = _loudnessNormalizerEnabled.asStateFlow()
+
+    private val _loudnessTargetLufs = MutableStateFlow(prefs.getFloat("loudness_target_lufs", -14.0f))
+    val loudnessTargetLufs: StateFlow<Float> = _loudnessTargetLufs.asStateFlow()
+
+    private val _limiterEnabled = MutableStateFlow(prefs.getBoolean("limiter_enabled", true))
+    val limiterEnabled: StateFlow<Boolean> = _limiterEnabled.asStateFlow()
+
+    // Triode Tube Warmth & Analog Harmonic Exciter
+    private val _tubeWarmthEnabled = MutableStateFlow(prefs.getBoolean("tube_warmth_enabled", false))
+    val tubeWarmthEnabled: StateFlow<Boolean> = _tubeWarmthEnabled.asStateFlow()
+
+    private val _tubeWarmthDrive = MutableStateFlow(prefs.getFloat("tube_warmth_drive", 0.30f))
+    val tubeWarmthDrive: StateFlow<Float> = _tubeWarmthDrive.asStateFlow()
+
+    // 360° Spatializer (Width: 0.0 to 2.0)
+    private val _spatializerEnabled = MutableStateFlow(prefs.getBoolean("spatializer_enabled", false))
+    val spatializerEnabled: StateFlow<Boolean> = _spatializerEnabled.asStateFlow()
+
+    private val _spatializerWidth = MutableStateFlow(prefs.getFloat("spatializer_width", 1.25f))
+    val spatializerWidth: StateFlow<Float> = _spatializerWidth.asStateFlow()
+
+    // Sub-Bass Exciter (Intensity: 0.0 to 1.0)
+    private val _subBassEnabled = MutableStateFlow(prefs.getBoolean("sub_bass_enabled", false))
+    val subBassEnabled: StateFlow<Boolean> = _subBassEnabled.asStateFlow()
+
+    private val _subBassIntensity = MutableStateFlow(prefs.getFloat("sub_bass_intensity", 0.40f))
+    val subBassIntensity: StateFlow<Float> = _subBassIntensity.asStateFlow()
+
+    // Vocal Clarity (Intensity: 0.0 to 1.0)
+    private val _vocalClarityEnabled = MutableStateFlow(prefs.getBoolean("vocal_clarity_enabled", false))
+    val vocalClarityEnabled: StateFlow<Boolean> = _vocalClarityEnabled.asStateFlow()
+
+    private val _vocalClarityIntensity = MutableStateFlow(prefs.getFloat("vocal_clarity_intensity", 0.35f))
+    val vocalClarityIntensity: StateFlow<Float> = _vocalClarityIntensity.asStateFlow()
+
+    // Precision L/R Channel Balance (-1.0 Left to +1.0 Right)
+    private val _channelBalance = MutableStateFlow(prefs.getFloat("channel_balance", 0.0f))
+    val channelBalance: StateFlow<Float> = _channelBalance.asStateFlow()
+
+    // High-Fidelity Playback Speed Scaling (Rubato sinc resampler)
+    private val _playbackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
+    // A-B Looping for critical listening & audiophile tuning
+    private val _loopPointA = MutableStateFlow<Double?>(null)
+    val loopPointA: StateFlow<Double?> = _loopPointA.asStateFlow()
+
+    private val _loopPointB = MutableStateFlow<Double?>(null)
+    val loopPointB: StateFlow<Double?> = _loopPointB.asStateFlow()
+
+    val isLoopingAB: StateFlow<Boolean> = combine(_loopPointA, _loopPointB) { a, b ->
+        a != null && b != null && b > a
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), false)
 
     // Queue & Shuffle Management
     private val _originalQueue = MutableStateFlow<List<TrackInfo>>(emptyList())
@@ -220,6 +314,13 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private val _crossfadeSeconds = MutableStateFlow(prefs.getFloat("crossfade_seconds", 0f))
     val crossfadeSeconds: StateFlow<Float> = _crossfadeSeconds.asStateFlow()
+
+    private val _crossfadeCurve = MutableStateFlow(
+        runCatching {
+            CrossfadeCurve.valueOf(prefs.getString("crossfade_curve", CrossfadeCurve.EQUAL_POWER.name) ?: CrossfadeCurve.EQUAL_POWER.name)
+        }.getOrDefault(CrossfadeCurve.EQUAL_POWER)
+    )
+    val crossfadeCurve: StateFlow<CrossfadeCurve> = _crossfadeCurve.asStateFlow()
 
     private val _bufferFrameSize = MutableStateFlow(prefs.getInt("buffer_frame_size", 128))
     val bufferFrameSize: StateFlow<Int> = _bufferFrameSize.asStateFlow()
@@ -543,6 +644,22 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     private var currentOutputSampleRate: UInt = 48000u
+
+    val hardwareOutputSummary: StateFlow<String> = combine(
+        connectedDac,
+        _bitPerfectEnabled,
+        _status
+    ) { dac, bitPerfect, status ->
+        val outRate = currentOutputSampleRate.toInt()
+        val rateDisplay = if (outRate >= 1000) "${outRate / 1000} kHz" else "$outRate Hz"
+        if (dac != null && bitPerfect) {
+            "DIRECT USB • ${dac.name} • $rateDisplay"
+        } else if (dac != null) {
+            "USB DAC • ${dac.name} • $rateDisplay"
+        } else {
+            "INTERNAL AUDIO • $rateDisplay • BIT-PERFECT"
+        }
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), "INTERNAL AUDIO • 48 kHz")
     private var pollJob: Job? = null
     private var lastTrackUri: String? = null
     private var isTransitioning = false
@@ -558,13 +675,35 @@ class AudioEngineController private constructor(private val context: Context) {
         observeUsbDacChanges()
         registerAudioDeviceListener()
         loadCustomEqPresets()
+        nativeScope.launch(Dispatchers.IO) {
+            onlineStreamManager.cleanAllStreamCaches()
+        }
+    }
+
+    private fun syncAllDspState(engine: AudiophileEngineHandle) {
+        engine.setDsdMode(_dsdMode.value)
+        engine.setCrossfeedPreset(_crossfeedPreset.value)
+        engine.setLoudnessNormalizerEnabled(_loudnessNormalizerEnabled.value)
+        engine.setLoudnessTargetLufs(_loudnessTargetLufs.value)
+        engine.setTubeWarmthEnabled(_tubeWarmthEnabled.value)
+        engine.setTubeWarmthDrive(_tubeWarmthDrive.value)
+        engine.setSpatializerEnabled(_spatializerEnabled.value)
+        engine.setSpatializerWidth(_spatializerWidth.value)
+        engine.setSubBassEnabled(_subBassEnabled.value)
+        engine.setSubBassIntensity(_subBassIntensity.value)
+        engine.setVocalClarityEnabled(_vocalClarityEnabled.value)
+        engine.setVocalClarityIntensity(_vocalClarityIntensity.value)
+        engine.setChannelBalance(_channelBalance.value)
+        engine.setLimiterEnabled(_limiterEnabled.value)
+        engine.setPlaybackSpeed(_playbackSpeed.value)
+        engine.setEqEnabled(_isEqEnabled.value)
     }
 
     private fun initEngine() {
         try {
             synchronized(nativeEngineLock) {
                 nativeEngine = AudiophileEngineHandle(48000f, 2u)
-                nativeEngine?.setDsdMode(_dsdMode.value)
+                nativeEngine?.let { syncAllDspState(it) }
                 currentOutputSampleRate = nativeEngine?.getOutputSampleRate() ?: 48000u
             }
             restoreEqState()
@@ -591,6 +730,9 @@ class AudioEngineController private constructor(private val context: Context) {
                 val hasOutput = removedDevices?.any { it.isSink } == true
                 if (hasOutput) {
                     Log.i("AudioEngineController", "Audio output device removed. Refreshing hardware stream...")
+                    if (_pauseOnDisconnect.value) {
+                        pause()
+                    }
                     scope.launch {
                         delay(250) // Let Android audio HAL settle routing
                         refreshHardwareOutput()
@@ -631,6 +773,9 @@ class AudioEngineController private constructor(private val context: Context) {
                 } else if (dac == null && previousDac != null) {
                     previousDac = null
                     Log.i("AudioEngineController", "USB DAC detached, returning to standard output")
+                    // Unplugging a physical USB DAC mid-playback must instantaneously pause
+                    // to prevent audio blast through the phone speaker at high DAC volume levels
+                    pause()
                     reconfigureHardwareOutput(48000u, null, exclusive = false)
                 }
             }
@@ -678,6 +823,13 @@ class AudioEngineController private constructor(private val context: Context) {
                             lastTrackPos = pos
                         }
 
+                        // Enforce A-B loop segment
+                        val a = _loopPointA.value
+                        val b = _loopPointB.value
+                        if (a != null && b != null && b > a && pos >= b) {
+                            seekTo(a)
+                        }
+
                         _currentPositionSec.value = pos
                         _currentPositionMs.value = (pos * 1000.0).toLong()
 
@@ -691,6 +843,7 @@ class AudioEngineController private constructor(private val context: Context) {
                             _currentLyrics.value = null
                             _currentPositionSec.value = 0.0
                             _currentPositionMs.value = 0L
+                            clearLoop()
 
                             if (pendingActiveTrack?.uri == currentUri) {
                                 pendingActiveTrack = null
@@ -1095,10 +1248,12 @@ class AudioEngineController private constructor(private val context: Context) {
             }
             RepeatMode.ALL -> skipNext()
             RepeatMode.OFF -> {
-                val currentUri = _status.value?.currentTrack?.uri
-                val currentIndex = _queue.value.indexOfFirst { it.uri == currentUri }
+                val current = pendingActiveTrack ?: _status.value?.currentTrack
+                val currentIndex = _queue.value.indexOfFirst {
+                    it.uri == current?.uri || (current != null && it.title.equals(current.title, ignoreCase = true))
+                }
                 val hasNext = if (_isShuffleEnabled.value) {
-                    unplayedShufflePool.isNotEmpty()
+                    unplayedShufflePool.isNotEmpty() || (currentIndex in 0 until _queue.value.lastIndex)
                 } else {
                     currentIndex in 0 until _queue.value.lastIndex
                 }
@@ -1185,6 +1340,7 @@ class AudioEngineController private constructor(private val context: Context) {
         setBitPerfectEnabled(true)
         setGaplessEnabled(true)
         setCrossfadeSeconds(0f)
+        setCrossfadeCurve(CrossfadeCurve.EQUAL_POWER)
         setAutoFetchLyrics(true)
         setPlayDuringCalls(false)
     }
@@ -1256,11 +1412,12 @@ class AudioEngineController private constructor(private val context: Context) {
         val currentIndex = q.indexOfFirst { it.uri == current?.uri || (current != null && it.title.equals(current.title, ignoreCase = true)) }
 
         val nextTrack = if (_isShuffleEnabled.value) {
-            if (unplayedShufflePool.isEmpty()) {
-                unplayedShufflePool.addAll(q.filter { it.uri != current?.uri && !it.title.equals(current?.title, ignoreCase = true) })
-            }
             if (unplayedShufflePool.isNotEmpty()) {
                 val next = unplayedShufflePool.removeAt(0)
+                if (current != null) playHistory.add(current)
+                next
+            } else if (currentIndex != -1 && currentIndex < q.size - 1) {
+                val next = q[currentIndex + 1]
                 if (current != null) playHistory.add(current)
                 next
             } else {
@@ -1585,11 +1742,11 @@ class AudioEngineController private constructor(private val context: Context) {
     fun removeFromQueue(index: Int) {
         val currentQueue = _queue.value.toMutableList()
         if (index in currentQueue.indices) {
-            currentQueue.removeAt(index)
+            val removed = currentQueue.removeAt(index)
             _queue.value = currentQueue
-            if (!_isShuffleEnabled.value) {
-                _originalQueue.value = currentQueue
-            }
+            _originalQueue.value = currentQueue
+            unplayedShufflePool.removeAll { it.uri == removed.uri || it.title.equals(removed.title, ignoreCase = true) }
+            scheduleNextTrackPrefetch()
         }
     }
 
@@ -1599,9 +1756,22 @@ class AudioEngineController private constructor(private val context: Context) {
             val item = currentQueue.removeAt(fromIndex)
             currentQueue.add(toIndex, item)
             _queue.value = currentQueue
-            if (!_isShuffleEnabled.value) {
-                _originalQueue.value = currentQueue
+            _originalQueue.value = currentQueue
+
+            // Re-sync unplayedShufflePool so that playback strictly follows the user's reordered queue sequence!
+            val current = pendingActiveTrack ?: _status.value?.currentTrack
+            val currentIdx = currentQueue.indexOfFirst {
+                it.uri == current?.uri || (current != null && it.title.equals(current.title, ignoreCase = true))
             }
+            unplayedShufflePool.clear()
+            if (currentIdx != -1 && currentIdx < currentQueue.size - 1) {
+                unplayedShufflePool.addAll(currentQueue.subList(currentIdx + 1, currentQueue.size))
+            } else {
+                unplayedShufflePool.addAll(currentQueue.filter { it.uri != current?.uri && !it.title.equals(current?.title, ignoreCase = true) })
+            }
+
+            // Immediately reschedule next track prefetch so it matches newly positioned next track
+            scheduleNextTrackPrefetch()
         }
     }
 
@@ -1616,25 +1786,30 @@ class AudioEngineController private constructor(private val context: Context) {
         }
         currentQueue.add(insertIndex.coerceIn(0, currentQueue.size), track)
         _queue.value = currentQueue
-        if (!_isShuffleEnabled.value) {
-            _originalQueue.value = currentQueue
+        _originalQueue.value = currentQueue
+        if (_isShuffleEnabled.value) {
+            unplayedShufflePool.add(0, track)
         }
+        scheduleNextTrackPrefetch()
     }
 
     fun addToQueue(track: TrackInfo) {
         val currentQueue = _queue.value.toMutableList()
         currentQueue.add(track)
         _queue.value = currentQueue
-        if (!_isShuffleEnabled.value) {
-            _originalQueue.value = currentQueue
+        _originalQueue.value = currentQueue
+        if (_isShuffleEnabled.value) {
+            unplayedShufflePool.add(track)
         }
     }
 
     fun clearQueue() {
         val current = _status.value?.currentTrack
         if (current != null) {
-            _queue.value = listOf(current)
-            _originalQueue.value = listOf(current)
+            val currentInfo = _queue.value.firstOrNull { it.uri == current.uri }
+            val single = if (currentInfo != null) listOf(currentInfo) else emptyList()
+            _queue.value = single
+            _originalQueue.value = single
         } else {
             _queue.value = emptyList()
             _originalQueue.value = emptyList()
@@ -2020,6 +2195,11 @@ class AudioEngineController private constructor(private val context: Context) {
         _queue.value = tracks
 
         val startTrack = tracks.getOrNull(startIndex) ?: tracks.first()
+        unplayedShufflePool.clear()
+        if (_isShuffleEnabled.value) {
+            val remaining = tracks.filter { it.uri != startTrack.uri }
+            unplayedShufflePool.addAll(remaining)
+        }
         playTrack(startTrack)
     }
 
@@ -2704,7 +2884,9 @@ class AudioEngineController private constructor(private val context: Context) {
                 val actualRate = withNativeEngine { it.getOutputSampleRate() } ?: sampleRate
                 currentOutputSampleRate = actualRate
                 Log.i("AudioEngineController", "Hardware output reconfigured: target=$sampleRate Hz, actual=$actualRate Hz")
-                withNativeEngine { it.setEqEnabled(_isEqEnabled.value) }
+                withNativeEngine {
+                    syncAllDspState(it)
+                }
                 val bands = _eqBands.value
                 for (i in bands.indices) {
                     val b = bands[i]
@@ -2848,15 +3030,242 @@ class AudioEngineController private constructor(private val context: Context) {
         for (i in gains.indices) {
             editor.putFloat("eq_band_$i", gains[i])
         }
+        editor.putBoolean("eq_enabled", true)
         editor.apply()
+        _isEqEnabled.value = true
+
+        val defaultFreqs = floatArrayOf(31.25f, 62.5f, 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f, 16000f)
+        val defaultQ = 1.414f
         val bands = _eqBands.value
-        for (i in gains.indices) {
-            if (i in bands.indices) {
-                val b = bands[i]
-                nativeScope.launch { withNativeEngine { it.setEqBand(i.toUInt(), gains[i], b.frequency, b.q) } }
+
+        nativeScope.launch {
+            withNativeEngine { engine ->
+                for (i in gains.indices) {
+                    val freq = if (i in bands.indices) bands[i].frequency else defaultFreqs.getOrElse(i) { 1000f }
+                    val q = if (i in bands.indices) bands[i].q else defaultQ
+                    engine.setEqBand(i.toUInt(), gains[i], freq, q)
+                }
+                engine.setEqEnabled(true)
+            }
+            refreshEq()
+        }
+    }
+
+    fun setCrossfeedPreset(preset: uniffi.audiophile_core.CrossfeedPresetEnum) {
+        _crossfeedPreset.value = preset
+        prefs.edit().putString("crossfeed_preset", preset.name).apply()
+        nativeScope.launch { withNativeEngine { it.setCrossfeedPreset(preset) } }
+    }
+
+    fun startSleepTimer(minutes: Int) {
+        cancelSleepTimer()
+        val totalSec = minutes * 60
+        _sleepTimerActiveOption.value = "${minutes}m"
+        _sleepTimerRemainingSeconds.value = totalSec
+        sleepTimerPreFadeVolume = _volume.value
+        isSleepTimerFading = false
+
+        sleepTimerJob = scope.launch {
+            var secLeft = totalSec
+            while (isActive && secLeft > 0) {
+                delay(1000)
+                secLeft--
+                _sleepTimerRemainingSeconds.value = secLeft
+
+                // Apply smooth logarithmic fade-out during final 30 seconds
+                if (secLeft <= 30) {
+                    isSleepTimerFading = true
+                    val factor = (secLeft.toFloat() / 30f).coerceIn(0f, 1f)
+                    val fadeVol = sleepTimerPreFadeVolume * (factor * factor)
+                    setVolume(fadeVol)
+                }
+            }
+
+            if (isActive) {
+                pause()
+                setVolume(sleepTimerPreFadeVolume)
+                _sleepTimerActiveOption.value = null
+                _sleepTimerRemainingSeconds.value = null
+                isSleepTimerFading = false
             }
         }
-        refreshEq()
+    }
+
+    fun startSleepTimerEndOfTrack() {
+        cancelSleepTimer()
+        _sleepTimerActiveOption.value = "track"
+        sleepTimerPreFadeVolume = _volume.value
+        isSleepTimerFading = false
+
+        sleepTimerJob = scope.launch {
+            while (isActive) {
+                delay(1000)
+                val currStatus = _status.value
+                val duration = currStatus?.durationSeconds ?: 0.0
+                val position = currStatus?.positionSeconds ?: 0.0
+
+                if (duration > 0.0) {
+                    val remaining = (duration - position).toInt().coerceAtLeast(0)
+                    _sleepTimerRemainingSeconds.value = remaining
+
+                    // Smooth fade out over last 15 seconds
+                    if (remaining in 1..15) {
+                        isSleepTimerFading = true
+                        val factor = (remaining.toFloat() / 15f).coerceIn(0f, 1f)
+                        val fadeVol = sleepTimerPreFadeVolume * (factor * factor)
+                        setVolume(fadeVol)
+                    }
+
+                    if (remaining <= 0 || position >= duration - 0.5) {
+                        pause()
+                        setVolume(sleepTimerPreFadeVolume)
+                        _sleepTimerActiveOption.value = null
+                        _sleepTimerRemainingSeconds.value = null
+                        isSleepTimerFading = false
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    fun cancelSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        if (isSleepTimerFading) {
+            setVolume(sleepTimerPreFadeVolume)
+            isSleepTimerFading = false
+        }
+        _sleepTimerActiveOption.value = null
+        _sleepTimerRemainingSeconds.value = null
+    }
+
+    fun setPauseOnDisconnect(enabled: Boolean) {
+        _pauseOnDisconnect.value = enabled
+        prefs.edit().putBoolean("pause_on_disconnect", enabled).apply()
+    }
+
+    fun setLoudnessNormalizerEnabled(enabled: Boolean) {
+        _loudnessNormalizerEnabled.value = enabled
+        prefs.edit().putBoolean("loudness_normalizer_enabled", enabled).apply()
+        nativeScope.launch { withNativeEngine { it.setLoudnessNormalizerEnabled(enabled) } }
+    }
+
+    fun setLoudnessTargetLufs(lufs: Float) {
+        _loudnessTargetLufs.value = lufs
+        prefs.edit().putFloat("loudness_target_lufs", lufs).apply()
+        nativeScope.launch { withNativeEngine { it.setLoudnessTargetLufs(lufs) } }
+    }
+
+    fun setLimiterEnabled(enabled: Boolean) {
+        _limiterEnabled.value = enabled
+        prefs.edit().putBoolean("limiter_enabled", enabled).apply()
+        nativeScope.launch { withNativeEngine { it.setLimiterEnabled(enabled) } }
+    }
+
+    fun setTubeWarmthEnabled(enabled: Boolean) {
+        _tubeWarmthEnabled.value = enabled
+        prefs.edit().putBoolean("tube_warmth_enabled", enabled).apply()
+        Log.i("AudioEngineController", "DSP setTubeWarmthEnabled: $enabled")
+        nativeScope.launch { withNativeEngine { it.setTubeWarmthEnabled(enabled) } }
+    }
+
+    fun setTubeWarmthDrive(drive: Float) {
+        val clamped = drive.coerceIn(0.0f, 1.0f)
+        _tubeWarmthDrive.value = clamped
+        prefs.edit().putFloat("tube_warmth_drive", clamped).apply()
+        Log.i("AudioEngineController", "DSP setTubeWarmthDrive: $clamped")
+        nativeScope.launch { withNativeEngine { it.setTubeWarmthDrive(clamped) } }
+    }
+
+    fun setSpatializerEnabled(enabled: Boolean) {
+        _spatializerEnabled.value = enabled
+        prefs.edit().putBoolean("spatializer_enabled", enabled).apply()
+        Log.i("AudioEngineController", "DSP setSpatializerEnabled: $enabled")
+        nativeScope.launch { withNativeEngine { it.setSpatializerEnabled(enabled) } }
+    }
+
+    fun setSpatializerWidth(width: Float) {
+        val clamped = width.coerceIn(0.5f, 2.2f)
+        _spatializerWidth.value = clamped
+        prefs.edit().putFloat("spatializer_width", clamped).apply()
+        Log.i("AudioEngineController", "DSP setSpatializerWidth: $clamped")
+        nativeScope.launch { withNativeEngine { it.setSpatializerWidth(clamped) } }
+    }
+
+    fun setSubBassEnabled(enabled: Boolean) {
+        _subBassEnabled.value = enabled
+        prefs.edit().putBoolean("sub_bass_enabled", enabled).apply()
+        Log.i("AudioEngineController", "DSP setSubBassEnabled: $enabled")
+        nativeScope.launch { withNativeEngine { it.setSubBassEnabled(enabled) } }
+    }
+
+    fun setSubBassIntensity(intensity: Float) {
+        val clamped = intensity.coerceIn(0.0f, 1.0f)
+        _subBassIntensity.value = clamped
+        prefs.edit().putFloat("sub_bass_intensity", clamped).apply()
+        Log.i("AudioEngineController", "DSP setSubBassIntensity: $clamped")
+        nativeScope.launch { withNativeEngine { it.setSubBassIntensity(clamped) } }
+    }
+
+    fun setVocalClarityEnabled(enabled: Boolean) {
+        _vocalClarityEnabled.value = enabled
+        prefs.edit().putBoolean("vocal_clarity_enabled", enabled).apply()
+        Log.i("AudioEngineController", "DSP setVocalClarityEnabled: $enabled")
+        nativeScope.launch { withNativeEngine { it.setVocalClarityEnabled(enabled) } }
+    }
+
+    fun setVocalClarityIntensity(intensity: Float) {
+        val clamped = intensity.coerceIn(0.0f, 1.0f)
+        _vocalClarityIntensity.value = clamped
+        prefs.edit().putFloat("vocal_clarity_intensity", clamped).apply()
+        Log.i("AudioEngineController", "DSP setVocalClarityIntensity: $clamped")
+        nativeScope.launch { withNativeEngine { it.setVocalClarityIntensity(clamped) } }
+    }
+
+    fun setChannelBalance(balance: Float) {
+        val clamped = balance.coerceIn(-1.0f, 1.0f)
+        _channelBalance.value = clamped
+        prefs.edit().putFloat("channel_balance", clamped).apply()
+        nativeScope.launch { withNativeEngine { it.setChannelBalance(clamped) } }
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = speed.coerceIn(0.5f, 2.0f)
+        _playbackSpeed.value = clamped
+        nativeScope.launch { withNativeEngine { it.setPlaybackSpeed(clamped) } }
+    }
+
+    fun setLoopPointA(sec: Double? = null) {
+        val pos = sec ?: _currentPositionSec.value
+        _loopPointA.value = pos
+        val b = _loopPointB.value
+        if (b != null && b <= pos) {
+            _loopPointB.value = null
+        }
+    }
+
+    fun setLoopPointB(sec: Double? = null) {
+        val pos = sec ?: _currentPositionSec.value
+        val a = _loopPointA.value
+        if (a != null && pos > a) {
+            _loopPointB.value = pos
+        }
+    }
+
+    fun clearLoop() {
+        _loopPointA.value = null
+        _loopPointB.value = null
+    }
+
+    fun toggleLoopPoint() {
+        if (_loopPointA.value == null) {
+            setLoopPointA()
+        } else if (_loopPointB.value == null) {
+            setLoopPointB()
+        } else {
+            clearLoop()
+        }
     }
 
     private fun loadCustomEqPresets() {
@@ -2988,6 +3397,20 @@ class AudioEngineController private constructor(private val context: Context) {
     fun setCrossfadeSeconds(sec: Float) {
         _crossfadeSeconds.value = sec
         prefs.edit().putFloat("crossfade_seconds", sec).apply()
+    }
+
+    fun setCrossfadeCurve(curve: CrossfadeCurve) {
+        _crossfadeCurve.value = curve
+        prefs.edit().putString("crossfade_curve", curve.name).apply()
+    }
+
+    fun startDiagnosticTone(type: DacToneType) {
+        pause()
+        toneGenerator.startTone(type)
+    }
+
+    fun stopDiagnosticTone() {
+        toneGenerator.stopTone()
     }
 
     fun setBufferFrameSize(size: Int) {

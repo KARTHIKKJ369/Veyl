@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import kotlin.math.roundToInt
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -77,7 +78,7 @@ import kotlinx.coroutines.launch
  * - Dynamic Ambient blurred album art backdrop
  * - Smooth spring-animated auto-scroll to active line
  * - Depth of field: Active line illuminated & scaled (1.04x), inactive lines softly dimmed (0.35x)
- * - Progressive word-by-word karaoke lighting (when word timings exist)
+ * - Progressive word-by-word synchronized lyrics lighting (when word timings exist)
  * - Tap-to-seek: Tap any line to immediately jump to that timestamp with haptic feedback
  * - Seamless top & bottom gradient edge dissolution
  * - Tap card background or toggle button to switch back to album cover
@@ -430,7 +431,7 @@ private fun NowPlayingLyricLine(
             .padding(vertical = 4.dp, horizontal = 4.dp)
     ) {
         if (line.words.isNotEmpty() && isCurrent) {
-            // Progressive word-level karaoke illumination
+            // Progressive word-level synchronized lyrics illumination
             val posMs by controller.currentPositionMs.collectAsState()
             val activeWordIdx = line.findActiveWordIndex(posMs.coerceAtLeast(0L))
 

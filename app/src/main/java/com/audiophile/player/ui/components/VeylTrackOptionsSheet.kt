@@ -73,6 +73,8 @@ fun VeylTrackOptionsSheet(
     var showPlaylistDialog by remember { mutableStateOf(false) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showSleepTimerSheet by remember { mutableStateOf(false) }
+    var showSpeedDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
 
     ModalBottomSheet(
@@ -124,8 +126,23 @@ fun VeylTrackOptionsSheet(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    val cleanFormat = remember(track) {
+                        var fmt = track.formatName.uppercase()
+                        if (fmt.startsWith("CODECTYPE") || fmt.contains("(")) {
+                            val uriLower = track.uri.lowercase()
+                            when {
+                                uriLower.endsWith(".flac") -> "FLAC"
+                                uriLower.endsWith(".mp3") -> "MP3"
+                                uriLower.endsWith(".wav") -> "WAV"
+                                uriLower.endsWith(".dsf") || uriLower.endsWith(".dff") -> "DSD"
+                                uriLower.endsWith(".m4a") || uriLower.endsWith(".aac") -> "AAC"
+                                uriLower.endsWith(".ogg") || uriLower.endsWith(".opus") -> "OPUS"
+                                else -> "PCM"
+                            }
+                        } else fmt
+                    }
                     Text(
-                        text = "${track.formatName} • ${track.sampleRate.toDouble() / 1000.0} kHz / ${track.bitDepth ?: 24}b",
+                        text = "$cleanFormat • ${track.sampleRate.toDouble() / 1000.0} kHz / ${track.bitDepth ?: 24}b",
                         style = VeylTypography.MonoSpec,
                         color = colors.accentSignal,
                         fontSize = 11.sp
@@ -191,6 +208,65 @@ fun VeylTrackOptionsSheet(
                     }
                 )
             }
+
+            // Option 4: Sleep Timer
+            val sleepTimerActive by controller.sleepTimerActiveOption.collectAsState()
+            val sleepTimerSec by controller.sleepTimerRemainingSeconds.collectAsState()
+            val timerTitle = when {
+                sleepTimerActive != null && sleepTimerSec != null -> {
+                    val m = (sleepTimerSec ?: 0) / 60
+                    val s = (sleepTimerSec ?: 0) % 60
+                    String.format(java.util.Locale.US, "Sleep Timer (Active: %02d:%02d)", m, s)
+                }
+                else -> "Sleep Timer"
+            }
+            OptionItem(
+                icon = VeylIcons.Moon,
+                title = timerTitle,
+                tint = if (sleepTimerActive != null) colors.accentSignal else colors.textPrimary,
+                onClick = {
+                    showSleepTimerSheet = true
+                }
+            )
+
+            // Option 5: Studio Playback Speed (Rubato Sinc Resampler)
+            val currentSpeed by controller.playbackSpeed.collectAsState()
+            OptionItem(
+                icon = VeylIcons.Speed,
+                title = if (currentSpeed != 1.0f) "Playback Speed (${currentSpeed}x)" else "Playback Speed (1.0x)",
+                tint = if (currentSpeed != 1.0f) colors.accentSignal else colors.textPrimary,
+                onClick = {
+                    showSpeedDialog = true
+                }
+            )
+
+            // Option 6: A-B Repeat Looper
+            val loopA by controller.loopPointA.collectAsState()
+            val loopB by controller.loopPointB.collectAsState()
+            val posSec by controller.currentPositionSec.collectAsState()
+
+            val loopTitle = when {
+                loopA != null && loopB != null -> {
+                    val secA = loopA!!.toInt().coerceAtLeast(0)
+                    val secB = loopB!!.toInt().coerceAtLeast(0)
+                    String.format(java.util.Locale.US, "A-B Loop Active (%d:%02d → %d:%02d) • Tap to Clear", secA / 60, secA % 60, secB / 60, secB % 60)
+                }
+                loopA != null -> {
+                    val secA = loopA!!.toInt().coerceAtLeast(0)
+                    val secPos = posSec.toInt().coerceAtLeast(0)
+                    String.format(java.util.Locale.US, "Set Point B at %d:%02d (Point A: %d:%02d)", secPos / 60, secPos % 60, secA / 60, secA % 60)
+                }
+                else -> "Start A-B Repeat Loop (Set Point A)"
+            }
+
+            OptionItem(
+                icon = VeylIcons.Looper,
+                title = loopTitle,
+                tint = if (loopA != null) colors.accentSignal else colors.textPrimary,
+                onClick = {
+                    controller.toggleLoopPoint()
+                }
+            )
 
             // Option 4: View Album
             if (track.album.isNotBlank() && onViewAlbum != null) {
@@ -400,6 +476,66 @@ fun VeylTrackOptionsSheet(
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirmDialog = false }) {
                     Text("Cancel", color = colors.textMuted)
+                }
+            }
+        )
+    }
+
+    if (showSleepTimerSheet) {
+        VeylSleepTimerSheet(
+            controller = controller,
+            onDismiss = { showSleepTimerSheet = false }
+        )
+    }
+
+    if (showSpeedDialog) {
+        val currentSpeed by controller.playbackSpeed.collectAsState()
+        AlertDialog(
+            onDismissRequest = { showSpeedDialog = false },
+            containerColor = colors.surfacePanel,
+            title = {
+                Text(
+                    text = "Studio Playback Speed",
+                    style = VeylTypography.SectionHeader,
+                    color = colors.textPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "High-fidelity sinc resampler speed scaling with studio pitch preservation.",
+                        style = VeylTypography.BodySmall,
+                        color = colors.textMuted
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        listOf(0.75f, 0.9f, 1.0f, 1.25f, 1.5f).forEach { speed ->
+                            val isSelected = (currentSpeed - speed).let { kotlin.math.abs(it) < 0.01f }
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) colors.accentSignal else colors.surfaceElevated,
+                                modifier = Modifier.clickable {
+                                    controller.setPlaybackSpeed(speed)
+                                    showSpeedDialog = false
+                                }
+                            ) {
+                                Text(
+                                    text = "${speed}x",
+                                    style = VeylTypography.MonoBadge.copy(fontWeight = FontWeight.Bold),
+                                    color = if (isSelected) Color.Black else colors.textPrimary,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSpeedDialog = false }) {
+                    Text("Close", color = colors.accentSignal)
                 }
             }
         )
