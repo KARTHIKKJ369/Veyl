@@ -196,25 +196,25 @@ class AudioEngineController private constructor(private val context: Context) {
     private val _tubeWarmthDrive = MutableStateFlow(prefs.getFloat("tube_warmth_drive", 0.30f))
     val tubeWarmthDrive: StateFlow<Float> = _tubeWarmthDrive.asStateFlow()
 
-    // 360° Spatializer (Width: 0.0 to 2.0)
-    private val _spatializerEnabled = MutableStateFlow(prefs.getBoolean("spatializer_enabled", false))
+    // 360° Spatializer (Deprecated - fully bypassed for audiophile fidelity)
+    private val _spatializerEnabled = MutableStateFlow(false)
     val spatializerEnabled: StateFlow<Boolean> = _spatializerEnabled.asStateFlow()
 
-    private val _spatializerWidth = MutableStateFlow(prefs.getFloat("spatializer_width", 1.25f))
+    private val _spatializerWidth = MutableStateFlow(1.0f)
     val spatializerWidth: StateFlow<Float> = _spatializerWidth.asStateFlow()
 
     private val _spatializerIsHeadphoneMode = MutableStateFlow(true)
     val spatializerIsHeadphoneMode: StateFlow<Boolean> = _spatializerIsHeadphoneMode.asStateFlow()
 
-    // Sub-Bass Exciter (Intensity: 0.0 to 1.0)
-    private val _subBassEnabled = MutableStateFlow(prefs.getBoolean("sub_bass_enabled", false))
+    // Sub-Bass Exciter (Bypassed by default for clean natural bass)
+    private val _subBassEnabled = MutableStateFlow(false)
     val subBassEnabled: StateFlow<Boolean> = _subBassEnabled.asStateFlow()
 
     private val _subBassIntensity = MutableStateFlow(prefs.getFloat("sub_bass_intensity", 0.40f))
     val subBassIntensity: StateFlow<Float> = _subBassIntensity.asStateFlow()
 
-    // Vocal Clarity (Intensity: 0.0 to 1.0)
-    private val _vocalClarityEnabled = MutableStateFlow(prefs.getBoolean("vocal_clarity_enabled", false))
+    // Vocal Clarity (Bypassed by default for pure uncolored vocals)
+    private val _vocalClarityEnabled = MutableStateFlow(false)
     val vocalClarityEnabled: StateFlow<Boolean> = _vocalClarityEnabled.asStateFlow()
 
     private val _vocalClarityIntensity = MutableStateFlow(prefs.getFloat("vocal_clarity_intensity", 0.35f))
@@ -686,18 +686,13 @@ class AudioEngineController private constructor(private val context: Context) {
     private fun syncAllDspState(engine: AudiophileEngineHandle) {
         engine.setDsdMode(_dsdMode.value)
         engine.setCrossfeedPreset(_crossfeedPreset.value)
-        engine.setLoudnessNormalizerEnabled(_loudnessNormalizerEnabled.value)
-        engine.setLoudnessTargetLufs(_loudnessTargetLufs.value)
-        engine.setTubeWarmthEnabled(_tubeWarmthEnabled.value)
-        engine.setTubeWarmthDrive(_tubeWarmthDrive.value)
-        engine.setSpatializerEnabled(_spatializerEnabled.value)
-        engine.setSpatializerWidth(_spatializerWidth.value)
-        engine.setSubBassEnabled(_subBassEnabled.value)
-        engine.setSubBassIntensity(_subBassIntensity.value)
-        engine.setVocalClarityEnabled(_vocalClarityEnabled.value)
-        engine.setVocalClarityIntensity(_vocalClarityIntensity.value)
+        engine.setLoudnessNormalizerEnabled(false)
+        engine.setTubeWarmthEnabled(false)
+        engine.setSpatializerEnabled(false)
+        engine.setSubBassEnabled(false)
+        engine.setVocalClarityEnabled(false)
         engine.setChannelBalance(_channelBalance.value)
-        engine.setLimiterEnabled(_limiterEnabled.value)
+        engine.setLimiterEnabled(false)
         engine.setPlaybackSpeed(_playbackSpeed.value)
         engine.setEqEnabled(_isEqEnabled.value)
     }
@@ -725,7 +720,6 @@ class AudioEngineController private constructor(private val context: Context) {
                     scope.launch {
                         delay(250) // Let Android audio HAL settle routing
                         refreshHardwareOutput()
-                        updateSpatializerAudioRouting()
                     }
                 }
             }
@@ -740,13 +734,11 @@ class AudioEngineController private constructor(private val context: Context) {
                     scope.launch {
                         delay(250) // Let Android audio HAL settle routing
                         refreshHardwareOutput()
-                        updateSpatializerAudioRouting()
                     }
                 }
             }
         }
         audioManager.registerAudioDeviceCallback(deviceCallback, null)
-        updateSpatializerAudioRouting()
     }
 
     private fun restoreEqState() {
