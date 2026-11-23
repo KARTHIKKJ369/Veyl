@@ -124,12 +124,22 @@ fun VeylSongsScreen(
     val favoriteUris by controller.favoriteUris.collectAsStateWithLifecycle()
     val currentUri by controller.currentUri.collectAsStateWithLifecycle()
 
+    val uiPrefs = remember { context.getSharedPreferences("veyl_ui_prefs", android.content.Context.MODE_PRIVATE) }
+
     var searchQuery by remember { mutableStateOf("") }
     var isSearchExpanded by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf("All") }
-    var viewLayout by remember { mutableStateOf(SongViewLayout.LIST) }
-    var sortOption by remember { mutableStateOf(SongSortOption.DEFAULT) }
-    var sortAscending by remember { mutableStateOf(true) }
+    var viewLayout by remember {
+        val saved = uiPrefs.getString("library_view_layout", "LIST")
+        mutableStateOf(runCatching { SongViewLayout.valueOf(saved ?: "LIST") }.getOrDefault(SongViewLayout.LIST))
+    }
+    var sortOption by remember {
+        val saved = uiPrefs.getString("library_sort_option", "DEFAULT")
+        mutableStateOf(runCatching { SongSortOption.valueOf(saved ?: "DEFAULT") }.getOrDefault(SongSortOption.DEFAULT))
+    }
+    var sortAscending by remember {
+        mutableStateOf(uiPrefs.getBoolean("library_sort_ascending", true))
+    }
     var showSortFilterSheet by remember { mutableStateOf(false) }
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
     var expandedArtist by remember { mutableStateOf<String?>(null) }
@@ -475,6 +485,7 @@ fun VeylSongsScreen(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             viewLayout = SongViewLayout.GRID
+                            uiPrefs.edit().putString("library_view_layout", SongViewLayout.GRID.name).apply()
                         },
                         modifier = Modifier
                             .size(32.dp)
@@ -494,6 +505,7 @@ fun VeylSongsScreen(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             viewLayout = SongViewLayout.LIST
+                            uiPrefs.edit().putString("library_view_layout", SongViewLayout.LIST.name).apply()
                         },
                         modifier = Modifier
                             .size(32.dp)
@@ -1047,6 +1059,10 @@ fun VeylSongsScreen(
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 sortOption = SongSortOption.DEFAULT
                                 sortAscending = true
+                                uiPrefs.edit()
+                                    .putString("library_sort_option", SongSortOption.DEFAULT.name)
+                                    .putBoolean("library_sort_ascending", true)
+                                    .apply()
                             }
                         ) {
                             Text(
@@ -1077,6 +1093,7 @@ fun VeylSongsScreen(
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 sortAscending = true
+                                uiPrefs.edit().putBoolean("library_sort_ascending", true).apply()
                             }
                             .padding(vertical = 8.dp),
                         contentAlignment = Alignment.Center
@@ -1097,6 +1114,7 @@ fun VeylSongsScreen(
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 sortAscending = false
+                                uiPrefs.edit().putBoolean("library_sort_ascending", false).apply()
                             }
                             .padding(vertical = 8.dp),
                         contentAlignment = Alignment.Center
@@ -1119,11 +1137,12 @@ fun VeylSongsScreen(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (isSelected) colors.surfaceElevated else Color.Transparent)
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    sortOption = option
-                                    showSortFilterSheet = false
-                                }
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                sortOption = option
+                                uiPrefs.edit().putString("library_sort_option", option.name).apply()
+                                showSortFilterSheet = false
+                            }
                                 .padding(horizontal = 14.dp, vertical = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically

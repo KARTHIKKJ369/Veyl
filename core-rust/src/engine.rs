@@ -229,6 +229,7 @@ impl PlaybackEngine {
         self.spatializer.lock().set_sample_rate(new_rate);
         self.sub_bass.lock().set_sample_rate(new_rate);
         self.vocal_clarity.lock().set_sample_rate(new_rate);
+        self.tube_exciter.lock().set_sample_rate(new_rate);
         self.crossfeed.lock().set_sample_rate(new_rate);
         self.loudness_normalizer.lock().set_sample_rate(new_rate);
         // Immediately configure resampler for new hardware output rate to prevent pitch distortion
@@ -770,6 +771,14 @@ impl PlaybackEngine {
         self.spatializer.lock().width
     }
 
+    pub fn set_spatializer_headphone_mode(&self, enabled: bool) {
+        self.spatializer.lock().set_headphone_mode(enabled);
+    }
+
+    pub fn is_spatializer_headphone_mode(&self) -> bool {
+        self.spatializer.lock().is_headphone_mode
+    }
+
     pub fn set_sub_bass_enabled(&self, enabled: bool) {
         self.sub_bass.lock().set_enabled(enabled);
     }
@@ -905,7 +914,7 @@ impl AudioRenderCallback for PlaybackEngine {
 
             // 4. Process Tube Warmth & Analog Harmonic Exciter (Musical 2nd/3rd harmonics)
             {
-                let tube = self.tube_exciter.lock();
+                let mut tube = self.tube_exciter.lock();
                 tube.process_interleaved(buffer);
             }
 

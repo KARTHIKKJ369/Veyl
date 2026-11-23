@@ -58,9 +58,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.audiophile.player.engine.ArtworkCache
 import com.audiophile.player.engine.AsyncAlbumArt
 import com.audiophile.player.engine.AudioEngineController
-import com.audiophile.player.ui.components.VeylStackedArtworkDeck
 import com.audiophile.player.ui.components.VeylTrackOptionsSheet
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
@@ -277,26 +277,97 @@ fun VeylPlaylistDetailScreen(
             }
         }
 
-        // 2. 3-Card Stacked Deck Artwork (Changes smoothly over time automatically)
+        // 2. Clean, Sleek Hero Playlist Artwork Cover
         item {
+            val distinctArtTracks = remember(playlistTracks) {
+                playlistTracks.filter { it.hasArtwork || ArtworkCache.getOnlineArtwork(it.uri) != null }.take(4)
+            }
+            val primaryCoverUri = remember(distinctArtTracks, playlistTracks) {
+                distinctArtTracks.firstOrNull()?.uri ?: playlistTracks.firstOrNull()?.uri ?: ""
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                VeylStackedArtworkDeck(
-                    tracks = playlistTracks,
-                    size = 210.dp,
-                    autoCycleIntervalMs = 3500L,
-                    onClick = {
-                        if (playlistTracks.isNotEmpty()) {
-                            controller.playTrackList(playlistTracks, startIndex = 0)
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = colors.surfaceElevated,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
+                    modifier = Modifier
+                        .size(190.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable {
+                            if (playlistTracks.isNotEmpty()) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                controller.playTrackList(playlistTracks, startIndex = 0)
+                            }
+                        }
+                ) {
+                    if (distinctArtTracks.size >= 4) {
+                        // 2x2 Collage Cover for varied playlists
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                AsyncAlbumArt(
+                                    uri = distinctArtTracks[0].uri,
+                                    contentDescription = null,
+                                    modifier = Modifier.weight(1f).fillMaxSize(),
+                                    cornerRadius = 0.dp,
+                                    targetSizePx = 200
+                                )
+                                AsyncAlbumArt(
+                                    uri = distinctArtTracks[1].uri,
+                                    contentDescription = null,
+                                    modifier = Modifier.weight(1f).fillMaxSize(),
+                                    cornerRadius = 0.dp,
+                                    targetSizePx = 200
+                                )
+                            }
+                            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                AsyncAlbumArt(
+                                    uri = distinctArtTracks[2].uri,
+                                    contentDescription = null,
+                                    modifier = Modifier.weight(1f).fillMaxSize(),
+                                    cornerRadius = 0.dp,
+                                    targetSizePx = 200
+                                )
+                                AsyncAlbumArt(
+                                    uri = distinctArtTracks[3].uri,
+                                    contentDescription = null,
+                                    modifier = Modifier.weight(1f).fillMaxSize(),
+                                    cornerRadius = 0.dp,
+                                    targetSizePx = 200
+                                )
+                            }
+                        }
+                    } else if (primaryCoverUri.isNotBlank()) {
+                        AsyncAlbumArt(
+                            uri = primaryCoverUri,
+                            contentDescription = currentPlaylistTitle,
+                            modifier = Modifier.fillMaxSize(),
+                            cornerRadius = 20.dp,
+                            targetSizePx = 360
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(colors.surfaceElevated),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.QueueList,
+                                contentDescription = null,
+                                tint = colors.accentSignal,
+                                modifier = Modifier.size(54.dp)
+                            )
                         }
                     }
-                )
+                }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
                 // Playlist Name
                 Text(
@@ -620,7 +691,23 @@ private fun PlaylistTrackRow(
             }
         }
 
-        // Title & Artist (Clean, immediate text - no album cover, zero lag)
+        // Lightweight Album Art Thumbnail (Zero scroll lag, memory-cached)
+        Box(
+            modifier = Modifier
+                .padding(end = 12.dp)
+                .size(42.dp)
+                .clip(RoundedCornerShape(8.dp))
+        ) {
+            AsyncAlbumArt(
+                uri = track.uri,
+                contentDescription = track.title,
+                modifier = Modifier.fillMaxSize(),
+                cornerRadius = 8.dp,
+                targetSizePx = 120
+            )
+        }
+
+        // Title & Artist
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,

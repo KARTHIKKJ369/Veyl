@@ -203,6 +203,9 @@ class AudioEngineController private constructor(private val context: Context) {
     private val _spatializerWidth = MutableStateFlow(prefs.getFloat("spatializer_width", 1.25f))
     val spatializerWidth: StateFlow<Float> = _spatializerWidth.asStateFlow()
 
+    private val _spatializerIsHeadphoneMode = MutableStateFlow(true)
+    val spatializerIsHeadphoneMode: StateFlow<Boolean> = _spatializerIsHeadphoneMode.asStateFlow()
+
     // Sub-Bass Exciter (Intensity: 0.0 to 1.0)
     private val _subBassEnabled = MutableStateFlow(prefs.getBoolean("sub_bass_enabled", false))
     val subBassEnabled: StateFlow<Boolean> = _subBassEnabled.asStateFlow()
@@ -722,6 +725,7 @@ class AudioEngineController private constructor(private val context: Context) {
                     scope.launch {
                         delay(250) // Let Android audio HAL settle routing
                         refreshHardwareOutput()
+                        updateSpatializerAudioRouting()
                     }
                 }
             }
@@ -736,11 +740,13 @@ class AudioEngineController private constructor(private val context: Context) {
                     scope.launch {
                         delay(250) // Let Android audio HAL settle routing
                         refreshHardwareOutput()
+                        updateSpatializerAudioRouting()
                     }
                 }
             }
         }
         audioManager.registerAudioDeviceCallback(deviceCallback, null)
+        updateSpatializerAudioRouting()
     }
 
     private fun restoreEqState() {
@@ -1529,13 +1535,18 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
-    fun addTrackToPlaylist(playlistId: String, uri: String, trackInfo: TrackInfo? = null) {
+    fun addTrackToPlaylist(playlistId: String, uri: String, trackInfo: TrackInfo? = null, artworkUrl: String? = null) {
         playlistManager.addTrackToPlaylist(playlistId, uri)
         val resolved = trackInfo ?: resolveTrackInfo(uri) ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
+        val effectiveArt = artworkUrl ?: ArtworkCache.getOnlineArtwork(uri) ?: resolved?.let { ArtworkCache.getOnlineArtwork(it.title.lowercase()) }
+        if (!effectiveArt.isNullOrBlank()) {
+            ArtworkCache.registerOnlineArtwork(uri, effectiveArt)
+            resolved?.let { ArtworkCache.registerOnlineArtwork(it.uri, effectiveArt) }
+        }
         if (resolved != null) {
-            val isOnline = resolved.uri.contains("veyl_online_stream_") || resolved.genre == "Online Stream"
+            val isOnline = resolved.uri.contains("veyl_online_stream_") || resolved.genre == "Online Stream" || resolved.uri.startsWith("online://")
             if (isOnline) {
-                playlistManager.registerOnlineTrack(resolved, _currentOnlineSong.value)
+                playlistManager.registerOnlineTrack(resolved, _currentOnlineSong.value?.takeIf { it.id in uri || it.title.equals(resolved.title, ignoreCase = true) }, effectiveArt)
             }
         }
     }
@@ -3191,6 +3202,30 @@ class AudioEngineController private constructor(private val context: Context) {
         prefs.edit().putFloat("spatializer_width", clamped).apply()
         Log.i("AudioEngineController", "DSP setSpatializerWidth: $clamped")
         nativeScope.launch { withNativeEngine { it.setSpatializerWidth(clamped) } }
+    }
+
+    fun isHeadphonesConnected(): Boolean {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return true
+        val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        return devices.any { dev ->
+            dev.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+            dev.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+            dev.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+            dev.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+            dev.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+            dev.type == AudioDeviceInfo.TYPE_USB_DEVICE
+        }
+    }
+
+    fun setSpatializerHeadphoneMode(isHeadphone: Boolean) {
+        _spatializerIsHeadphoneMode.value = isHeadphone
+        nativeScope.launch { withNativeEngine { it.setSpatializerHeadphoneMode(isHeadphone) } }
+    }
+
+    fun updateSpatializerAudioRouting() {
+        val isHeadphone = isHeadphonesConnected()
+        _spatializerIsHeadphoneMode.value = isHeadphone
+        nativeScope.launch { withNativeEngine { it.setSpatializerHeadphoneMode(isHeadphone) } }
     }
 
     fun setSubBassEnabled(enabled: Boolean) {

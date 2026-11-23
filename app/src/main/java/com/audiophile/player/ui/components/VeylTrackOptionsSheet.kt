@@ -1,5 +1,7 @@
 package com.audiophile.player.ui.components
 
+import com.audiophile.player.engine.ArtworkCache
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -60,7 +62,8 @@ fun VeylTrackOptionsSheet(
     onDismiss: () -> Unit,
     onViewAlbum: ((String) -> Unit)? = null,
     onViewArtist: ((String) -> Unit)? = null,
-    onOpenEqualizer: (() -> Unit)? = null
+    onOpenEqualizer: (() -> Unit)? = null,
+    artworkUrl: String? = null
 ) {
     if (track == null) return
 
@@ -68,6 +71,10 @@ fun VeylTrackOptionsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val favoriteUris by controller.favoriteUris.collectAsState()
     val playlists by controller.playlists.collectAsState()
+
+    val effectiveArtwork = artworkUrl?.takeIf { it.isNotBlank() }
+        ?: ArtworkCache.getOnlineArtwork(track.uri)
+        ?: ArtworkCache.getOnlineArtwork(track.title.lowercase())
 
     val isFav = remember(track, favoriteUris) { controller.isTrackFavorite(track, favoriteUris) }
     var showPlaylistDialog by remember { mutableStateOf(false) }
@@ -356,7 +363,7 @@ fun VeylTrackOptionsSheet(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
                                         .clickable {
-                                            controller.addTrackToPlaylist(pl.id, track.uri, track)
+                                            controller.addTrackToPlaylist(pl.id, track.uri, track, effectiveArtwork)
                                             showPlaylistDialog = false
                                             onDismiss()
                                         }
@@ -421,7 +428,7 @@ fun VeylTrackOptionsSheet(
                     onClick = {
                         if (newPlaylistName.isNotBlank()) {
                             val newPl = controller.playlistManager.createPlaylist(newPlaylistName.trim())
-                            controller.playlistManager.addTrackToPlaylist(newPl.id, track.uri)
+                            controller.addTrackToPlaylist(newPl.id, track.uri, track, effectiveArtwork)
                             newPlaylistName = ""
                             showCreatePlaylistDialog = false
                             showPlaylistDialog = false

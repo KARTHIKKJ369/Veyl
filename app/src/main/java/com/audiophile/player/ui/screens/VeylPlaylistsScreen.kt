@@ -378,29 +378,12 @@ fun VeylPlaylistsScreen(
                     Spacer(modifier = Modifier.width(14.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Favorites",
-                                style = VeylTypography.TitleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.textPrimary
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = colors.accentSignal.copy(alpha = 0.15f),
-                                modifier = Modifier.padding(start = 2.dp)
-                            ) {
-                                Text(
-                                    text = "PINNED",
-                                    style = VeylTypography.MonoSpec,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colors.accentSignal,
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Favorites",
+                            style = VeylTypography.TitleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary
+                        )
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = "${favTracks.size} loved tracks • Auto-updated",

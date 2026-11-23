@@ -764,14 +764,35 @@ pub struct TubeWarmthExciter {
     pub enabled: bool,
     /// Warmth drive amount: 0.0 (clean/transparent) to 1.0 (warm vintage saturation)
     pub drive: f32,
+    sample_rate: f32,
+    dc_x_prev_l: f32,
+    dc_y_prev_l: f32,
+    dc_x_prev_r: f32,
+    dc_y_prev_r: f32,
+    dc_r: f32,
 }
 
 impl TubeWarmthExciter {
     pub fn new() -> Self {
-        Self {
+        let mut exciter = Self {
             enabled: false,
             drive: 0.35,
-        }
+            sample_rate: 44100.0,
+            dc_x_prev_l: 0.0,
+            dc_y_prev_l: 0.0,
+            dc_x_prev_r: 0.0,
+            dc_y_prev_r: 0.0,
+            dc_r: 0.9992,
+        };
+        exciter.set_sample_rate(44100.0);
+        exciter
+    }
+
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        let sr = sample_rate.max(8000.0);
+        self.sample_rate = sr;
+        // 5 Hz DC-blocking high-pass filter: R = 1 - (2 * pi * 5 / sr)
+        self.dc_r = (1.0 - (2.0 * PI * 5.0 / sr)).clamp(0.990, 0.9999);
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
@@ -783,36 +804,56 @@ impl TubeWarmthExciter {
     }
 
     #[inline(always)]
-    pub fn process_sample(&self, sample: f32) -> f32 {
+    fn process_sample_ch(&mut self, is_left: bool, sample: f32) -> f32 {
+        let d = self.drive;
+        let in_gain = 1.0 + d * 0.45;
+        let x = sample * in_gain;
+
+        // Class-A soft triode saturation: musical 2nd harmonic without DC skew
+        let x_tube = x + 0.12 * d * (x * x * x.signum());
+        let saturated = x_tube.tanh();
+        let dc_r = self.dc_r;
+
+        let (x_prev, y_prev) = if is_left {
+            (&mut self.dc_x_prev_l, &mut self.dc_y_prev_l)
+        } else {
+            (&mut self.dc_x_prev_r, &mut self.dc_y_prev_r)
+        };
+
+        let y = saturated - *x_prev + dc_r * (*y_prev);
+        *x_prev = saturated;
+        *y_prev = y;
+
+        // Makeup gain compensation so perceived loudness stays balanced
+        let makeup = 1.0 / (1.0 + d * 0.15);
+        (y * makeup).clamp(-1.0, 1.0)
+    }
+
+    #[inline(always)]
+    pub fn process_sample(&mut self, sample: f32) -> f32 {
         if !self.enabled || self.drive < 0.01 {
             return sample;
         }
-
-        let d = self.drive;
-        // Input gain drive: 1.0 to 2.8x so signal reaches the musical non-linear saturation curve
-        let in_gain = 1.0 + d * 1.8;
-        let x = (sample * in_gain).clamp(-2.5, 2.5);
-
-        // Class-A asymmetrical triode saturation:
-        // Even harmonics: 0.25 * d * (x^2 - 0.35 * |x|)
-        let even = 0.25 * d * (x * x - 0.35 * x.abs());
-        let saturated = if x >= 0.0 {
-            (x + even) / (1.0 + 0.35 * d * x)
-        } else {
-            (x + even) / (1.0 - 0.25 * d * x)
-        };
-
-        // Makeup gain compensation so perceived loudness stays balanced
-        let makeup = 1.0 / (1.0 + d * 0.40);
-        (saturated * makeup).clamp(-1.0, 1.0)
+        self.process_sample_ch(true, sample)
     }
 
-    pub fn process_interleaved(&self, buffer: &mut [f32]) {
+    pub fn process_interleaved(&mut self, buffer: &mut [f32]) {
         if !self.enabled || self.drive < 0.01 {
             return;
         }
-        for s in buffer.iter_mut() {
-            *s = self.process_sample(*s);
+        let len = buffer.len();
+        let frames = len / 2;
+        if frames > 0 {
+            for f in 0..frames {
+                let l_idx = f * 2;
+                let r_idx = l_idx + 1;
+                buffer[l_idx] = self.process_sample_ch(true, buffer[l_idx]);
+                buffer[r_idx] = self.process_sample_ch(false, buffer[r_idx]);
+            }
+        } else {
+            for s in buffer.iter_mut() {
+                *s = self.process_sample_ch(true, *s);
+            }
         }
     }
 }
@@ -866,21 +907,23 @@ impl ChannelBalance {
 /// 360° Panoramic Spatializer
 /// Expands stereo soundstage into a wide 3D acoustic bubble using:
 /// 1. Bass-Anchored Mid/Side Crossover (keeping <140 Hz mono so kick and bass remain locked center)
-/// 2. Schroeder All-Pass Diffusers on Side channel (creates natural 3D room depth without metallic comb-filtering)
-/// 3. HRTF Head-Shadowed ITD Crossfeed (~0.32 ms delay, 1.8 kHz LPF to simulate human head diffraction)
+/// 2. Headphone mode: Positive HRTF Head-Shadowed ITD Crossfeed (~0.28 ms delay) + Smooth 3D diffuse reflections
+/// 3. Speaker mode: Blumlein Stereo Shuffler (room acoustics widening without artificial HRTF crossfeed)
 #[derive(Debug, Clone)]
 pub struct Spatializer360 {
     pub enabled: bool,
     /// Stereo width multiplier: 0.5 (Narrow) to 1.0 (Natural) to 2.2 (Wide 360°)
     pub width: f32,
+    /// Whether headphones are active (binaural HRTF crossfeed) or speakers (Blumlein room shuffler)
+    pub is_headphone_mode: bool,
     sample_rate: f32,
     side_hp_l: f32,
     side_hp_alpha: f32,
-    // ITD delay buffers (~0.32 ms)
+    // ITD delay buffers (~0.28 ms)
     delay_l: Vec<f32>,
     delay_r: Vec<f32>,
     write_idx: usize,
-    // Prime-length Schroeder All-Pass buffers (~4.3 ms L, ~5.9 ms R) for 3D room depth
+    // Prime-length Schroeder All-Pass buffers (~1.8 ms L, ~2.5 ms R) for natural room depth
     ap_buf_l: Vec<f32>,
     ap_buf_r: Vec<f32>,
     ap_idx_l: usize,
@@ -896,6 +939,7 @@ impl Spatializer360 {
         let mut spat = Self {
             enabled: false,
             width: 1.35,
+            is_headphone_mode: true,
             sample_rate: sample_rate.max(8000.0),
             side_hp_l: 0.0,
             side_hp_alpha: 0.0,
@@ -923,19 +967,19 @@ impl Spatializer360 {
         let rc_side = 1.0 / (2.0 * PI * 140.0);
         self.side_hp_alpha = dt / (rc_side + dt);
 
-        // 1.8 kHz head-shadow LPF for HRTF crossfeed
-        let rc_cross = 1.0 / (2.0 * PI * 1800.0);
+        // 2.0 kHz head-shadow LPF for natural earphone HRTF crossfeed
+        let rc_cross = 1.0 / (2.0 * PI * 2000.0);
         self.cross_alpha = dt / (rc_cross + dt);
 
-        // ITD delay (~0.32 ms)
-        let itd_samples = ((0.00032 * sr) as usize).max(4);
+        // ITD delay (~0.28 ms)
+        let itd_samples = ((0.00028 * sr) as usize).max(4);
         self.delay_l.resize(itd_samples, 0.0);
         self.delay_r.resize(itd_samples, 0.0);
         self.write_idx = 0;
 
-        // Prime Schroeder All-Pass buffers (~4.3 ms L, ~5.9 ms R) for 3D room depth
-        let ap_l_len = ((0.0043 * sr) as usize).max(17);
-        let ap_r_len = ((0.0059 * sr) as usize).max(23);
+        // Smooth Schroeder All-Pass buffers (~1.8 ms L, ~2.5 ms R) for natural room depth
+        let ap_l_len = ((0.0018 * sr) as usize).max(11);
+        let ap_r_len = ((0.0025 * sr) as usize).max(17);
         self.ap_buf_l.resize(ap_l_len, 0.0);
         self.ap_buf_r.resize(ap_r_len, 0.0);
         self.ap_idx_l = 0;
@@ -948,6 +992,10 @@ impl Spatializer360 {
 
     pub fn set_width(&mut self, width: f32) {
         self.width = width.clamp(0.5, 2.2);
+    }
+
+    pub fn set_headphone_mode(&mut self, is_headphone: bool) {
+        self.is_headphone_mode = is_headphone;
     }
 
     #[inline(always)]
@@ -963,7 +1011,7 @@ impl Spatializer360 {
         }
 
         let frames = buffer.len() / 2;
-        let g = 0.5;
+        let g = 0.35;
 
         for f in 0..frames {
             let idx = f * 2;
@@ -978,45 +1026,53 @@ impl Spatializer360 {
             self.side_hp_l += self.side_hp_alpha * (side - self.side_hp_l);
             let side_highs = side - self.side_hp_l;
 
-            // 3. Schroeder All-Pass Diffusers on Side channel for 3D room envelope
-            let delayed_ap_l = self.ap_buf_l[self.ap_idx_l];
-            let ap_in_l = side_highs + g * delayed_ap_l;
-            self.ap_buf_l[self.ap_idx_l] = ap_in_l;
-            self.ap_idx_l = (self.ap_idx_l + 1) % self.ap_buf_l.len();
-            let diff_l = delayed_ap_l - g * ap_in_l;
+            if self.is_headphone_mode {
+                // HEADPHONE MODE: Natural 3D Binaural Stage with positive HRTF crossfeed
+                let delayed_ap_l = self.ap_buf_l[self.ap_idx_l];
+                let ap_in_l = side_highs + g * delayed_ap_l;
+                self.ap_buf_l[self.ap_idx_l] = ap_in_l;
+                self.ap_idx_l = (self.ap_idx_l + 1) % self.ap_buf_l.len();
+                let diff_l = delayed_ap_l - g * ap_in_l;
 
-            let delayed_ap_r = self.ap_buf_r[self.ap_idx_r];
-            let ap_in_r = -side_highs + g * delayed_ap_r;
-            self.ap_buf_r[self.ap_idx_r] = ap_in_r;
-            self.ap_idx_r = (self.ap_idx_r + 1) % self.ap_buf_r.len();
-            let diff_r = delayed_ap_r - g * ap_in_r;
+                let delayed_ap_r = self.ap_buf_r[self.ap_idx_r];
+                let ap_in_r = side_highs + g * delayed_ap_r;
+                self.ap_buf_r[self.ap_idx_r] = ap_in_r;
+                self.ap_idx_r = (self.ap_idx_r + 1) % self.ap_buf_r.len();
+                let diff_r = delayed_ap_r - g * ap_in_r;
 
-            // 4. HRTF Head-Shadowed ITD Crossfeed
-            let itd_l = self.delay_l[self.write_idx];
-            let itd_r = self.delay_r[self.write_idx];
-            self.delay_l[self.write_idx] = l;
-            self.delay_r[self.write_idx] = r;
-            self.write_idx = (self.write_idx + 1) % self.delay_l.len();
+                // Positive ITD crossfeed (mimics natural sound wrapping around the head)
+                let itd_l = self.delay_l[self.write_idx];
+                let itd_r = self.delay_r[self.write_idx];
+                self.delay_l[self.write_idx] = l;
+                self.delay_r[self.write_idx] = r;
+                self.write_idx = (self.write_idx + 1) % self.delay_l.len();
 
-            self.cross_lp_l += self.cross_alpha * (itd_l - self.cross_lp_l);
-            self.cross_lp_r += self.cross_alpha * (itd_r - self.cross_lp_r);
+                self.cross_lp_l += self.cross_alpha * (itd_l - self.cross_lp_l);
+                self.cross_lp_r += self.cross_alpha * (itd_r - self.cross_lp_r);
 
-            // 5. Recombine: Mid slightly recessed for front stage depth + widened side highs + 3D diffuser + crossfeed
-            let mid_scaled = mid * (1.0 - 0.12 * s);
-            let wide_side = self.side_hp_l + side_highs * (1.0 + 0.75 * s);
+                let mid_scaled = mid * (1.0 - 0.08 * s);
+                let wide_side = self.side_hp_l + side_highs * (1.0 + 0.65 * s);
 
-            let out_l = mid_scaled + wide_side + (diff_l * 0.28 * s) - (self.cross_lp_r * 0.18 * s);
-            let out_r = mid_scaled - wide_side + (diff_r * 0.28 * s) - (self.cross_lp_l * 0.18 * s);
+                let out_l = mid_scaled + wide_side + (diff_l * 0.18 * s) + (self.cross_lp_r * 0.15 * s);
+                let out_r = mid_scaled - wide_side + (diff_r * 0.18 * s) + (self.cross_lp_l * 0.15 * s);
 
-            buffer[idx] = out_l;
-            buffer[idx + 1] = out_r;
+                buffer[idx] = out_l;
+                buffer[idx + 1] = out_r;
+            } else {
+                // SPEAKER MODE: Blumlein Stereo Shuffler (Room Acoustics)
+                // Speakers already cross-feed acoustically in the room air.
+                let wide_side = self.side_hp_l + side_highs * (1.0 + 0.55 * s);
+                buffer[idx] = mid + wide_side;
+                buffer[idx + 1] = mid - wide_side;
+            }
         }
     }
 }
 
 /// Audiophile Psychoacoustic Sub-Bass Exciter
-/// Combines a resonant sub-bass shelf (40–90 Hz) with missing-fundamental
-/// harmonic generation (even/odd overtones) so sub-bass hits hard on both IEMs and speakers.
+/// Combines a musical resonant sub-bass shelf (40–80 Hz) with missing-fundamental
+/// harmonic generation (even/odd overtones strictly bandpassed to 80-220 Hz)
+/// so sub-bass hits deep and punchy without creating mid/treble noise or distortion.
 #[derive(Debug, Clone)]
 pub struct SubBassExciter {
     pub enabled: bool,
@@ -1025,8 +1081,11 @@ pub struct SubBassExciter {
     sample_rate: f32,
     shelf_l: BiquadChannelState,
     shelf_r: BiquadChannelState,
-    coeffs: BiquadCoefficients,
-    // 85 Hz sub-bass extractor LPF
+    coeffs_shelf: BiquadCoefficients,
+    bp_harm_l: BiquadChannelState,
+    bp_harm_r: BiquadChannelState,
+    coeffs_bp: BiquadCoefficients,
+    // 75 Hz sub-bass extractor LPF
     sub_lp_l: f32,
     sub_lp_r: f32,
     sub_alpha: f32,
@@ -1041,7 +1100,10 @@ impl SubBassExciter {
             sample_rate: sr,
             shelf_l: BiquadChannelState::default(),
             shelf_r: BiquadChannelState::default(),
-            coeffs: BiquadCoefficients::identity(),
+            coeffs_shelf: BiquadCoefficients::identity(),
+            bp_harm_l: BiquadChannelState::default(),
+            bp_harm_r: BiquadChannelState::default(),
+            coeffs_bp: BiquadCoefficients::identity(),
             sub_lp_l: 0.0,
             sub_lp_r: 0.0,
             sub_alpha: 0.0,
@@ -1067,16 +1129,26 @@ impl SubBassExciter {
     fn recalculate(&mut self) {
         let sr = self.sample_rate.max(8000.0);
         let dt = 1.0 / sr;
-        let rc_sub = 1.0 / (2.0 * PI * 85.0);
+        let rc_sub = 1.0 / (2.0 * PI * 75.0);
         self.sub_alpha = dt / (rc_sub + dt);
 
-        // Resonant low-shelf boost at 75 Hz: up to +9.5 dB with Q = 0.85
-        let gain_db = self.intensity * 9.5;
-        self.coeffs = BiquadCoefficients::calculate(
+        // Musical low-shelf boost at 70 Hz: up to +5.5 dB with smooth Q = 0.707
+        let gain_db = self.intensity * 5.5;
+        self.coeffs_shelf = BiquadCoefficients::calculate(
             FilterType::LowShelf,
-            75.0,
+            70.0,
             gain_db,
-            0.85,
+            0.707,
+            sr,
+        );
+
+        // Bandpass filter centered at 130 Hz with Q = 0.8
+        // Strictly confines generated harmonics to 80-220 Hz so high-frequency hiss/distortion cannot bleed through
+        self.coeffs_bp = BiquadCoefficients::calculate(
+            FilterType::BandPass,
+            130.0,
+            0.0,
+            0.8,
             sr,
         );
     }
@@ -1089,40 +1161,36 @@ impl SubBassExciter {
 
         let intensity = self.intensity;
         // Headroom attenuation so boosted sub-bass doesn't hard-clip into distortion
-        let headroom = 1.0 / (1.0 + intensity * 0.45);
+        let headroom = 1.0 / (1.0 + intensity * 0.30);
         let frames = buffer.len() / channels;
-
-        let soft_clip = |x: f32| -> f32 {
-            if x.abs() <= 0.85 {
-                x
-            } else {
-                x.signum() * (0.85 + 0.15 * ((x.abs() - 0.85) / 0.15).tanh())
-            }
-        };
 
         for f in 0..frames {
             let l_idx = f * channels;
             let l = buffer[l_idx] * headroom;
 
             // 1. Resonant low-shelf boost on sub-bass fundamental
-            let bl = self.shelf_l.process(l, &self.coeffs);
+            let bl = self.shelf_l.process(l, &self.coeffs_shelf);
 
-            // 2. Sub-bass harmonic exciter (adds warm 2nd/3rd harmonics to <85Hz)
+            // 2. Sub-bass harmonic exciter (adds warm 2nd/3rd harmonics)
             self.sub_lp_l += self.sub_alpha * (l - self.sub_lp_l);
-            let harm_l = (self.sub_lp_l * 2.5).tanh() * 0.22 * intensity;
+            let sub_in = self.sub_lp_l;
+            let harm_raw = (sub_in * 1.8).tanh() + 0.3 * (sub_in * sub_in * sub_in.signum());
+            let harm_filtered = self.bp_harm_l.process(harm_raw, &self.coeffs_bp) * 0.25 * intensity;
 
-            buffer[l_idx] = soft_clip(bl + harm_l);
+            buffer[l_idx] = (bl + harm_filtered).clamp(-1.0, 1.0);
 
             if channels > 1 {
                 let r_idx = l_idx + 1;
                 let r = buffer[r_idx] * headroom;
 
-                let br = self.shelf_r.process(r, &self.coeffs);
+                let br = self.shelf_r.process(r, &self.coeffs_shelf);
 
                 self.sub_lp_r += self.sub_alpha * (r - self.sub_lp_r);
-                let harm_r = (self.sub_lp_r * 2.5).tanh() * 0.22 * intensity;
+                let sub_in_r = self.sub_lp_r;
+                let harm_raw_r = (sub_in_r * 1.8).tanh() + 0.3 * (sub_in_r * sub_in_r * sub_in_r.signum());
+                let harm_filtered_r = self.bp_harm_r.process(harm_raw_r, &self.coeffs_bp) * 0.25 * intensity;
 
-                buffer[r_idx] = soft_clip(br + harm_r);
+                buffer[r_idx] = (br + harm_filtered_r).clamp(-1.0, 1.0);
             }
         }
     }
@@ -1130,9 +1198,10 @@ impl SubBassExciter {
 
 /// Audiophile Vocal Clarity & Formant Intelligibility Enhancer
 /// Multi-band acoustic processing:
-/// 1. Formant presence peaking filter at 2.8 kHz (+2.0 dB to +8.5 dB)
-/// 2. Breath & air articulation high-shelf at 8.5 kHz (+1.0 dB to +5.0 dB)
-/// 3. Mud/boxiness scoop at 380 Hz (-1.0 dB to -3.0 dB)
+/// 1. Formant presence peaking filter at 2.8 kHz (+1.0 dB to +4.5 dB)
+/// 2. Breath & air articulation gentle high-shelf at 8.5 kHz (+0.5 dB to +2.5 dB)
+/// 3. Mud/boxiness scoop at 380 Hz (-0.5 dB to -2.0 dB)
+/// 4. Automatic dynamic headroom compensation to prevent noise amplification and digital clipping
 #[derive(Debug, Clone)]
 pub struct VocalClarity {
     pub enabled: bool,
@@ -1187,8 +1256,8 @@ impl VocalClarity {
 
     fn recalculate(&mut self) {
         let c = self.clarity;
-        // 1. Presence peaking boost at 2800 Hz: up to +8.5 dB
-        let presence_gain = c * 8.5;
+        // 1. Presence peaking boost at 2800 Hz: +1.0 dB to +4.5 dB
+        let presence_gain = c * 4.5;
         self.coeffs_presence = BiquadCoefficients::calculate(
             FilterType::Peaking,
             2800.0,
@@ -1197,18 +1266,18 @@ impl VocalClarity {
             self.sample_rate,
         );
 
-        // 2. Air articulation high-shelf at 8500 Hz: up to +5.0 dB
-        let air_gain = c * 5.0;
+        // 2. Air articulation gentle high-shelf at 8500 Hz: +0.5 dB to +2.5 dB
+        let air_gain = c * 2.5;
         self.coeffs_air = BiquadCoefficients::calculate(
             FilterType::HighShelf,
             8500.0,
             air_gain,
-            0.75,
+            0.707,
             self.sample_rate,
         );
 
-        // 3. Gentle boxy mud dip at 380 Hz: down to -3.0 dB
-        let mud_gain = -c * 3.0;
+        // 3. Gentle boxy mud dip at 380 Hz: down to -2.0 dB
+        let mud_gain = -c * 2.0;
         self.coeffs_mud = BiquadCoefficients::calculate(
             FilterType::Peaking,
             380.0,
@@ -1224,10 +1293,13 @@ impl VocalClarity {
             return;
         }
 
+        // Automatic digital headroom compensation to guarantee zero digital clipping
+        let headroom = 1.0 / (1.0 + self.clarity * 0.35);
+
         let frames = buffer.len() / channels;
         for f in 0..frames {
             let l_idx = f * channels;
-            let mut s_l = buffer[l_idx];
+            let mut s_l = buffer[l_idx] * headroom;
             s_l = self.state_mud_l.process(s_l, &self.coeffs_mud);
             s_l = self.state_presence_l.process(s_l, &self.coeffs_presence);
             s_l = self.state_air_l.process(s_l, &self.coeffs_air);
@@ -1235,7 +1307,7 @@ impl VocalClarity {
 
             if channels > 1 {
                 let r_idx = l_idx + 1;
-                let mut s_r = buffer[r_idx];
+                let mut s_r = buffer[r_idx] * headroom;
                 s_r = self.state_mud_r.process(s_r, &self.coeffs_mud);
                 s_r = self.state_presence_r.process(s_r, &self.coeffs_presence);
                 s_r = self.state_air_r.process(s_r, &self.coeffs_air);

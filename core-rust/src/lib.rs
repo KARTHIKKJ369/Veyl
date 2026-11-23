@@ -512,6 +512,14 @@ impl AudiophileEngineHandle {
         self.engine.get_spatializer_width()
     }
 
+    pub fn set_spatializer_headphone_mode(&self, enabled: bool) {
+        self.engine.set_spatializer_headphone_mode(enabled);
+    }
+
+    pub fn is_spatializer_headphone_mode(&self) -> bool {
+        self.engine.is_spatializer_headphone_mode()
+    }
+
     pub fn set_sub_bass_enabled(&self, enabled: bool) {
         self.engine.set_sub_bass_enabled(enabled);
     }

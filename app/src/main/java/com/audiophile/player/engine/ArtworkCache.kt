@@ -104,20 +104,41 @@ object ArtworkCache {
                 memoryCache.remove("${previous}_lg")
                 memoryCache.remove("${previous}_sm")
             }
-            onlineArtMapping[trackUri] = imageUrl
+            // Clear negative cache miss flags so fresh artwork immediately attempts load
+            noArtworkSet.remove(trackUri)
             val clean = trackUri.removePrefix("file://")
+            noArtworkSet.remove(clean)
+            noArtworkSet.remove("file://$clean")
+            val onlineClean = trackUri.removePrefix("online://")
+            noArtworkSet.remove(onlineClean)
+            noArtworkSet.remove("online://$onlineClean")
+
+            onlineArtMapping[trackUri] = imageUrl
             onlineArtMapping[clean] = imageUrl
             onlineArtMapping["file://$clean"] = imageUrl
+            onlineArtMapping[onlineClean] = imageUrl
+            onlineArtMapping["online://$onlineClean"] = imageUrl
             val name = File(clean).name
             if (name.isNotBlank()) {
                 onlineArtMapping[name] = imageUrl
+                onlineArtMapping["online://$name"] = imageUrl
+                noArtworkSet.remove(name)
+                noArtworkSet.remove("online://$name")
             }
         }
     }
 
     fun getOnlineArtwork(trackUri: String): String? {
+        if (trackUri.isBlank()) return null
         val clean = trackUri.removePrefix("file://")
-        return onlineArtMapping[trackUri] ?: onlineArtMapping[clean] ?: onlineArtMapping["file://$clean"] ?: onlineArtMapping[File(clean).name]
+        val onlineClean = trackUri.removePrefix("online://")
+        val name = File(clean).name
+        return onlineArtMapping[trackUri]
+            ?: onlineArtMapping[clean]
+            ?: onlineArtMapping["file://$clean"]
+            ?: onlineArtMapping[onlineClean]
+            ?: onlineArtMapping["online://$onlineClean"]
+            ?: (if (name.isNotBlank()) onlineArtMapping[name] ?: onlineArtMapping["online://$name"] else null)
     }
 
     fun markNoArtwork(uri: String) {
@@ -132,9 +153,10 @@ object ArtworkCache {
     fun getMemoryOnlyArtwork(uri: String, targetSizePx: Int = 128): Bitmap? {
         if (uri.isBlank()) return null
         val clean = uri.removePrefix("file://")
-        if (noArtworkSet.contains(uri) || noArtworkSet.contains(clean)) return null
+        val actualUri = getOnlineArtwork(uri) ?: uri
 
-        val actualUri = onlineArtMapping[uri] ?: onlineArtMapping[clean] ?: onlineArtMapping["file://$clean"] ?: onlineArtMapping[File(clean).name] ?: uri
+        if (actualUri == uri && (noArtworkSet.contains(uri) || noArtworkSet.contains(clean))) return null
+
         val cacheKey = if (targetSizePx > 256) "${actualUri}_lg" else "${actualUri}_sm"
         return memoryCache.get(cacheKey)
     }
@@ -176,9 +198,9 @@ object ArtworkCache {
     suspend fun loadArtwork(uri: String, targetSizePx: Int = 128): Bitmap? {
         if (uri.isBlank()) return null
         val clean = uri.removePrefix("file://")
-        if (noArtworkSet.contains(uri) || noArtworkSet.contains(clean)) return null
+        val actualUri = getOnlineArtwork(uri) ?: uri
+        if (actualUri == uri && (noArtworkSet.contains(uri) || noArtworkSet.contains(clean))) return null
 
-        val actualUri = onlineArtMapping[uri] ?: onlineArtMapping[clean] ?: onlineArtMapping["file://$clean"] ?: onlineArtMapping[File(clean).name] ?: uri
         val cacheKey = if (targetSizePx > 256) "${actualUri}_lg" else "${actualUri}_sm"
 
         // 1. Memory Cache fast return (0ms)

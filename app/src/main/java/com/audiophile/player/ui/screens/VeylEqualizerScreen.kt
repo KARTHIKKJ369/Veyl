@@ -691,10 +691,40 @@ fun VeylEqualizerScreen(
             }
 
             DspTab.ENHANCE -> {
-                // 1. 360° Spatializer Card
+                // Audio DSP Engine Headroom & Co-Processing Status Banner
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = colors.surfaceElevated,
+                        border = BorderStroke(1.dp, colors.borderHairline),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.PulseSine,
+                                contentDescription = null,
+                                tint = colors.accentSignal,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "DSP Engine: Dynamic Headroom Protection Active • Zero Hiss & Anti-Clipping",
+                                style = VeylTypography.MonoSpec,
+                                fontSize = 10.sp,
+                                color = colors.textSecondary
+                            )
+                        }
+                    }
+                }
+
+                // 1. 360° Spatializer Card (Auto Output Routing: Headphones 3D vs Speaker Panorama)
                 item {
                     val spatializerEnabled by controller.spatializerEnabled.collectAsState()
                     val spatializerWidth by controller.spatializerWidth.collectAsState()
+                    val isHeadphoneMode by controller.spatializerIsHeadphoneMode.collectAsState()
 
                     Card(
                         shape = RoundedCornerShape(16.dp),
@@ -720,7 +750,7 @@ fun VeylEqualizerScreen(
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Icon(
-                                        imageVector = VeylIcons.Headphones,
+                                        imageVector = if (isHeadphoneMode) VeylIcons.Headphones else VeylIcons.VolumeUp,
                                         contentDescription = null,
                                         tint = if (spatializerEnabled) colors.accentSignal else colors.textMuted,
                                         modifier = Modifier.size(20.dp)
@@ -733,7 +763,10 @@ fun VeylEqualizerScreen(
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         Text(
-                                            text = if (spatializerEnabled) "Width ${(spatializerWidth * 100).toInt()}% • Haas 3D Stage" else "Bypass • Direct Stereo",
+                                            text = if (spatializerEnabled) {
+                                                if (isHeadphoneMode) "Width ${(spatializerWidth * 100).toInt()}% • Binaural 3D Stage"
+                                                else "Width ${(spatializerWidth * 100).toInt()}% • Stereo Panorama"
+                                            } else "Bypass • Direct Stereo",
                                             style = VeylTypography.MonoSpec,
                                             color = if (spatializerEnabled) colors.accentSignal else colors.textMuted,
                                             fontSize = 11.sp
@@ -756,8 +789,40 @@ fun VeylEqualizerScreen(
                                 )
                             }
 
+                            // Output Device Routing Indicator
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = colors.surfaceElevated,
+                                border = BorderStroke(1.dp, if (spatializerEnabled) colors.accentSignal.copy(alpha = 0.35f) else colors.borderHairline),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isHeadphoneMode) VeylIcons.Headphones else VeylIcons.VolumeUp,
+                                        contentDescription = null,
+                                        tint = colors.accentSignal,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = if (isHeadphoneMode) "AUTO ROUTING: EARPHONES (3D Binaural Crossfeed)" else "AUTO ROUTING: SPEAKER (Blumlein Stereo Shuffler)",
+                                        style = VeylTypography.MonoSpec,
+                                        fontSize = 10.sp,
+                                        color = colors.textPrimary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
                             Text(
-                                text = "Expands soundstage depth & width using interaural Haas delay without phase cancellation.",
+                                text = if (isHeadphoneMode) {
+                                    "Applies phase-aligned ITD/ILD interaural crossfeed and early 3D reflections calibrated for earphones without phase cancellation."
+                                } else {
+                                    "Applies Blumlein stereo shuffler matrix expansion calibrated for external speaker acoustics."
+                                },
                                 style = VeylTypography.BodySmall,
                                 color = colors.textSecondary,
                                 fontSize = 11.sp,
@@ -863,7 +928,7 @@ fun VeylEqualizerScreen(
                                     Icon(
                                         imageVector = VeylIcons.Waveform,
                                         contentDescription = null,
-                                        tint = if (subBassEnabled) Color(0xFF00D1FF) else colors.textMuted,
+                                        tint = if (subBassEnabled) colors.accentSignal else colors.textMuted,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Column {
@@ -874,9 +939,9 @@ fun VeylEqualizerScreen(
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         Text(
-                                            text = if (subBassEnabled) "Depth ${(subBassIntensity * 100).toInt()}% • Sub Harmonics" else "Bypass • Untouched Bass",
+                                            text = if (subBassEnabled) "Depth ${(subBassIntensity * 100).toInt()}% • 2nd-Order Sub Harmonics" else "Bypass • Untouched Bass",
                                             style = VeylTypography.MonoSpec,
-                                            color = if (subBassEnabled) Color(0xFF00D1FF) else colors.textMuted,
+                                            color = if (subBassEnabled) colors.accentSignal else colors.textMuted,
                                             fontSize = 11.sp
                                         )
                                     }
@@ -890,7 +955,7 @@ fun VeylEqualizerScreen(
                                     },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = colors.surfacePanel,
-                                        checkedTrackColor = Color(0xFF00D1FF),
+                                        checkedTrackColor = colors.accentSignal,
                                         uncheckedThumbColor = colors.textMuted,
                                         uncheckedTrackColor = colors.surfaceElevated
                                     )
@@ -898,7 +963,7 @@ fun VeylEqualizerScreen(
                             }
 
                             Text(
-                                text = "Synthesizes missing-fundamental sub harmonics (20–70 Hz) for deep physical impact without muddying midrange.",
+                                text = "Synthesizes missing-fundamental sub harmonics (20–70 Hz) for deep physical impact with 2nd-order bandpass isolation.",
                                 style = VeylTypography.BodySmall,
                                 color = colors.textSecondary,
                                 fontSize = 11.sp,
@@ -921,7 +986,7 @@ fun VeylEqualizerScreen(
                                         Text(
                                             text = "${(subBassIntensity * 100).toInt()}%",
                                             style = VeylTypography.MonoSpec,
-                                            color = Color(0xFF00D1FF),
+                                            color = colors.accentSignal,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -932,8 +997,8 @@ fun VeylEqualizerScreen(
                                         onValueChange = { controller.setSubBassIntensity(it) },
                                         valueRange = 0.05f..1.0f,
                                         colors = SliderDefaults.colors(
-                                            thumbColor = Color(0xFF00D1FF),
-                                            activeTrackColor = Color(0xFF00D1FF),
+                                            thumbColor = colors.accentSignal,
+                                            activeTrackColor = colors.accentSignal,
                                             inactiveTrackColor = colors.surfaceElevated
                                         ),
                                         modifier = Modifier.fillMaxWidth()
@@ -959,7 +1024,7 @@ fun VeylEqualizerScreen(
                                                 },
                                                 colors = FilterChipDefaults.filterChipColors(
                                                     containerColor = colors.surfaceElevated,
-                                                    selectedContainerColor = Color(0xFF00D1FF),
+                                                    selectedContainerColor = colors.accentSignal,
                                                     labelColor = colors.textPrimary,
                                                     selectedLabelColor = colors.surfacePanel
                                                 ),
@@ -1004,7 +1069,7 @@ fun VeylEqualizerScreen(
                                     Icon(
                                         imageVector = VeylIcons.VolumeUp,
                                         contentDescription = null,
-                                        tint = if (vocalClarityEnabled) Color(0xFF00E676) else colors.textMuted,
+                                        tint = if (vocalClarityEnabled) colors.accentSignal else colors.textMuted,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Column {
@@ -1015,9 +1080,9 @@ fun VeylEqualizerScreen(
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         Text(
-                                            text = if (vocalClarityEnabled) "Presence ${(vocalClarityIntensity * 100).toInt()}% • 2.8 kHz Formant" else "Bypass • Neutral Midrange",
+                                            text = if (vocalClarityEnabled) "Presence ${(vocalClarityIntensity * 100).toInt()}% • Dynamic Headroom Anti-Hiss" else "Bypass • Neutral Midrange",
                                             style = VeylTypography.MonoSpec,
-                                            color = if (vocalClarityEnabled) Color(0xFF00E676) else colors.textMuted,
+                                            color = if (vocalClarityEnabled) colors.accentSignal else colors.textMuted,
                                             fontSize = 11.sp
                                         )
                                     }
@@ -1031,7 +1096,7 @@ fun VeylEqualizerScreen(
                                     },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = colors.surfacePanel,
-                                        checkedTrackColor = Color(0xFF00E676),
+                                        checkedTrackColor = colors.accentSignal,
                                         uncheckedThumbColor = colors.textMuted,
                                         uncheckedTrackColor = colors.surfaceElevated
                                     )
@@ -1039,7 +1104,7 @@ fun VeylEqualizerScreen(
                             }
 
                             Text(
-                                text = "Brings lead vocals and instruments forward with precision mid-band formant peaking.",
+                                text = "Brings lead vocals forward with calibrated 2.8 kHz presence boost and anti-hiss headroom compensation.",
                                 style = VeylTypography.BodySmall,
                                 color = colors.textSecondary,
                                 fontSize = 11.sp,
@@ -1062,7 +1127,7 @@ fun VeylEqualizerScreen(
                                         Text(
                                             text = "${(vocalClarityIntensity * 100).toInt()}%",
                                             style = VeylTypography.MonoSpec,
-                                            color = Color(0xFF00E676),
+                                            color = colors.accentSignal,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -1073,8 +1138,8 @@ fun VeylEqualizerScreen(
                                         onValueChange = { controller.setVocalClarityIntensity(it) },
                                         valueRange = 0.05f..1.0f,
                                         colors = SliderDefaults.colors(
-                                            thumbColor = Color(0xFF00E676),
-                                            activeTrackColor = Color(0xFF00E676),
+                                            thumbColor = colors.accentSignal,
+                                            activeTrackColor = colors.accentSignal,
                                             inactiveTrackColor = colors.surfaceElevated
                                         ),
                                         modifier = Modifier.fillMaxWidth()
@@ -1100,7 +1165,7 @@ fun VeylEqualizerScreen(
                                                 },
                                                 colors = FilterChipDefaults.filterChipColors(
                                                     containerColor = colors.surfaceElevated,
-                                                    selectedContainerColor = Color(0xFF00E676),
+                                                    selectedContainerColor = colors.accentSignal,
                                                     labelColor = colors.textPrimary,
                                                     selectedLabelColor = colors.surfacePanel
                                                 ),
@@ -1145,7 +1210,7 @@ fun VeylEqualizerScreen(
                                     Icon(
                                         imageVector = VeylIcons.PulseSine,
                                         contentDescription = null,
-                                        tint = if (tubeEnabled) Color(0xFFFF9E43) else colors.textMuted,
+                                        tint = if (tubeEnabled) colors.accentSignal else colors.textMuted,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Column {
@@ -1156,9 +1221,9 @@ fun VeylEqualizerScreen(
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         Text(
-                                            text = if (tubeEnabled) "Drive ${(tubeDrive * 100).toInt()}% • Triode Harmonics" else "Bypass • Clean Digital",
+                                            text = if (tubeEnabled) "Drive ${(tubeDrive * 100).toInt()}% • DC-Blocked Triode Harmonics" else "Bypass • Clean Digital",
                                             style = VeylTypography.MonoSpec,
-                                            color = if (tubeEnabled) Color(0xFFFF9E43) else colors.textMuted,
+                                            color = if (tubeEnabled) colors.accentSignal else colors.textMuted,
                                             fontSize = 11.sp
                                         )
                                     }
@@ -1172,7 +1237,7 @@ fun VeylEqualizerScreen(
                                     },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = colors.surfacePanel,
-                                        checkedTrackColor = Color(0xFFFF9E43),
+                                        checkedTrackColor = colors.accentSignal,
                                         uncheckedThumbColor = colors.textMuted,
                                         uncheckedTrackColor = colors.surfaceElevated
                                     )
@@ -1180,7 +1245,7 @@ fun VeylEqualizerScreen(
                             }
 
                             Text(
-                                text = "Adds even-order harmonic richness modeled on Class-A triode vacuum tube saturation.",
+                                text = "Adds musical even-order harmonics modeled on Class-A triode vacuum tubes with 5 Hz DC-blocking protection.",
                                 style = VeylTypography.BodySmall,
                                 color = colors.textSecondary,
                                 fontSize = 11.sp,
@@ -1203,7 +1268,7 @@ fun VeylEqualizerScreen(
                                         Text(
                                             text = "${(tubeDrive * 100).toInt()}%",
                                             style = VeylTypography.MonoSpec,
-                                            color = Color(0xFFFF9E43),
+                                            color = colors.accentSignal,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -1214,8 +1279,8 @@ fun VeylEqualizerScreen(
                                         onValueChange = { controller.setTubeWarmthDrive(it) },
                                         valueRange = 0.05f..1.0f,
                                         colors = SliderDefaults.colors(
-                                            thumbColor = Color(0xFFFF9E43),
-                                            activeTrackColor = Color(0xFFFF9E43),
+                                            thumbColor = colors.accentSignal,
+                                            activeTrackColor = colors.accentSignal,
                                             inactiveTrackColor = colors.surfaceElevated
                                         ),
                                         modifier = Modifier.fillMaxWidth()
@@ -1241,7 +1306,7 @@ fun VeylEqualizerScreen(
                                                 },
                                                 colors = FilterChipDefaults.filterChipColors(
                                                     containerColor = colors.surfaceElevated,
-                                                    selectedContainerColor = Color(0xFFFF9E43),
+                                                    selectedContainerColor = colors.accentSignal,
                                                     labelColor = colors.textPrimary,
                                                     selectedLabelColor = colors.surfacePanel
                                                 ),

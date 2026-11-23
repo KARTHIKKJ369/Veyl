@@ -533,12 +533,13 @@ class PlaylistManager(context: Context) {
      * Registers and persists metadata for an online track so it can always be displayed
      * and played in Favorites or Playlists.
      */
-    fun registerOnlineTrack(track: TrackInfo, song: OnlineSongItem? = null) {
+    fun registerOnlineTrack(track: TrackInfo, song: OnlineSongItem? = null, artworkUrl: String? = null) {
         val current = _onlineTrackMeta.value.toMutableMap()
         current[track.uri] = track
         val fileName = java.io.File(track.uri).name
         if (fileName.isNotBlank()) {
             current[fileName] = track
+            current["online://$fileName"] = track
         }
         val musicDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC)
         val veylDir = java.io.File(musicDir, "Veyl")
@@ -547,22 +548,29 @@ class PlaylistManager(context: Context) {
         current[targetPath] = track
         current[java.io.File(targetPath).name] = track
 
+        val effectiveArt = artworkUrl?.takeIf { it.isNotBlank() }
+            ?: song?.thumbnailUrl?.takeIf { it.isNotBlank() }
+            ?: ArtworkCache.getOnlineArtwork(track.uri)
+            ?: ArtworkCache.getOnlineArtwork(track.title.lowercase())
+
+        if (!effectiveArt.isNullOrBlank()) {
+            ArtworkCache.registerOnlineArtwork(track.uri, effectiveArt)
+            if (fileName.isNotBlank()) {
+                ArtworkCache.registerOnlineArtwork(fileName, effectiveArt)
+                ArtworkCache.registerOnlineArtwork("online://$fileName", effectiveArt)
+            }
+            ArtworkCache.registerOnlineArtwork(targetPath, effectiveArt)
+            ArtworkCache.registerOnlineArtwork(java.io.File(targetPath).name, effectiveArt)
+            ArtworkCache.registerOnlineArtwork(track.title.lowercase(), effectiveArt)
+        }
+
         song?.let {
             if (it.streamUrl.isNotBlank()) current[it.streamUrl] = track
             if (it.id.isNotBlank()) current[it.id] = track
             if (it.videoId.isNotBlank()) current[it.videoId] = track
             if (it.thumbnailUrl.isNotBlank()) {
-                ArtworkCache.registerOnlineArtwork(track.uri, it.thumbnailUrl)
-                val fn = java.io.File(track.uri).name
-                if (fn.isNotBlank()) {
-                    ArtworkCache.registerOnlineArtwork(fn, it.thumbnailUrl)
-                    ArtworkCache.registerOnlineArtwork("online://$fn", it.thumbnailUrl)
-                }
-                if (it.id.isNotBlank()) {
-                    ArtworkCache.registerOnlineArtwork(it.id, it.thumbnailUrl)
-                    ArtworkCache.registerOnlineArtwork("online://${it.id}", it.thumbnailUrl)
-                }
-                ArtworkCache.registerOnlineArtwork(track.title.lowercase(), it.thumbnailUrl)
+                ArtworkCache.registerOnlineArtwork(it.id, it.thumbnailUrl)
+                ArtworkCache.registerOnlineArtwork("online://${it.id}", it.thumbnailUrl)
             }
         }
         _onlineTrackMeta.value = current
@@ -588,7 +596,10 @@ class PlaylistManager(context: Context) {
     }
 
     private fun trackInfoToJson(t: TrackInfo): JSONObject {
-        val art = ArtworkCache.getOnlineArtwork(t.uri) ?: ""
+        val art = ArtworkCache.getOnlineArtwork(t.uri)
+            ?: ArtworkCache.getOnlineArtwork(t.title.lowercase())
+            ?: ArtworkCache.getOnlineArtwork("online://${java.io.File(t.uri).name}")
+            ?: ""
         return JSONObject().apply {
             put("uri", t.uri)
             put("title", t.title)
@@ -602,7 +613,7 @@ class PlaylistManager(context: Context) {
             put("bitrate", t.bitrate?.toInt() ?: 320000)
             put("channels", t.channels.toInt())
             put("formatName", t.formatName)
-            put("hasArtwork", t.hasArtwork)
+            put("hasArtwork", true)
             if (art.isNotBlank()) put("artworkUrl", art)
         }
     }

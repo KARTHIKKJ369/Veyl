@@ -1,5 +1,7 @@
 package com.audiophile.player.ui.screens
 
+import com.audiophile.player.engine.ArtworkCache
+
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -119,6 +121,7 @@ fun VeylSearchScreen(
     var showAllSongs by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(SearchTab.ALL) }
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
+    var selectedArtworkForOptions by remember { mutableStateOf<String?>(null) }
 
     var onlineResults by remember { mutableStateOf<List<OnlineSongItem>>(emptyList()) }
     var isSearchingOnline by remember { mutableStateOf(false) }
@@ -660,6 +663,35 @@ fun VeylSearchScreen(
                                                 Toast.makeText(context, "Download failed: ${err.message}", Toast.LENGTH_SHORT).show()
                                             }
                                         )
+                                    },
+                                    onOpenOptions = {
+                                        val effectiveUri = item.streamUrl.ifBlank { "online://${item.id}" }
+                                        if (item.thumbnailUrl.isNotBlank()) {
+                                            ArtworkCache.registerOnlineArtwork(effectiveUri, item.thumbnailUrl)
+                                            ArtworkCache.registerOnlineArtwork("online://${item.id}", item.thumbnailUrl)
+                                            ArtworkCache.registerOnlineArtwork(item.id, item.thumbnailUrl)
+                                            ArtworkCache.registerOnlineArtwork(item.title.lowercase(), item.thumbnailUrl)
+                                        }
+                                        val trackInfo = TrackInfo(
+                                            uri = effectiveUri,
+                                            title = item.title,
+                                            artist = item.artist,
+                                            album = item.album,
+                                            albumArtist = null,
+                                            genre = "Online Stream",
+                                            year = null,
+                                            trackNumber = null,
+                                            discNumber = null,
+                                            durationSeconds = item.durationSeconds,
+                                            sampleRate = 44100u,
+                                            bitDepth = 16u,
+                                            bitrate = 320000u,
+                                            channels = 2u,
+                                            formatName = "AAC 320k",
+                                            hasArtwork = true
+                                        )
+                                        selectedArtworkForOptions = item.thumbnailUrl
+                                        selectedTrackForOptions = trackInfo
                                     }
                                 )
                             }
@@ -701,7 +733,11 @@ fun VeylSearchScreen(
         VeylTrackOptionsSheet(
             track = selectedTrackForOptions,
             controller = controller,
-            onDismiss = { selectedTrackForOptions = null }
+            onDismiss = {
+                selectedTrackForOptions = null
+                selectedArtworkForOptions = null
+            },
+            artworkUrl = selectedArtworkForOptions
         )
     }
 }
@@ -825,7 +861,8 @@ private fun SearchOnlineSongRow(
     isBuffering: Boolean,
     isPlaying: Boolean,
     onClick: () -> Unit,
-    onDownloadClick: () -> Unit
+    onDownloadClick: () -> Unit,
+    onOpenOptions: (() -> Unit)? = null
 ) {
     val colors = LocalVeylColors.current
     Row(
@@ -900,6 +937,20 @@ private fun SearchOnlineSongRow(
                 tint = colors.textMuted,
                 modifier = Modifier.size(17.dp)
             )
+        }
+
+        if (onOpenOptions != null) {
+            IconButton(
+                onClick = onOpenOptions,
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(
+                    VeylIcons.MoreVert,
+                    contentDescription = "Track options",
+                    tint = colors.textMuted,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
 
         Spacer(Modifier.width(4.dp))

@@ -1,5 +1,7 @@
 package com.audiophile.player.ui.screens
 
+import com.audiophile.player.engine.ArtworkCache
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -91,6 +93,7 @@ fun VeylCloudHomeScreen(
     var sections by remember { mutableStateOf<List<RecommendationSection>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
+    var selectedArtworkForOptions by remember { mutableStateOf<String?>(null) }
 
     val greeting = remember {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -340,8 +343,15 @@ fun VeylCloudHomeScreen(
                                 )
                             },
                             onOpenOptions = {
+                                val effectiveUri = song.streamUrl.ifBlank { "online://${song.id}" }
+                                if (song.thumbnailUrl.isNotBlank()) {
+                                    ArtworkCache.registerOnlineArtwork(effectiveUri, song.thumbnailUrl)
+                                    ArtworkCache.registerOnlineArtwork("online://${song.id}", song.thumbnailUrl)
+                                    ArtworkCache.registerOnlineArtwork(song.id, song.thumbnailUrl)
+                                    ArtworkCache.registerOnlineArtwork(song.title.lowercase(), song.thumbnailUrl)
+                                }
                                 val trackInfo = TrackInfo(
-                                    uri = song.streamUrl.ifBlank { "online://${song.id}" },
+                                    uri = effectiveUri,
                                     title = song.title,
                                     artist = song.artist,
                                     album = song.album,
@@ -358,6 +368,7 @@ fun VeylCloudHomeScreen(
                                     formatName = "AAC 320k",
                                     hasArtwork = true
                                 )
+                                selectedArtworkForOptions = song.thumbnailUrl
                                 selectedTrackForOptions = trackInfo
                             }
                         )
@@ -372,7 +383,11 @@ fun VeylCloudHomeScreen(
         VeylTrackOptionsSheet(
             track = selectedTrackForOptions,
             controller = controller,
-            onDismiss = { selectedTrackForOptions = null }
+            onDismiss = {
+                selectedTrackForOptions = null
+                selectedArtworkForOptions = null
+            },
+            artworkUrl = selectedArtworkForOptions
         )
     }
 

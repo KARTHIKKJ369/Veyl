@@ -812,6 +812,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -865,6 +869,8 @@ internal interface UniffiLib : Library {
     ): Byte
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_spatializer_enabled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_spatializer_headphone_mode(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_sub_bass_enabled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_is_tube_warmth_enabled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -904,6 +910,8 @@ internal interface UniffiLib : Library {
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_playback_speed(`ptr`: Pointer,`speed`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_spatializer_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_spatializer_headphone_mode(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_audiophile_core_fn_method_audiophileenginehandle_set_spatializer_width(`ptr`: Pointer,`width`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1075,6 +1083,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_spatializer_enabled(
     ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_spatializer_headphone_mode(
+    ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_sub_bass_enabled(
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_tube_warmth_enabled(
@@ -1114,6 +1124,8 @@ internal interface UniffiLib : Library {
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_playback_speed(
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_enabled(
+    ): Short
+    fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_headphone_mode(
     ): Short
     fun uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_width(
     ): Short
@@ -1202,6 +1214,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_spatializer_enabled() != 27955.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_spatializer_headphone_mode() != 54759.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_is_sub_bass_enabled() != 51631.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1260,6 +1275,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_enabled() != 54272.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_headphone_mode() != 53334.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_audiophile_core_checksum_method_audiophileenginehandle_set_spatializer_width() != 39188.toShort()) {
@@ -1760,6 +1778,8 @@ public interface AudiophileEngineHandleInterface {
     
     fun `isSpatializerEnabled`(): kotlin.Boolean
     
+    fun `isSpatializerHeadphoneMode`(): kotlin.Boolean
+    
     fun `isSubBassEnabled`(): kotlin.Boolean
     
     fun `isTubeWarmthEnabled`(): kotlin.Boolean
@@ -1799,6 +1819,8 @@ public interface AudiophileEngineHandleInterface {
     fun `setPlaybackSpeed`(`speed`: kotlin.Float)
     
     fun `setSpatializerEnabled`(`enabled`: kotlin.Boolean)
+    
+    fun `setSpatializerHeadphoneMode`(`enabled`: kotlin.Boolean)
     
     fun `setSpatializerWidth`(`width`: kotlin.Float)
     
@@ -2080,6 +2102,18 @@ open class AudiophileEngineHandle: Disposable, AutoCloseable, AudiophileEngineHa
     }
     
 
+    override fun `isSpatializerHeadphoneMode`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_is_spatializer_headphone_mode(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
     override fun `isSubBassEnabled`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     callWithPointer {
@@ -2300,6 +2334,17 @@ open class AudiophileEngineHandle: Disposable, AutoCloseable, AudiophileEngineHa
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_spatializer_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    
+    
+
+    override fun `setSpatializerHeadphoneMode`(`enabled`: kotlin.Boolean)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_audiophile_core_fn_method_audiophileenginehandle_set_spatializer_headphone_mode(
         it, FfiConverterBoolean.lower(`enabled`),_status)
 }
     }

@@ -253,6 +253,15 @@ object JioSaavnService {
             val encryptedUrl = moreInfo.optString("encrypted_media_url").ifBlank { r.optString("encrypted_media_url") }
             val streamUrl = decryptMediaUrl(encryptedUrl) ?: continue
 
+            if (highResImage.isNotBlank()) {
+                com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork("online://$id", highResImage)
+                com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork(id, highResImage)
+                if (streamUrl.isNotBlank()) {
+                    com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork(streamUrl, highResImage)
+                }
+                com.audiophile.player.engine.ArtworkCache.registerOnlineArtwork(cleanTitle.lowercase(), highResImage)
+            }
+
             items.add(
                 OnlineSongItem(
                     id = id,
