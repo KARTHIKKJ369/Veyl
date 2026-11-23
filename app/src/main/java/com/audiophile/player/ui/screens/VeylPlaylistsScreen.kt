@@ -235,7 +235,7 @@ fun VeylPlaylistsScreen(
                             .height(42.dp)
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                importPlaylistLauncher.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "*/*"))
+                                importPlaylistLauncher.launch(arrayOf("*/*"))
                             }
                     ) {
                         Row(

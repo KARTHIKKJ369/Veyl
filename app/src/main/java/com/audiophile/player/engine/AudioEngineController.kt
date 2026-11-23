@@ -2836,8 +2836,8 @@ class AudioEngineController private constructor(private val context: Context) {
                 return meta.copy(uri = targetFile.absolutePath, hasArtwork = true)
             }
             val isDownloading = _downloadingUris.value.contains(targetFile.absolutePath) || _downloadingUris.value.contains(uri)
-            if (!isDownloading && (meta.uri.startsWith("/") || meta.uri.startsWith("file:"))) {
-                val origFile = File(meta.uri)
+            if (!isDownloading && meta.genre != "Imported" && (meta.uri.startsWith("/") || meta.uri.startsWith("file:"))) {
+                val origFile = File(meta.uri.removePrefix("file://"))
                 if (!origFile.exists()) {
                     // Song was deleted from storage!
                     playlistManager.removeTrackEverywhere(uri, meta.title, meta.artist)
@@ -2961,7 +2961,7 @@ class AudioEngineController private constructor(private val context: Context) {
             if (targetFile.exists() && targetFile.length() > 50_000L) {
                 actualTrack = actualTrack.copy(uri = targetFile.absolutePath)
                 playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
-            } else if (actualTrack.genre == "Online Stream" || actualTrack.uri.contains("veyl_online_stream_") || actualTrack.uri.startsWith("online://")) {
+            } else if (actualTrack.genre == "Online Stream" || actualTrack.genre == "Imported" || actualTrack.uri.contains("veyl_online_stream_") || actualTrack.uri.startsWith("online://")) {
                 val realTrackArt = ArtworkCache.getOnlineArtwork(actualTrack.uri)
                     ?: ArtworkCache.getOnlineArtwork("online://${actualTrack.uri.removePrefix("online://")}")
                     ?: ArtworkCache.getOnlineArtwork(actualTrack.title.lowercase())

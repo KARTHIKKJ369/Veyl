@@ -309,6 +309,8 @@ class PlaylistManager(context: Context) {
 
                 val musicDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC)
                 val veylDir = java.io.File(musicDir, "Veyl")
+                val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                val downloadVeylDir = java.io.File(downloadDir, "Veyl")
 
                 for (rawLine in lines) {
                     val line = rawLine.trim()
@@ -318,70 +320,125 @@ class PlaylistManager(context: Context) {
                         if (line.startsWith("#PLAYLIST:", ignoreCase = true)) {
                             val parsed = line.substring("#PLAYLIST:".length).trim()
                             if (parsed.isNotEmpty()) playlistName = parsed
+                        } else if (line.startsWith("#EXT-X-NAME:", ignoreCase = true)) {
+                            val parsed = line.substring("#EXT-X-NAME:".length).trim().removeSurrounding("\"")
+                            if (parsed.isNotEmpty()) playlistName = parsed
+                        } else if (line.startsWith("#NAME:", ignoreCase = true)) {
+                            val parsed = line.substring("#NAME:".length).trim()
+                            if (parsed.isNotEmpty()) playlistName = parsed
                         } else if (line.startsWith("#EXTINF:", ignoreCase = true)) {
                             val info = line.substring("#EXTINF:".length).trim()
                             val commaIdx = info.indexOf(',')
-                            if (commaIdx != -1) {
+                            val titleAndArtist = if (commaIdx != -1) {
                                 val durStr = info.substring(0, commaIdx).trim()
-                                pendingDuration = durStr.toDoubleOrNull() ?: 0.0
-                                val titleAndArtist = info.substring(commaIdx + 1).trim()
-                                val dashIdx = titleAndArtist.indexOf(" - ")
-                                if (dashIdx != -1) {
-                                    pendingArtist = titleAndArtist.substring(0, dashIdx).trim()
-                                    pendingTitle = titleAndArtist.substring(dashIdx + 3).trim()
+                                val firstToken = durStr.split("\\s+".toRegex()).firstOrNull() ?: ""
+                                pendingDuration = firstToken.toDoubleOrNull() ?: 0.0
+                                info.substring(commaIdx + 1).trim()
+                            } else {
+                                val parts = info.split("\\s+".toRegex(), limit = 2)
+                                if (parts.isNotEmpty() && parts[0].toDoubleOrNull() != null) {
+                                    pendingDuration = parts[0].toDoubleOrNull() ?: 0.0
+                                    if (parts.size > 1) parts[1].trim() else ""
+                                } else {
+                                    info
+                                }
+                            }
+                            if (titleAndArtist.isNotEmpty()) {
+                                val dashRegex = Regex("\\s+[-–—:]\\s+")
+                                val split = dashRegex.split(titleAndArtist, limit = 2)
+                                if (split.size >= 2 && split[0].isNotBlank() && split[1].isNotBlank()) {
+                                    pendingArtist = split[0].trim()
+                                    pendingTitle = split[1].trim()
                                 } else {
                                     pendingTitle = titleAndArtist
                                 }
                             }
                         } else if (line.startsWith("#EXTALB:", ignoreCase = true)) {
                             pendingAlbum = line.substring("#EXTALB:".length).trim()
-                        } else if (line.startsWith("#EXTART:", ignoreCase = true)) {
-                            pendingArtist = line.substring("#EXTART:".length).trim()
+                        } else if (line.startsWith("#EXTART:", ignoreCase = true) || line.startsWith("#EXT-X-ARTIST:", ignoreCase = true)) {
+                            pendingArtist = line.substringAfter(':').trim()
                         }
                         continue
                     }
 
                     val trackUri = line
-                    val fName = java.io.File(trackUri).name
+                    // Normalize slashes, file:// prefixes, and URL encoding
+                    val normalizedPath = trackUri.replace('\\', '/')
+                    val decodedPath = try {
+                        if (normalizedPath.contains("%")) java.net.URLDecoder.decode(normalizedPath, "UTF-8") else normalizedPath
+                    } catch (_: Exception) {
+                        normalizedPath
+                    }
+                    val cleanPath = decodedPath.removePrefix("file://")
+                    val fName = cleanPath.substringAfterLast('/')
+                    val fNameNoExt = fName.substringBeforeLast('.')
+
+                    // Derive Title and Artist if not provided by #EXTINF
+                    val parsedTitle: String
+                    val parsedArtist: String
+                    if (!pendingTitle.isNullOrBlank()) {
+                        parsedTitle = pendingTitle!!
+                        parsedArtist = pendingArtist ?: "Unknown Artist"
+                    } else {
+                        val cleanName = fNameNoExt.replace(Regex("^[0-9]+[\\s.\\-_]+"), "").trim()
+                        val dashRegex = Regex("\\s+[-–—]\\s+")
+                        val parts = dashRegex.split(cleanName, limit = 2)
+                        if (parts.size >= 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                            parsedArtist = parts[0].trim()
+                            parsedTitle = parts[1].trim()
+                        } else {
+                            parsedTitle = cleanName.ifBlank { fNameNoExt }
+                            parsedArtist = "Unknown Artist"
+                        }
+                    }
 
                     // Match against library tracks
                     val matchedTrack = libraryTracks.find { lib ->
+                        lib.uri.equals(cleanPath, ignoreCase = true) ||
                         lib.uri.equals(trackUri, ignoreCase = true) ||
                         (fName.isNotBlank() && java.io.File(lib.uri).name.equals(fName, ignoreCase = true)) ||
-                        (!pendingTitle.isNullOrBlank() &&
-                         lib.title.equals(pendingTitle, ignoreCase = true) &&
-                         (pendingArtist.isNullOrBlank() || lib.artist.equals(pendingArtist, ignoreCase = true)))
+                        (fNameNoExt.isNotBlank() && java.io.File(lib.uri).nameWithoutExtension.equals(fNameNoExt, ignoreCase = true)) ||
+                        (parsedTitle.isNotBlank() && lib.title.equals(parsedTitle, ignoreCase = true) &&
+                         (parsedArtist == "Unknown Artist" || lib.artist.equals(parsedArtist, ignoreCase = true)))
+                    }
+
+                    val localCandidate = when {
+                        java.io.File(cleanPath).exists() -> cleanPath
+                        java.io.File(musicDir, fName).exists() -> java.io.File(musicDir, fName).absolutePath
+                        java.io.File(veylDir, fName).exists() -> java.io.File(veylDir, fName).absolutePath
+                        java.io.File(downloadDir, fName).exists() -> java.io.File(downloadDir, fName).absolutePath
+                        java.io.File(downloadVeylDir, fName).exists() -> java.io.File(downloadVeylDir, fName).absolutePath
+                        else -> null
                     }
 
                     val finalUri = when {
                         matchedTrack != null -> matchedTrack.uri
-                        java.io.File(trackUri).exists() -> trackUri
-                        java.io.File(musicDir, fName).exists() -> java.io.File(musicDir, fName).absolutePath
-                        java.io.File(veylDir, fName).exists() -> java.io.File(veylDir, fName).absolutePath
-                        else -> {
-                            if (!pendingTitle.isNullOrBlank()) {
-                                val fallbackTrack = TrackInfo(
-                                    uri = trackUri,
-                                    title = pendingTitle ?: fName.substringBeforeLast("."),
-                                    artist = pendingArtist ?: "Unknown Artist",
-                                    album = pendingAlbum ?: "",
-                                    albumArtist = null,
-                                    genre = "Imported",
-                                    year = null,
-                                    trackNumber = null,
-                                    discNumber = null,
-                                    durationSeconds = if (pendingDuration > 0) pendingDuration else 0.0,
-                                    sampleRate = 44100u,
-                                    bitDepth = 16u,
-                                    bitrate = 320000u,
-                                    channels = 2u,
-                                    formatName = "Audio",
-                                    hasArtwork = false
-                                )
-                                registerOnlineTrack(fallbackTrack)
-                            }
-                            trackUri
-                        }
+                        localCandidate != null -> localCandidate
+                        trackUri.startsWith("http://") || trackUri.startsWith("https://") -> trackUri
+                        else -> cleanPath
+                    }
+
+                    // Always ensure track metadata is registered for non-local or fallback tracks so resolveTrackInfo succeeds
+                    if (matchedTrack == null && localCandidate == null) {
+                        val fallbackTrack = TrackInfo(
+                            uri = finalUri,
+                            title = parsedTitle,
+                            artist = parsedArtist,
+                            album = pendingAlbum ?: "",
+                            albumArtist = null,
+                            genre = "Imported",
+                            year = null,
+                            trackNumber = null,
+                            discNumber = null,
+                            durationSeconds = if (pendingDuration > 0) pendingDuration else 0.0,
+                            sampleRate = 44100u,
+                            bitDepth = 16u,
+                            bitrate = 320000u,
+                            channels = 2u,
+                            formatName = "Audio",
+                            hasArtwork = false
+                        )
+                        registerOnlineTrack(fallbackTrack)
                     }
 
                     importedUris.add(finalUri)

@@ -12,11 +12,11 @@
   [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
   [![Audio Engine](https://img.shields.io/badge/Engine-Bit--Perfect%20AAudio%20MMAP-00E5FF?style=flat-square)](https://developer.android.com/ndk/guides/audio/aaudio/aaudio)
   [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-  [![Download APK](https://img.shields.io/badge/Download-APK%20(v2.3.0)-FFB300?style=flat-square&logo=android&logoColor=black)](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)
+  [![Download APK](https://img.shields.io/badge/Download-APK%20(v2.6.1)-FFB300?style=flat-square&logo=android&logoColor=black)](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)
 
   ⭐ If you find Veyl useful, star the repository on GitHub!
 
-  [Overview](#overview) • [Key Features](#key-features) • [Architecture](#architecture) • [Audio Engine Specifications](#audio-engine-specifications) • [Spotify Playlist Import](#spotify-playlist-import) • [Getting Started](#getting-started) • [Building from Source](#building-from-source) • [License](#license)
+  [Overview](#overview) • [Key Features](#key-features) • [Architecture](#architecture) • [Audio Engine Specifications](#audio-engine-specifications) • [Playlists & M3U8 Import](#playlists--m3u8-import) • [Spotify Import](#spotify-playlist-import) • [Metadata & Tagging](#metadata-identification--tagging) • [Getting Started](#getting-started) • [Building from Source](#building-from-source) • [License](#license)
 
 </div>
 
@@ -57,7 +57,27 @@ Veyl bypasses system audio degradation by coupling a pure **Rust audio decoding 
 - **Interactive DSP Cockpit**: Live mathematical transfer function curve canvas ($20\text{ Hz} - 20\text{ kHz}$) with draggable filter nodes.
 - **In-Place Synchronized Lyrics**: Word-level illuminated synchronized lyrics with tap-to-seek and ambient backdrop artwork.
 - **Tactile Color Palettes**: Tailored high-contrast aesthetics including *Monochrome Carbon*, *Braun Dieter Rams*, *Macintosh Lab*, and custom user themes.
-- **Unified Search & Filter**: Instant, non-blocking multi-category search across tracks, artists, and albums with inline library filters.
+- **Unified Search & Filter**: Instant, non-blocking multi-category search across tracks, artists, and albums with inline library filters and background worker parallelization.
+- **Ultra-Lean Native Footprint**: Optimized native packaging reduced APK size by 48% (14 MB release) while maintaining full 120 FPS UI performance.
+
+### Universal M3U & M3U8 Playlist Management
+- **M3U / M3U8 File Import**: Import playlists seamlessly from `.m3u8` and `.m3u` files across internal storage, SD cards, and USB drives.
+- **Robust Path & Syntax Parsing**:
+  - Handles `#EXTINF` attributes, track durations, and multi-dash delimiters (`-`, `–`, `—`, `:`).
+  - Normalizes Windows backslashes (`\`) and Unix slashes (`/`), decodes percent-encoded URIs (`%20`), and strips `file://` prefixes.
+  - Automatically derives song title and artist from raw filenames even when `#EXTINF` tags are omitted.
+- **Local Library & Directory Resolution**: Automatically matches playlist entries against local library tracks, `Music/`, `Music/Veyl/`, and `Download/` directories.
+- **Online Fallback & Streaming**: Missing tracks remain preserved in the playlist and stream on-demand via high-fidelity online endpoints.
+- **System-Wide File Association**: Tap any `.m3u` or `.m3u8` file in external file managers (Google Files, Samsung My Files, ZArchiver) to launch and import directly into Veyl.
+
+### Metadata Identification & Physical File Tagging
+- **Jellyfin-Style Track Identification**: Identify untagged audio tracks with real-time online metadata lookup.
+- **Direct In-File Tag & Artwork Embedding**:
+  - **MP3**: Full ID3v2.3 tag updating with embedded `APIC` cover art frames.
+  - **FLAC**: Vorbis comment updating with binary `PICTURE` block injection.
+  - **M4A / AAC**: Direct MP4 atom manipulation (`covr` with Apple vendor flags, `\xa9nam`, `\xa9ART`, `\xa9alb`).
+  - **Zero Companion Image Clutter**: Artwork is written directly into physical audio containers without leaving auxiliary `.jpg` files in your storage folders.
+- **Live Playback Synchronization**: Updates Now Playing telemetry and restores playback position in real time upon metadata changes.
 
 ### Spotify Playlist Importer
 - **Direct Link & ID Import**: Import playlists instantly via Spotify URLs (`open.spotify.com/playlist/...`) or playlist IDs.
@@ -72,6 +92,7 @@ Veyl bypasses system audio degradation by coupling a pure **Rust audio decoding 
 - **320 kbps Studio Streams**: Delivers master-quality streaming via low-latency CDN endpoints with sub-second playback start.
 - **0 MB RAM Disk Cache**: Streamed data buffers directly into low-overhead temporary storage and routes into Symphonia without bloating RAM.
 - **One-Tap Offline Download**: Saves tracks to `Music/Veyl/` with immediate Android MediaScanner registration for permanent offline playback.
+- **Persistent Continue Listening & History**: Preserves artwork and playback session history across app reboots for both local and online tracks.
 
 ---
 
@@ -128,6 +149,34 @@ $$H(z) = \frac{b_0 + b_1 z^{-1} + b_2 z^{-2}}{1 + a_1 z^{-1} + a_2 z^{-2}}$$
 - **Gain Range**: $-12.0\text{ dB}$ to $+12.0\text{ dB}$ with $0.1\text{ dB}$ precision
 - **Filter Q**: Configurable $0.5$ to $4.0$ (default $1.414$ Butterworth)
 - **Preamp Fader**: $-12.0\text{ dB}$ to $+6.0\text{ dB}$ digital headroom attenuation
+
+---
+
+## Playlists & M3U8 Import
+
+Veyl provides complete playlist portability with universal M3U and M3U8 support:
+
+1. Open **Playlists** in Veyl and tap **Import M3U**.
+2. Select any `.m3u8` or `.m3u` file from your device storage or cloud download.
+3. Veyl automatically:
+   - Resolves cross-platform path differences (Windows backslashes vs. Linux slashes).
+   - Matches local files across your music folders regardless of extension differences.
+   - Preserves external or streaming tracks and matches them to online stream equivalents so your playlist is always complete.
+4. Export your custom playlists back to standard `.m3u8` anytime with a single tap.
+
+---
+
+## Metadata Identification & Tagging
+
+Tired of messy filenames or missing album art? Veyl includes built-in physical metadata taggers:
+
+1. Tap the three-dot options menu on any track and select **Identify & Match**.
+2. Search and select the verified track metadata.
+3. Veyl embeds:
+   - **Cover Art**: Injected directly into the audio file (ID3v2 APIC, Vorbis Picture Block, or MP4 `covr`).
+   - **Track Tags**: Title, Artist, Album, and Year written directly to file headers.
+   - **Physical File Renaming**: Renames the physical file cleanly to `Title - Artist.ext`.
+   - **Live Playback Sync**: If you are currently playing the track, Veyl updates Now Playing instantly and resumes playback seamlessly at the exact second.
 
 ---
 

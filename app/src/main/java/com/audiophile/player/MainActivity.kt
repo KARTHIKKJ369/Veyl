@@ -131,6 +131,39 @@ class MainActivity : ComponentActivity() {
         }
         val uri = intent?.data ?: return
         if (intent.action == Intent.ACTION_VIEW) {
+            val mime = intent.type ?: contentResolver.getType(uri) ?: ""
+            val uriStr = uri.toString()
+            val isPlaylist = uriStr.endsWith(".m3u8", ignoreCase = true) ||
+                             uriStr.endsWith(".m3u", ignoreCase = true) ||
+                             mime.contains("mpegurl", ignoreCase = true) ||
+                             mime.contains("text/x-m4u", ignoreCase = true)
+
+            if (isPlaylist) {
+                try {
+                    var fileName: String? = null
+                    try {
+                        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                if (idx != -1) fileName = cursor.getString(idx)
+                            }
+                        }
+                    } catch (_: Exception) {}
+                    val defaultName = fileName?.substringBeforeLast(".") ?: uri.lastPathSegment?.substringBeforeLast(".") ?: "Imported Playlist"
+                    contentResolver.openInputStream(uri)?.use { ins ->
+                        val result = controller.importPlaylist(ins, defaultName, controller.tracks.value)
+                        result.onSuccess { pl ->
+                            android.widget.Toast.makeText(this, "Imported playlist \"${pl.name}\" (${pl.trackUris.size} tracks)", android.widget.Toast.LENGTH_LONG).show()
+                        }.onFailure { err ->
+                            android.widget.Toast.makeText(this, "Import failed: ${err.message}", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(this, "Error importing: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                return
+            }
+
             val path = if (uri.scheme == "file") {
                 uri.path ?: uri.toString()
             } else if (uri.scheme == "content") {
