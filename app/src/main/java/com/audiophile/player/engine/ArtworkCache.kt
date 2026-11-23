@@ -74,12 +74,25 @@ object ArtworkCache {
 
     @Volatile
     private var diskCacheDir: File? = null
+    @Volatile
+    private var artPrefs: android.content.SharedPreferences? = null
 
     fun init(context: Context) {
         if (diskCacheDir == null) {
             val dir = File(context.cacheDir, "art_thumbs")
             if (!dir.exists()) dir.mkdirs()
             diskCacheDir = dir
+        }
+        if (artPrefs == null) {
+            val prefs = context.getSharedPreferences("veyl_artwork_mapping", Context.MODE_PRIVATE)
+            artPrefs = prefs
+            try {
+                prefs.all.forEach { (k, v) ->
+                    if (v is String && v.isNotBlank()) {
+                        onlineArtMapping[k] = v
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -93,6 +106,37 @@ object ArtworkCache {
 
     fun getDiskCacheSizeBytes(): Long {
         return diskCacheDir?.listFiles()?.sumOf { it.length() } ?: 0L
+    }
+
+    fun invalidateTrackArtwork(vararg uris: String) {
+        for (rawUri in uris) {
+            if (rawUri.isBlank()) continue
+            val clean = rawUri.removePrefix("file://")
+            val onlineClean = rawUri.removePrefix("online://")
+            val name = File(clean).name
+
+            noArtworkSet.remove(rawUri)
+            noArtworkSet.remove(clean)
+            noArtworkSet.remove("file://$clean")
+            noArtworkSet.remove(onlineClean)
+            noArtworkSet.remove("online://$onlineClean")
+            if (name.isNotBlank()) {
+                noArtworkSet.remove(name)
+                noArtworkSet.remove("online://$name")
+            }
+
+            memoryCache.remove("${rawUri}_lg")
+            memoryCache.remove("${rawUri}_sm")
+            memoryCache.remove("${clean}_lg")
+            memoryCache.remove("${clean}_sm")
+            memoryCache.remove("${onlineClean}_lg")
+            memoryCache.remove("${onlineClean}_sm")
+
+            getDiskCacheFile("${rawUri}_lg")?.delete()
+            getDiskCacheFile("${rawUri}_sm")?.delete()
+            getDiskCacheFile("${clean}_lg")?.delete()
+            getDiskCacheFile("${clean}_sm")?.delete()
+        }
     }
 
     fun registerOnlineArtwork(trackUri: String, imageUrl: String) {
@@ -125,6 +169,13 @@ object ArtworkCache {
                 noArtworkSet.remove(name)
                 noArtworkSet.remove("online://$name")
             }
+
+            try {
+                artPrefs?.edit()
+                    ?.putString(trackUri, imageUrl)
+                    ?.putString(clean, imageUrl)
+                    ?.apply()
+            } catch (_: Exception) {}
         }
     }
 

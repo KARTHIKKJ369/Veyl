@@ -74,7 +74,9 @@ import com.audiophile.player.online.OnlineSongItem
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
 import com.audiophile.player.ui.theme.VeylTypography
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import uniffi.audiophile_core.PlaybackStateEnum
 import uniffi.audiophile_core.TrackInfo
 
@@ -138,11 +140,50 @@ fun VeylSearchScreen(
     }
     BackHandler(onBack = onBack)
 
-    // Debounced Online Search for official studio tracks
+    // Asynchronous local search state to eliminate all UI thread lag
+    var songResults by remember { mutableStateOf<List<TrackInfo>>(emptyList()) }
+    var albumResults by remember { mutableStateOf<List<Triple<String, String, List<TrackInfo>>>>(emptyList()) }
+    var artistResults by remember { mutableStateOf<List<Triple<String, List<TrackInfo>, Int>>>(emptyList()) }
+
+    // Fast, non-blocking local search on background worker thread (debounced 80ms)
+    LaunchedEffect(query, tracks, albumGroups, artistGroups) {
+        val q = query.trim()
+        if (q.isBlank()) {
+            songResults = emptyList()
+            albumResults = emptyList()
+            artistResults = emptyList()
+            return@LaunchedEffect
+        }
+
+        delay(80)
+        withContext(Dispatchers.Default) {
+            val qLower = q.lowercase()
+            val filteredSongs = tracks.filter { t ->
+                t.title.contains(qLower, ignoreCase = true) ||
+                    (t.artist ?: "").contains(qLower, ignoreCase = true) ||
+                    (t.album ?: "").contains(qLower, ignoreCase = true)
+            }.take(50)
+
+            val filteredAlbums = albumGroups.filter { (album, artist, _) ->
+                album.contains(qLower, ignoreCase = true) ||
+                    artist.contains(qLower, ignoreCase = true)
+            }.take(12)
+
+            val filteredArtists = artistGroups.filter { (artist, _, _) ->
+                artist.contains(qLower, ignoreCase = true)
+            }.take(10)
+
+            songResults = filteredSongs
+            albumResults = filteredAlbums
+            artistResults = filteredArtists
+        }
+    }
+
+    // Debounced Online Search for official studio tracks (450ms debounce so typing is fluid)
     LaunchedEffect(query) {
         val q = query.trim()
         if (q.length >= 2) {
-            delay(250)
+            delay(450)
             isSearchingOnline = true
             try {
                 val results = JioSaavnService.searchSongs(q)
@@ -156,31 +197,6 @@ fun VeylSearchScreen(
             onlineResults = emptyList()
             isSearchingOnline = false
         }
-    }
-
-    // Derive local results from query
-    val songResults = remember(query, tracks) {
-        if (query.isBlank()) emptyList()
-        else tracks.filter { t ->
-            t.title.contains(query, ignoreCase = true) ||
-                (t.artist ?: "").contains(query, ignoreCase = true) ||
-                (t.album ?: "").contains(query, ignoreCase = true)
-        }.take(50)
-    }
-
-    val albumResults = remember(query, albumGroups) {
-        if (query.isBlank()) emptyList()
-        else albumGroups.filter { (album, artist, _) ->
-            album.contains(query, ignoreCase = true) ||
-                artist.contains(query, ignoreCase = true)
-        }.take(12)
-    }
-
-    val artistResults = remember(query, artistGroups) {
-        if (query.isBlank()) emptyList()
-        else artistGroups.filter { (artist, _, _) ->
-            artist.contains(query, ignoreCase = true)
-        }.take(10)
     }
 
     val hasLocalResults = songResults.isNotEmpty() || albumResults.isNotEmpty() || artistResults.isNotEmpty()

@@ -877,7 +877,18 @@ class AudioEngineController private constructor(private val context: Context) {
                                 (tickCount % 3 == 0)
 
                         if (shouldUpdateStatus) {
-                            _status.value = currentStatus
+                            if (_isOnlineStreaming.value && _currentOnlineSong.value != null) {
+                                val s = _currentOnlineSong.value!!
+                                val enrichedTrack = currentStatus.currentTrack?.copy(
+                                    title = s.title,
+                                    artist = s.artist,
+                                    album = s.album,
+                                    hasArtwork = true
+                                )
+                                _status.value = currentStatus.copy(currentTrack = enrichedTrack)
+                            } else {
+                                _status.value = currentStatus
+                            }
                         }
                         tickCount++
 
@@ -926,12 +937,26 @@ class AudioEngineController private constructor(private val context: Context) {
             put("channels", t.channels.toInt())
             put("formatName", t.formatName)
             put("hasArtwork", t.hasArtwork)
+            val art = ArtworkCache.getOnlineArtwork(t.uri)
+                ?: ArtworkCache.getOnlineArtwork(t.title.lowercase())
+            if (!art.isNullOrBlank()) {
+                put("artworkUrl", art)
+            }
         }
     }
 
     private fun jsonToTrack(obj: org.json.JSONObject): TrackInfo {
+        val uri = obj.getString("uri")
+        val artUrl = obj.optString("artworkUrl")
+        if (artUrl.isNotBlank()) {
+            ArtworkCache.registerOnlineArtwork(uri, artUrl)
+            val title = obj.optString("title")
+            if (title.isNotBlank()) {
+                ArtworkCache.registerOnlineArtwork(title.lowercase(), artUrl)
+            }
+        }
         return TrackInfo(
-            uri = obj.getString("uri"),
+            uri = uri,
             title = obj.getString("title"),
             artist = obj.optString("artist", "Unknown Artist"),
             album = obj.optString("album", ""),
@@ -957,7 +982,11 @@ class AudioEngineController private constructor(private val context: Context) {
                 val arr = org.json.JSONArray(tracksJson)
                 val list = mutableListOf<TrackInfo>()
                 for (i in 0 until arr.length()) {
-                    list.add(jsonToTrack(arr.getJSONObject(i)))
+                    val track = jsonToTrack(arr.getJSONObject(i))
+                    // Purge stale or transient cache stream URIs
+                    if (!track.uri.contains("veyl_online_stream_") && !track.title.startsWith("veyl_online_stream_")) {
+                        list.add(track)
+                    }
                 }
                 if (list.isNotEmpty()) {
                     _playbackHistory.value = list
@@ -1043,24 +1072,186 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
+    fun updateTrackMetadata(
+        oldUri: String,
+        newTitle: String,
+        newArtist: String,
+        newAlbum: String,
+        newYear: UInt?,
+        newArtworkUrl: String?,
+        newUri: String = oldUri
+    ) {
+        val oldF = File(oldUri)
+        val oldFName = oldF.name
+        val oldCleanPath = oldUri.removePrefix("file://")
+        val newCleanPath = newUri.removePrefix("file://")
+
+        fun isMatch(uri: String): Boolean {
+            if (uri == oldUri || uri == oldCleanPath || uri == "file://$oldCleanPath") return true
+            val f = File(uri.removePrefix("file://"))
+            return f.name == oldFName
+        }
+
+        // 1. Update library tracks
+        val currentLib = _libraryTracks.value
+        val updatedLib = currentLib.map { track ->
+            if (isMatch(track.uri)) {
+                track.copy(
+                    uri = newCleanPath,
+                    title = newTitle,
+                    artist = newArtist,
+                    album = newAlbum,
+                    year = newYear ?: track.year,
+                    hasArtwork = true
+                )
+            } else {
+                track
+            }
+        }
+        _libraryTracks.value = updatedLib
+        updateDerivedTrackLists(updatedLib)
+        persistLibraryTracksCache(updatedLib)
+
+        // 2. Update current playing track in _status if matched
+        val curStatus = _status.value
+        val current = curStatus?.currentTrack
+        if (current != null && isMatch(current.uri)) {
+            val updated = current.copy(
+                uri = newCleanPath,
+                title = newTitle,
+                artist = newArtist,
+                album = newAlbum,
+                year = newYear ?: current.year,
+                hasArtwork = true
+            )
+            _status.value = curStatus.copy(currentTrack = updated)
+            pendingActiveTrack = updated
+        }
+
+        // 3. Update active queue and original queue
+        val currentQueue = _queue.value
+        if (currentQueue.any { isMatch(it.uri) }) {
+            _queue.value = currentQueue.map { track ->
+                if (isMatch(track.uri)) {
+                    track.copy(
+                        uri = newCleanPath,
+                        title = newTitle,
+                        artist = newArtist,
+                        album = newAlbum,
+                        year = newYear ?: track.year,
+                        hasArtwork = true
+                    )
+                } else track
+            }
+        }
+        val origQ = _originalQueue.value
+        if (origQ.any { isMatch(it.uri) }) {
+            _originalQueue.value = origQ.map { track ->
+                if (isMatch(track.uri)) {
+                    track.copy(
+                        uri = newCleanPath,
+                        title = newTitle,
+                        artist = newArtist,
+                        album = newAlbum,
+                        year = newYear ?: track.year,
+                        hasArtwork = true
+                    )
+                } else track
+            }
+        }
+
+        // 4. Update Playback History
+        val curHist = _playbackHistory.value
+        if (curHist.any { isMatch(it.uri) }) {
+            val updatedHistory = curHist.map { track ->
+                if (isMatch(track.uri)) {
+                    track.copy(
+                        uri = newCleanPath,
+                        title = newTitle,
+                        artist = newArtist,
+                        album = newAlbum,
+                        year = newYear ?: track.year,
+                        hasArtwork = true
+                    )
+                } else track
+            }
+            _playbackHistory.value = updatedHistory
+            persistPlaybackHistory(updatedHistory)
+        }
+
+        // 5. Update PlaylistManager if URI changed
+        if (oldUri != newCleanPath) {
+            playlistManager.updateTrackUri(oldUri, newCleanPath)
+            playlistManager.updateTrackUri(oldCleanPath, newCleanPath)
+            playlistManager.updateTrackUri("file://$oldCleanPath", newCleanPath)
+        }
+
+        // 6. Invalidate old cache and register fresh in ArtworkCache
+        ArtworkCache.invalidateTrackArtwork(oldUri, oldCleanPath, newCleanPath)
+        val newF = File(newCleanPath)
+        if (!newArtworkUrl.isNullOrBlank()) {
+            ArtworkCache.registerOnlineArtwork(newCleanPath, newArtworkUrl)
+            ArtworkCache.registerOnlineArtwork("file://$newCleanPath", newArtworkUrl)
+            ArtworkCache.registerOnlineArtwork(newF.name, newArtworkUrl)
+            ArtworkCache.registerOnlineArtwork(newTitle.lowercase(), newArtworkUrl)
+        }
+    }
+
     fun recordTrackPlayed(uri: String, directTrack: TrackInfo? = null) {
         val currentCount = playCountPrefs.getInt(uri, 0)
         playCountPrefs.edit().putInt(uri, currentCount + 1).apply()
 
-        val all = _libraryTracks.value
-        val track = all.firstOrNull { it.uri == uri }
-            ?: directTrack
-            ?: resolveTrackInfo(uri)
-            ?: _queue.value.firstOrNull { it.uri == uri }
-            ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
+        val onlineSong = _currentOnlineSong.value
+        val isOnline = uri.contains("veyl_online_stream_") || uri.startsWith("online://") || directTrack?.genre == "Online Stream" || _isOnlineStreaming.value
+
+        val track = if (isOnline && onlineSong != null) {
+            val canonicalUri = if (onlineSong.id.startsWith("online://")) onlineSong.id else "online://${onlineSong.id}"
+            val artUrl = ArtworkCache.getOnlineArtwork(canonicalUri)
+                ?: ArtworkCache.getOnlineArtwork(onlineSong.id)
+                ?: ArtworkCache.getOnlineArtwork(onlineSong.title.lowercase())
+                ?: onlineSong.thumbnailUrl
+
+            if (artUrl.isNotBlank()) {
+                ArtworkCache.registerOnlineArtwork(canonicalUri, artUrl)
+                ArtworkCache.registerOnlineArtwork(onlineSong.title.lowercase(), artUrl)
+            }
+
+            TrackInfo(
+                uri = canonicalUri,
+                title = onlineSong.title,
+                artist = onlineSong.artist,
+                album = onlineSong.album,
+                albumArtist = onlineSong.artist,
+                genre = "Online Stream",
+                year = null,
+                trackNumber = null,
+                discNumber = null,
+                durationSeconds = onlineSong.durationSeconds,
+                sampleRate = 44100u,
+                bitDepth = 16u,
+                bitrate = 320000u,
+                channels = 2u,
+                formatName = "AAC 320k (Studio Master)",
+                hasArtwork = true
+            )
+        } else {
+            val all = _libraryTracks.value
+            all.firstOrNull { it.uri == uri }
+                ?: directTrack
+                ?: resolveTrackInfo(uri)
+                ?: _queue.value.firstOrNull { it.uri == uri }
+                ?: _status.value?.currentTrack?.takeIf { it.uri == uri }
+        }
 
         if (track != null) {
             val updatedHistory = (listOf(track) + _playbackHistory.value.filter {
-                it.uri != track.uri && (track.title.isBlank() || !it.title.equals(track.title, ignoreCase = true) || !it.artist.equals(track.artist, ignoreCase = true))
+                it.uri != track.uri &&
+                !it.uri.contains("veyl_online_stream_") &&
+                (track.title.isBlank() || !it.title.equals(track.title, ignoreCase = true) || !it.artist.equals(track.artist, ignoreCase = true))
             }).take(50)
             _playbackHistory.value = updatedHistory
             persistPlaybackHistory(updatedHistory)
-            updateDerivedTrackLists(all)
+            updateDerivedTrackLists(_libraryTracks.value)
         }
     }
 

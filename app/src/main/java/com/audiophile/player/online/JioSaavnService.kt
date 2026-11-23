@@ -5,6 +5,8 @@ import android.text.Html
 import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -41,148 +43,166 @@ object JioSaavnService {
         val trimmed = query.trim()
         if (trimmed.length < 2) return@withContext emptyList()
 
-        val allItems = mutableListOf<OnlineSongItem>()
-        val seenIds = mutableSetOf<String>()
-        val seenTitles = mutableSetOf<String>()
-
-        fun addItems(items: List<OnlineSongItem>) {
-            for (item in items) {
-                if (item.streamUrl.isBlank()) continue
-                val normalizedTitle = item.title
-                    .replace(Regex("\\(.*?\\)|\\[.*?\\]"), "")
-                    .replace(Regex("[^a-zA-Z0-9]"), "")
-                    .lowercase()
-                val dedupeKey = if (normalizedTitle.length >= 4) normalizedTitle else item.title.lowercase()
-                if (seenIds.add(item.id) && seenTitles.add(dedupeKey)) {
-                    allItems.add(item)
-                }
-            }
-        }
-
         try {
             val encodedQuery = URLEncoder.encode(trimmed, "UTF-8")
 
-            // 1. Check autocomplete to find matching movie, album, or artist
-            var topAlbumId: String? = null
-            var topArtistId: String? = null
-
-            try {
-                val autoRequest = Request.Builder()
-                    .url(AUTOCOMPLETE_ENDPOINT + encodedQuery)
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                    .get()
-                    .build()
-
-                httpClient.newCall(autoRequest).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string() ?: ""
-                        if (body.isNotBlank()) {
-                            val autoJson = JSONObject(body)
-                            val topArr = autoJson.optJSONObject("topquery")?.optJSONArray("data")
-                            if (topArr != null && topArr.length() > 0) {
-                                val topItem = topArr.optJSONObject(0)
-                                val type = topItem?.optString("type")
-                                val id = topItem?.optString("id")
-                                if (type == "album" && !id.isNullOrBlank()) {
-                                    topAlbumId = id
-                                } else if (type == "artist" && !id.isNullOrBlank()) {
-                                    topArtistId = id
-                                }
-                            }
-                            if (topAlbumId == null) {
-                                val albumsArr = autoJson.optJSONObject("albums")?.optJSONArray("data")
-                                if (albumsArr != null && albumsArr.length() > 0) {
-                                    topAlbumId = albumsArr.optJSONObject(0)?.optString("id")
-                                }
-                            }
-                            if (topArtistId == null) {
-                                val artistsArr = autoJson.optJSONObject("artists")?.optJSONArray("data")
-                                if (artistsArr != null && artistsArr.length() > 0) {
-                                    topArtistId = artistsArr.optJSONObject(0)?.optString("id")
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Autocomplete error for '$trimmed'", e)
-            }
-
-            // 2. If movie/album found, fetch complete movie soundtrack
-            if (!topAlbumId.isNullOrBlank()) {
-                try {
-                    val albRequest = Request.Builder()
-                        .url(ALBUM_DETAILS_ENDPOINT + topAlbumId)
+            coroutineScope {
+                // 1. Direct song search concurrently
+                val directSearchDeferred = async {
+                    val results = mutableListOf<OnlineSongItem>()
+                    val songRequest = Request.Builder()
+                        .url(SEARCH_ENDPOINT + encodedQuery)
                         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                         .get()
                         .build()
-                    httpClient.newCall(albRequest).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            val body = resp.body?.string() ?: ""
-                            if (body.isNotBlank()) {
-                                val albJson = JSONObject(body)
-                                val songArr = albJson.optJSONArray("songs")
-                                if (songArr != null) {
-                                    addItems(parseJsonSongArray(songArr))
+
+                    try {
+                        httpClient.newCall(songRequest).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                val body = resp.body?.string().orEmpty()
+                                if (body.isNotBlank()) {
+                                    val json = JSONObject(body)
+                                    results.addAll(parseSearchResults(json))
                                 }
                             }
                         }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Direct search error for '$trimmed'", e)
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Album details error for '$topAlbumId'", e)
+                    results
                 }
-            }
 
-            // 3. If artist found, fetch artist top songs
-            if (!topArtistId.isNullOrBlank()) {
-                try {
-                    val artRequest = Request.Builder()
-                        .url(ARTIST_DETAILS_ENDPOINT + topArtistId)
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                        .get()
-                        .build()
-                    httpClient.newCall(artRequest).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            val body = resp.body?.string() ?: ""
-                            if (body.isNotBlank()) {
-                                val artJson = JSONObject(body)
-                                val songArr = artJson.optJSONObject("topSongs")?.optJSONArray("songs")
-                                if (songArr != null) {
-                                    addItems(parseJsonSongArray(songArr))
+                // 2. Targeted search (movie / album soundtrack / artist top hits) concurrently
+                val targetedSearchDeferred = async {
+                    val results = mutableListOf<OnlineSongItem>()
+                    var topAlbumId: String? = null
+                    var topArtistId: String? = null
+
+                    try {
+                        val autoRequest = Request.Builder()
+                            .url(AUTOCOMPLETE_ENDPOINT + encodedQuery)
+                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                            .get()
+                            .build()
+
+                        httpClient.newCall(autoRequest).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                val body = resp.body?.string().orEmpty()
+                                if (body.isNotBlank()) {
+                                    val autoJson = JSONObject(body)
+                                    val topArr = autoJson.optJSONObject("topquery")?.optJSONArray("data")
+                                    if (topArr != null && topArr.length() > 0) {
+                                        val topItem = topArr.optJSONObject(0)
+                                        val type = topItem?.optString("type")
+                                        val id = topItem?.optString("id")
+                                        if (type == "album" && !id.isNullOrBlank()) {
+                                            topAlbumId = id
+                                        } else if (type == "artist" && !id.isNullOrBlank()) {
+                                            topArtistId = id
+                                        }
+                                    }
+                                    if (topAlbumId == null) {
+                                        val albumsArr = autoJson.optJSONObject("albums")?.optJSONArray("data")
+                                        if (albumsArr != null && albumsArr.length() > 0) {
+                                            topAlbumId = albumsArr.optJSONObject(0)?.optString("id")
+                                        }
+                                    }
+                                    if (topArtistId == null) {
+                                        val artistsArr = autoJson.optJSONObject("artists")?.optJSONArray("data")
+                                        if (artistsArr != null && artistsArr.length() > 0) {
+                                            topArtistId = artistsArr.optJSONObject(0)?.optString("id")
+                                        }
+                                    }
                                 }
                             }
                         }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Autocomplete error for '$trimmed'", e)
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Artist details error for '$topArtistId'", e)
+
+                    // If movie/album found, fetch complete movie soundtrack
+                    if (!topAlbumId.isNullOrBlank()) {
+                        try {
+                            val albRequest = Request.Builder()
+                                .url(ALBUM_DETAILS_ENDPOINT + topAlbumId)
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                                .get()
+                                .build()
+                            httpClient.newCall(albRequest).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string().orEmpty()
+                                    if (body.isNotBlank()) {
+                                        val albJson = JSONObject(body)
+                                        val songArr = albJson.optJSONArray("songs")
+                                        if (songArr != null) {
+                                            results.addAll(parseJsonSongArray(songArr))
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Album details error for '$topAlbumId'", e)
+                        }
+                    }
+
+                    // If artist found, fetch artist top songs
+                    if (!topArtistId.isNullOrBlank()) {
+                        try {
+                            val artRequest = Request.Builder()
+                                .url(ARTIST_DETAILS_ENDPOINT + topArtistId)
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                                .get()
+                                .build()
+                            httpClient.newCall(artRequest).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string().orEmpty()
+                                    if (body.isNotBlank()) {
+                                        val artJson = JSONObject(body)
+                                        val songArr = artJson.optJSONObject("topSongs")?.optJSONArray("songs")
+                                        if (songArr != null) {
+                                            results.addAll(parseJsonSongArray(songArr))
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Artist details error for '$topArtistId'", e)
+                        }
+                    }
+
+                    results
                 }
-            }
 
-            // 4. Also fetch direct song search results and merge
-            val songRequest = Request.Builder()
-                .url(SEARCH_ENDPOINT + encodedQuery)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .get()
-                .build()
+                val targetedSongs = targetedSearchDeferred.await()
+                val directSongs = directSearchDeferred.await()
 
-            try {
-                httpClient.newCall(songRequest).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string() ?: ""
-                        if (body.isNotBlank()) {
-                            val json = JSONObject(body)
-                            addItems(parseSearchResults(json))
+                val allItems = mutableListOf<OnlineSongItem>()
+                val seenIds = mutableSetOf<String>()
+                val seenTitles = mutableSetOf<String>()
+
+                fun addItems(items: List<OnlineSongItem>) {
+                    for (item in items) {
+                        if (item.streamUrl.isBlank()) continue
+                        val normalizedTitle = item.title
+                            .replace(Regex("\\(.*?\\)|\\[.*?\\]"), "")
+                            .replace(Regex("[^a-zA-Z0-9]"), "")
+                            .lowercase()
+                        val dedupeKey = if (normalizedTitle.length >= 4) normalizedTitle else item.title.lowercase()
+                        if (seenIds.add(item.id) && seenTitles.add(dedupeKey)) {
+                            allItems.add(item)
                         }
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Direct search error for '$trimmed'", e)
+
+                addItems(targetedSongs)
+                addItems(directSongs)
+
+                allItems
             }
         } catch (e: Exception) {
             Log.e(TAG, "Smart search error for '$trimmed'", e)
+            emptyList()
         }
-
-        return@withContext allItems
     }
 
     suspend fun searchArtists(query: String): List<OnlineArtistItem> = withContext(Dispatchers.IO) {

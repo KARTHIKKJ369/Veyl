@@ -323,27 +323,10 @@ class OnlineStreamManager(private val context: Context) {
             }
         }
 
+        // Ensure no companion image files pollute the music directory
         val coverFile = File(targetFile.parentFile, "${targetFile.nameWithoutExtension}.jpg")
-
-        // If downloading image failed, check if companion cover already exists on disk
-        if ((coverBytes == null || coverBytes.isEmpty()) && coverFile.exists()) {
-            try {
-                coverBytes = coverFile.readBytes()
-            } catch (_: Exception) {}
-        }
-
-        // Save .jpg cover art beside audio file in Music/Veyl
-        if (coverBytes != null && coverBytes.isNotEmpty() && !coverFile.exists()) {
-            try {
-                coverFile.writeBytes(coverBytes)
-                android.media.MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(coverFile.absolutePath),
-                    arrayOf("image/jpeg")
-                ) { _, _ -> }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to save companion cover.jpg", e)
-            }
+        if (coverFile.exists()) {
+            try { coverFile.delete() } catch (_: Exception) {}
         }
 
         // Embed MP4/iTunes tags (Title, Artist, Album, and Cover Art) directly into the .m4a file

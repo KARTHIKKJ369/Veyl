@@ -136,10 +136,18 @@ class PlaybackService : MediaBrowserServiceCompat() {
                     if (isCurrentlyPlaying) engineController.pause()
                 } else if (isCurrentlyPlaying) {
                     if (!isDucked) {
-                        preDuckVolume = engineController.volume
+                        preDuckVolume = engineController.volume.coerceAtLeast(0.8f)
                         isDucked = true
                     }
-                    engineController.setVolume(0.2f * preDuckVolume)
+                    engineController.setVolume(0.5f * preDuckVolume)
+                    // Auto-restore volume after 1800ms in case Android HAL does not deliver AUDIOFOCUS_GAIN
+                    audioFocusJob = serviceScope.launch {
+                        delay(1800)
+                        if (isDucked) {
+                            engineController.setVolume(preDuckVolume)
+                            isDucked = false
+                        }
+                    }
                 }
             }
         }

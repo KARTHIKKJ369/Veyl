@@ -77,6 +77,7 @@ fun VeylTrackOptionsSheet(
         ?: ArtworkCache.getOnlineArtwork(track.title.lowercase())
 
     val isFav = remember(track, favoriteUris) { controller.isTrackFavorite(track, favoriteUris) }
+    var showIdentifySheet by remember { mutableStateOf(false) }
     var showPlaylistDialog by remember { mutableStateOf(false) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
@@ -182,6 +183,16 @@ fun VeylTrackOptionsSheet(
                 title = "Add to Playlist",
                 onClick = {
                     showPlaylistDialog = true
+                }
+            )
+
+            // Option: Identify & Match Metadata (Writes directly to file)
+            OptionItem(
+                icon = VeylIcons.Search,
+                title = "Identify & Match Metadata",
+                tint = colors.accentSignal,
+                onClick = {
+                    showIdentifySheet = true
                 }
             )
 
@@ -544,6 +555,17 @@ fun VeylTrackOptionsSheet(
                 TextButton(onClick = { showSpeedDialog = false }) {
                     Text("Close", color = colors.accentSignal)
                 }
+            }
+        )
+    }
+
+    if (showIdentifySheet) {
+        VeylIdentifyTrackSheet(
+            track = track,
+            controller = controller,
+            onDismiss = {
+                showIdentifySheet = false
+                onDismiss()
             }
         )
     }

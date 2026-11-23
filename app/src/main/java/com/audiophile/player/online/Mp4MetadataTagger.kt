@@ -27,6 +27,7 @@ object Mp4MetadataTagger {
         title: String,
         artist: String,
         album: String,
+        year: UInt? = null,
         coverBytes: ByteArray? = null
     ): Boolean {
         if (!file.exists() || file.length() < 100) return false
@@ -70,7 +71,7 @@ object Mp4MetadataTagger {
             }
 
             // Build new udta atom
-            val newUdta = buildUdtaAtom(title, artist, album, coverBytes)
+            val newUdta = buildUdtaAtom(title, artist, album, year, coverBytes)
 
             // New moov content = otherMoovChildren + newUdta
             val newMoovContent = otherMoovChildren.toByteArray() + newUdta
@@ -166,7 +167,7 @@ object Mp4MetadataTagger {
         }
     }
 
-    private fun buildUdtaAtom(title: String, artist: String, album: String, coverBytes: ByteArray?): ByteArray {
+    private fun buildUdtaAtom(title: String, artist: String, album: String, year: UInt?, coverBytes: ByteArray?): ByteArray {
         val ilstContent = ByteArrayOutputStream()
         if (title.isNotBlank()) {
             ilstContent.write(buildTextAtom("\u00A9nam", title))
@@ -177,6 +178,9 @@ object Mp4MetadataTagger {
         }
         if (album.isNotBlank()) {
             ilstContent.write(buildTextAtom("\u00A9alb", album))
+        }
+        if (year != null && year > 0u) {
+            ilstContent.write(buildTextAtom("\u00A9day", year.toString()))
         }
         if (coverBytes != null && coverBytes.isNotEmpty()) {
             ilstContent.write(buildCoverAtom(coverBytes))
@@ -228,7 +232,8 @@ object Mp4MetadataTagger {
             write(byteArrayOf(0, 0, 0, 0)) // Version & flags
             write(byteArrayOf(0, 0, 0, 0)) // pre_defined
             write("mdir".toByteArray(Charsets.ISO_8859_1)) // handler type
-            write(byteArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)) // 12 reserved bytes
+            write("appl".toByteArray(Charsets.ISO_8859_1)) // component manufacturer: appl
+            write(byteArrayOf(0, 0, 0, 0, 0, 0, 0, 0)) // 8 reserved bytes
             write(0) // name (null terminated string)
         }.toByteArray()
         return buildBox("hdlr", hdlrContent)

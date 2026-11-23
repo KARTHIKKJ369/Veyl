@@ -15,13 +15,13 @@ android {
         applicationId = "com.audiophile.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "2.3.0"
+        versionCode = 9
+        versionName = "2.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         ndk {
-            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
+            abiFilters.addAll(listOf("arm64-v8a"))
         }
     }
 
@@ -84,6 +84,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "DebugProbesKt.bin"
+            excludes += "/META-INF/*.version"
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/INDEX.LIST"
+        }
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 }

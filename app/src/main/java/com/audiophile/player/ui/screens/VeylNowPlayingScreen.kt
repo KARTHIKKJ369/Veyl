@@ -114,7 +114,6 @@ fun VeylNowPlayingScreen(
     val isShuffle by controller.isShuffleEnabled.collectAsState()
     val repeatMode by controller.repeatMode.collectAsState()
     val currentLyrics by controller.currentLyrics.collectAsState()
-    val connectedDac by controller.connectedDac.collectAsState()
     val favoriteUris by controller.favoriteUris.collectAsState()
     val downloadingUris by controller.downloadingUris.collectAsState()
     val downloadedUris by controller.downloadedUris.collectAsState()
@@ -190,82 +189,18 @@ fun VeylNowPlayingScreen(
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            var showHardwareHud by remember { mutableStateOf(false) }
-            val hardwareSummary by controller.hardwareOutputSummary.collectAsState()
-            var lastSeenHardwareSummary by remember { mutableStateOf<String?>(null) }
-
-            // Only trigger HUD when hardware routing actually changes (e.g. USB DAC plugged/unplugged), NOT on song change
-            LaunchedEffect(hardwareSummary) {
-                if (lastSeenHardwareSummary != null && lastSeenHardwareSummary != hardwareSummary) {
-                    showHardwareHud = true
-                    delay(2800)
-                    showHardwareHud = false
-                }
-                lastSeenHardwareSummary = hardwareSummary
-            }
-
-            // Top Drag Handle & Hardware Status (Fixed height so artwork and controls never shift or jump)
+            // Top Drag Handle (Clean and minimal)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(28.dp),
                 contentAlignment = Alignment.Center
             ) {
-                AnimatedContent(
-                    targetState = showHardwareHud,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = tween(220)) + scaleIn(initialScale = 0.94f, animationSpec = tween(220)))
-                            .togetherWith(fadeOut(animationSpec = tween(180)) + scaleOut(targetScale = 0.94f, animationSpec = tween(180)))
-                    },
-                    label = "HardwareHudTransition"
-                ) { isHudVisible ->
-                    if (isHudVisible) {
-                        val isDirectUsb = hardwareSummary.startsWith("DIRECT USB")
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isDirectUsb) colors.accentSignal.copy(alpha = 0.15f) else colors.surfaceElevated,
-                            border = BorderStroke(1.dp, if (isDirectUsb) colors.accentSignal.copy(alpha = 0.4f) else colors.borderHairline),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { showHardwareHud = false }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(5.dp)
-                                        .background(
-                                            color = if (isDirectUsb) colors.accentSignal else colors.textMuted,
-                                            shape = CircleShape
-                                        )
-                                )
-                                Text(
-                                    text = hardwareSummary,
-                                    style = VeylTypography.MonoBadge.copy(fontSize = 10.sp, fontWeight = FontWeight.Medium),
-                                    color = if (isDirectUsb) colors.accentSignal else colors.textMuted,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    } else {
-                        // Top Drag Handle Indicator (Tap to check hardware audio status)
-                        Box(
-                            modifier = Modifier
-                                .size(width = 48.dp, height = 24.dp)
-                                .clickable { showHardwareHud = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = colors.textMuted.copy(alpha = 0.35f),
-                                modifier = Modifier.size(width = 36.dp, height = 4.dp)
-                            ) {}
-                        }
-                    }
-                }
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = colors.textMuted.copy(alpha = 0.35f),
+                    modifier = Modifier.size(width = 36.dp, height = 4.dp)
+                ) {}
             }
 
             Spacer(modifier = Modifier.height(4.dp))
