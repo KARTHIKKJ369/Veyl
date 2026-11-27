@@ -29,17 +29,17 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Assemble Debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+      - name: Assemble Release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
 
       - name: Prepare Release APK Asset
-        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/veyl-debug.apk
+        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/veyl-release.apk
 
-      - name: Upload Debug APK Artifact
+      - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: veyl-debug-apk
-          path: app/build/outputs/apk/debug/veyl-debug.apk
+          name: veyl-release-apk
+          path: app/build/outputs/apk/release/veyl-release.apk
           retention-days: 14
 
       - name: Publish GitHub Release
@@ -48,24 +48,24 @@ jobs:
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
           target_commitish: ${{ github.sha }}
-          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Veyl Latest Build' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Veyl Latest Release' }}
           body: |
             ## 🎵 Veyl — Reference Audiophile Android Music Player
 
-            ### 🚀 Highlights in this release (v2.7.0):
-            - **Multi-Provider Synchronized Lyrics**: Added YouTube Music InnerTube, NetEase, JioSaavn, and Lyrics.ovh alongside LRCLIB and embedded tags with a minimal borderless provider selector.
-            - **Redesigned Lyrics Experience**: Centered Outfit geometric display typography with smooth sync-driven line transitions, clean top toolbar, and auto-hidden transparent "Jump to playing" button shown only during manual scroll.
-            - **Dedicated Artist & Album Detail Pages**: Tapping any artist or album opens a full page tracklist with accurate multi-artist and album grouping.
-            - **Downloads & MediaStore M3U8 Scanner**: Finds `.m3u8` / `.m3u` playlists in `Download/` and storage automatically via MediaStore and scoped storage fallback.
-            - **Unified Clean List & Queue UI**: Borderless header actions, hairline dividers, transparent floating A–Z ribbon fast scroller across all views, and paused playing-bars freeze.
-            - **100% Free & Open Source**: Licensed under the GNU General Public License v3.0 (GPL-3.0).
+            ### 🚀 Highlights in v2.9.0:
+            - **True Gapless & Equal-Power Crossfade**: Full resampler tail flushing, Linear/Equal-Power/S-Curve overlap mixing, and race-free skip flushing.
+            - **WSOLA Time-Stretching & ITU-R Downmix**: Pitch-preserving playback speed and proper 5.1/7.1 → stereo downmixing.
+            - **ReplayGain Modes & 24-bit TPDF Dither**: Off/Track/Album ReplayGain with peak clipping protection, plus lock-free 24-bit TPDF dithering on DSP-modified streams.
+            - **CUE Sheet Splitting & Auto-Scan**: Automatic splitting of monolithic FLAC/WAV/APE/WV `.cue` albums and instant library updates for downloaded tracks.
+            - **Pill-Free Studio UI & New Icon**: Redesigned Now Playing, Equalizer (0.1 dB bipolar sliders + `0 dB`-anchored curve), Home, Cloud, and Monochrome Carbon vector icon.
+            - **Ultra-Lean 6.5 MB Release APK**: R8 code & resource shrinking (`arm64-v8a`).
 
             ### 📥 Download
-            Download and install **`veyl-debug.apk`** from the Assets below.
+            Download and install **`veyl-release.apk`** from the Assets below.
           draft: false
           prerelease: false
           make_latest: true
           files: |
-            app/build/outputs/apk/debug/veyl-debug.apk
+            app/build/outputs/apk/release/veyl-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
