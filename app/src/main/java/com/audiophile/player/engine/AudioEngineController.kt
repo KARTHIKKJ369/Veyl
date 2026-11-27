@@ -1774,37 +1774,23 @@ class AudioEngineController private constructor(private val context: Context) {
         val current = pendingActiveTrack ?: _status.value?.currentTrack
         val currentIndex = q.indexOfFirst { it.uri == current?.uri || (current != null && it.title.equals(current.title, ignoreCase = true)) }
 
-        val nextTrack = if (_isShuffleEnabled.value) {
-            if (unplayedShufflePool.isNotEmpty()) {
-                val next = unplayedShufflePool.removeAt(0)
-                if (current != null) playHistory.add(current)
-                next
-            } else if (currentIndex != -1 && currentIndex < q.size - 1) {
-                val next = q[currentIndex + 1]
-                if (current != null) playHistory.add(current)
-                next
-            } else {
-                val isCloud = _appExperienceMode.value == AppExperienceMode.CLOUD_FIRST ||
-                        _isOnlineStreaming.value ||
-                        _status.value?.currentTrack?.genre == "Online Stream"
-                if (isCloud && _isAutoplayEnabled.value) {
-                    triggerAutoplayNext()
-                    return
-                }
-                q.firstOrNull()
+        if (current != null) {
+            playHistory.add(current)
+            if (playHistory.size > 100) playHistory.removeAt(0)
+        }
+
+        val nextTrack = if (currentIndex != -1 && currentIndex >= q.size - 1) {
+            val isCloud = _appExperienceMode.value == AppExperienceMode.CLOUD_FIRST ||
+                    _isOnlineStreaming.value ||
+                    _status.value?.currentTrack?.genre == "Online Stream"
+            if (isCloud && _isAutoplayEnabled.value) {
+                triggerAutoplayNext()
+                return
             }
+            q.firstOrNull()
         } else {
-            if (currentIndex != -1 && currentIndex >= q.size - 1) {
-                val isCloud = _appExperienceMode.value == AppExperienceMode.CLOUD_FIRST ||
-                        _isOnlineStreaming.value ||
-                        _status.value?.currentTrack?.genre == "Online Stream"
-                if (isCloud && _isAutoplayEnabled.value) {
-                    triggerAutoplayNext()
-                    return
-                }
-            }
             val nextIndex = if (currentIndex != -1) (currentIndex + 1) % q.size else 0
-            q[nextIndex]
+            q.getOrNull(nextIndex)
         }
 
         nextTrack?.let { playTrack(it) }
@@ -2559,13 +2545,13 @@ class AudioEngineController private constructor(private val context: Context) {
     fun playTrackList(tracks: List<TrackInfo>, startIndex: Int = 0) {
         if (tracks.isEmpty()) return
         _originalQueue.value = tracks
-        _queue.value = tracks
-
         val startTrack = tracks.getOrNull(startIndex) ?: tracks.first()
         unplayedShufflePool.clear()
         if (_isShuffleEnabled.value) {
-            val remaining = tracks.filter { it.uri != startTrack.uri }
-            unplayedShufflePool.addAll(remaining)
+            val remaining = tracks.filter { it.uri != startTrack.uri }.shuffled()
+            _queue.value = listOf(startTrack) + remaining
+        } else {
+            _queue.value = tracks
         }
         playTrack(startTrack)
     }
@@ -2828,16 +2814,12 @@ class AudioEngineController private constructor(private val context: Context) {
             val current = pendingActiveTrack ?: _status.value?.currentTrack
             val currentIndex = q.indexOfFirst { it.uri == current?.uri || (current != null && it.title.equals(current.title, ignoreCase = true)) }
 
-            val nextTrack = if (_isShuffleEnabled.value) {
-                unplayedShufflePool.firstOrNull() ?: q.firstOrNull()
+            val nextTrack = if (currentIndex != -1 && currentIndex < q.size - 1) {
+                q[currentIndex + 1]
+            } else if (_repeatMode.value == RepeatMode.ALL) {
+                q.firstOrNull()
             } else {
-                if (currentIndex != -1 && currentIndex < q.size - 1) {
-                    q[currentIndex + 1]
-                } else if (_repeatMode.value == RepeatMode.ALL) {
-                    q.firstOrNull()
-                } else {
-                    null
-                }
+                null
             } ?: return@launch
 
             val isOnline = nextTrack.genre == "Online Stream" ||
@@ -3267,7 +3249,7 @@ class AudioEngineController private constructor(private val context: Context) {
             // Re-apply user's persistent equalizer state on track transition
             withNativeEngine { it.setEqEnabled(_isEqEnabled.value) }
 
-            // Ensure queue always contains all tracks if queue was empty or single
+            // Ensure queue always matches what's playing and what's next
             val currentQ = _queue.value
             if (isOnline) {
                 if (currentQ.isEmpty()) {
@@ -3277,13 +3259,23 @@ class AudioEngineController private constructor(private val context: Context) {
             } else if (currentQ.isEmpty() || currentQ.size <= 1) {
                 val lib = _libraryTracks.value
                 if (lib.isNotEmpty()) {
-                    _queue.value = lib
                     _originalQueue.value = lib
+                    if (_isShuffleEnabled.value) {
+                        val rest = lib.filter { it.uri != actualTrack.uri }.shuffled()
+                        _queue.value = listOf(actualTrack) + rest
+                    } else {
+                        _queue.value = lib
+                    }
                 } else {
                     _queue.value = listOf(actualTrack)
                 }
-            } else if (!currentQ.any { it.uri == track.uri }) {
-                _queue.value = currentQ + track
+            } else if (!currentQ.any { it.uri == actualTrack.uri }) {
+                val prevTrack = _status.value?.currentTrack
+                val prevIdx = currentQ.indexOfFirst { it.uri == prevTrack?.uri }
+                val insertAt = if (prevIdx >= 0) (prevIdx + 1).coerceAtMost(currentQ.size) else 0
+                val mutable = currentQ.toMutableList()
+                mutable.add(insertAt, actualTrack)
+                _queue.value = mutable
             }
             scheduleNextTrackPrefetch()
             } catch (error: Throwable) {

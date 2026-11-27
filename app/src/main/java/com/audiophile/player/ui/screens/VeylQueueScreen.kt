@@ -100,9 +100,22 @@ fun VeylQueueScreen(
     var draggingItemKey by remember { mutableStateOf<String?>(null) }
     var dragOffsetY by remember { mutableStateOf(0f) }
 
+    // Build upcoming slice starting immediately after currentTrack so #1 in UP NEXT is always the actual next track
+    val currentQueueIndex = remember(queue, currentTrack?.uri) {
+        if (currentTrack == null) -1
+        else queue.indexOfFirst { it.uri == currentTrack.uri || it.title.equals(currentTrack.title, ignoreCase = true) }
+    }
+    val upcomingItems = remember(queue, currentQueueIndex) {
+        if (currentQueueIndex >= 0) {
+            (currentQueueIndex + 1 until queue.size).map { idx -> idx to queue[idx] }
+        } else {
+            queue.mapIndexed { idx, t -> idx to t }
+        }
+    }
+
     // Calculate total remaining queue duration without O(N) recalculation on position ticks
-    val restQueueSec = remember(queue, currentTrack?.uri) {
-        queue.filter { it.uri != currentTrack?.uri }.sumOf { it.durationSeconds }
+    val restQueueSec = remember(upcomingItems) {
+        upcomingItems.sumOf { it.second.durationSeconds }
     }
     val totalRemainingSeconds = (durationSec - positionSec).coerceAtLeast(0.0) + restQueueSec
 
@@ -265,7 +278,7 @@ fun VeylQueueScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "UP NEXT (${queue.size})",
+                        text = "UP NEXT (${upcomingItems.size})",
                         style = VeylTypography.MonoBadge,
                         color = colors.textSecondary
                     )
@@ -279,7 +292,7 @@ fun VeylQueueScreen(
             }
 
             // 5. Reorderable Queue Items
-            if (queue.isEmpty()) {
+            if (upcomingItems.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -290,7 +303,7 @@ fun VeylQueueScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No tracks in playback sequence",
+                            text = "No upcoming tracks in queue",
                             style = VeylTypography.Body,
                             color = colors.textMuted
                         )
@@ -298,11 +311,11 @@ fun VeylQueueScreen(
                 }
             } else {
                 itemsIndexed(
-                    items = queue,
-                    key = { _, track -> "${track.uri}_${System.identityHashCode(track)}" }
-                ) { index, track ->
+                    items = upcomingItems,
+                    key = { _, pair -> "${pair.second.uri}_${System.identityHashCode(pair.second)}" }
+                ) { displayIdx, (realQueueIndex, track) ->
                     val trackKey = "${track.uri}_${System.identityHashCode(track)}"
-                    val isCurrent = currentTrack?.uri == track.uri
+                    val isCurrent = false
                     val isDragging = draggingItemKey == trackKey
 
                     val dragHandleModifier = Modifier.pointerInput(trackKey) {
@@ -318,6 +331,7 @@ fun VeylQueueScreen(
                                 val threshold = itemHeightPx * 0.55f
                                 val curQ = controller.queue.value
                                 var cur = curQ.indexOfFirst { "${it.uri}_${System.identityHashCode(it)}" == trackKey }
+                                val minIdx = (currentQueueIndex + 1).coerceAtLeast(0)
                                 if (cur != -1) {
                                     while (dragOffsetY > threshold && cur < curQ.size - 1) {
                                         controller.moveInQueue(cur, cur + 1)
@@ -325,7 +339,7 @@ fun VeylQueueScreen(
                                         dragOffsetY -= itemHeightPx
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     }
-                                    while (dragOffsetY < -threshold && cur > 0) {
+                                    while (dragOffsetY < -threshold && cur > minIdx) {
                                         controller.moveInQueue(cur, cur - 1)
                                         cur -= 1
                                         dragOffsetY += itemHeightPx
@@ -346,10 +360,10 @@ fun VeylQueueScreen(
                     }
 
                     QueueTrackRow(
-                        index = index + 1,
+                        index = displayIdx + 1,
                         track = track,
                         isCurrent = isCurrent,
-                        isPlaying = isCurrent && isPlaying,
+                        isPlaying = false,
                         isDragging = isDragging,
                         dragOffsetY = if (isDragging) dragOffsetY else 0f,
                         dragHandleModifier = dragHandleModifier,
@@ -359,7 +373,7 @@ fun VeylQueueScreen(
                         },
                         onRemove = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            controller.removeFromQueue(index)
+                            controller.removeFromQueue(realQueueIndex)
                         }
                     )
                 }
