@@ -2318,6 +2318,7 @@ class AudioEngineController private constructor(private val context: Context) {
             current.add(0, track)
         }
         _libraryTracks.value = current
+        persistLibraryTracksCache(current)
         updateDerivedTrackLists(current)
     }
 
@@ -2950,9 +2951,9 @@ class AudioEngineController private constructor(private val context: Context) {
                     playlistManager.updateTrackUri(track.uri, targetFile.absolutePath)
                     _downloadedUris.value = _downloadedUris.value + track.uri + targetFile.absolutePath
                     _downloadingUris.value = _downloadingUris.value - track.uri - targetFile.absolutePath
+                    android.media.MediaScannerConnection.scanFile(context, arrayOf(targetFile.absolutePath), null, null)
                     withContext(Dispatchers.Main) {
                         addTrackToLibrary(downloadedTrack)
-                        rescanLibrary()
                         onCompleted?.invoke(targetFile)
                     }
                     return@launch
@@ -2974,8 +2975,8 @@ class AudioEngineController private constructor(private val context: Context) {
                     playlistManager.updateTrackUri(track.uri, file.absolutePath)
                     _downloadedUris.value = _downloadedUris.value + track.uri + file.absolutePath
                     _downloadingUris.value = _downloadingUris.value - track.uri - targetFile.absolutePath
+                    android.media.MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), null, null)
                     addTrackToLibrary(downloadedTrack)
-                    rescanLibrary()
                     onCompleted?.invoke(file)
                 },
                 onError = { err ->
@@ -3200,12 +3201,6 @@ class AudioEngineController private constructor(private val context: Context) {
                 if (optimalRate != currentOutputSampleRate) {
                     Log.i("AudioEngineController", "Switching DAC sample rate to $optimalRate Hz for bit-perfect playback")
                     reconfigureHardwareOutput(optimalRate, dac.id, exclusive = true)
-                }
-            } else if (dac == null) {
-                val sinkRate = getOptimalNonUsbSampleRate(actualTrack.sampleRate.toInt()).toUInt()
-                if (sinkRate != currentOutputSampleRate) {
-                    Log.i("AudioEngineController", "Matching active Bluetooth/wired sink sample rate: $sinkRate Hz")
-                    reconfigureHardwareOutput(sinkRate, null, exclusive = false)
                 }
             }
 

@@ -3,6 +3,7 @@ package com.audiophile.player.ui.screens
 import com.audiophile.player.engine.ArtworkCache
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -287,7 +288,7 @@ fun VeylCloudHomeScreen(
                     }
 
                     if (section.items.isNotEmpty()) {
-                        Surface(
+                        Row(
                             modifier = Modifier
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -298,30 +299,23 @@ fun VeylCloudHomeScreen(
                                         startShuffled = true
                                     )
                                 }
-                                .clip(RoundedCornerShape(14.dp)),
-                            shape = RoundedCornerShape(14.dp),
-                            color = colors.surfaceElevated,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderSubtle)
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    VeylIcons.Shuffle,
-                                    contentDescription = "Shuffle Section",
-                                    tint = colors.accentSignal,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "Shuffle",
-                                    style = VeylTypography.BodySmall,
-                                    color = colors.textPrimary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 12.sp
-                                )
-                            }
+                            Icon(
+                                VeylIcons.Shuffle,
+                                contentDescription = "Shuffle Section",
+                                tint = colors.accentSignal,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Shuffle",
+                                style = VeylTypography.BodySmall,
+                                color = colors.accentSignal,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
@@ -420,14 +414,19 @@ private fun CloudSongCard(
 
     Column(
         modifier = Modifier
-            .width(148.dp)
+            .width(144.dp)
             .clickable(onClick = onClick)
     ) {
         Box(
             modifier = Modifier
-                .size(148.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(colors.surfaceElevated)
+                .size(144.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.surfacePanel)
+                .border(
+                    width = if (isPlaying) 1.5.dp else 0.8.dp,
+                    color = if (isPlaying) colors.accentSignal else colors.borderHairline.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(12.dp)
+                )
         ) {
             AsyncAlbumArt(
                 uri = song.thumbnailUrl,
@@ -435,34 +434,14 @@ private fun CloudSongCard(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Play indicator badge
-            if (isPlaying) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(colors.accentSignal),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        VeylIcons.Play,
-                        contentDescription = "Playing",
-                        tint = Color.Black,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            }
-
-            // More options button
+            // Minimal options button
             IconButton(
                 onClick = onOpenOptions,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(2.dp)
-                    .size(28.dp)
-                    .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+                    .padding(4.dp)
+                    .size(26.dp)
+                    .background(Color.Black.copy(alpha = 0.45f), CircleShape)
             ) {
                 Icon(
                     VeylIcons.MoreVert,
@@ -477,9 +456,9 @@ private fun CloudSongCard(
 
         Text(
             text = song.title,
-            style = VeylTypography.TitleMedium,
+            style = VeylTypography.BodyMedium,
             color = if (isPlaying) colors.accentSignal else colors.textPrimary,
-            fontWeight = FontWeight.Bold,
+            fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -505,14 +484,19 @@ private fun RecentTrackCard(
 
     Column(
         modifier = Modifier
-            .width(128.dp)
+            .width(144.dp)
             .clickable(onClick = onClick)
     ) {
         Box(
             modifier = Modifier
-                .size(128.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(colors.surfaceElevated)
+                .size(144.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.surfacePanel)
+                .border(
+                    width = if (isPlaying) 1.5.dp else 0.8.dp,
+                    color = if (isPlaying) colors.accentSignal else colors.borderHairline.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(12.dp)
+                )
         ) {
             AsyncAlbumArt(
                 uri = track.uri,
@@ -520,35 +504,15 @@ private fun RecentTrackCard(
                 contentDescription = "${track.title} - ${track.artist}",
                 modifier = Modifier.fillMaxSize()
             )
-
-            if (isPlaying) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(colors.accentSignal),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        VeylIcons.Play,
-                        contentDescription = "Playing",
-                        tint = Color.Black,
-                        modifier = Modifier.size(12.dp)
-                    )
-                }
-            }
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
 
         Text(
             text = track.title,
-            style = VeylTypography.TitleMedium,
-            fontSize = 13.sp,
+            style = VeylTypography.BodyMedium,
             color = if (isPlaying) colors.accentSignal else colors.textPrimary,
-            fontWeight = FontWeight.Bold,
+            fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -557,7 +521,6 @@ private fun RecentTrackCard(
             text = track.artist ?: "Unknown Artist",
             style = VeylTypography.BodySmall,
             color = colors.textMuted,
-            fontSize = 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )

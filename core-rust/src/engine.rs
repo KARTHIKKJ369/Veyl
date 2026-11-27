@@ -379,6 +379,12 @@ impl PlaybackEngine {
                         if let Some(ref mut r) = *resampler.lock() {
                             r.reset();
                         }
+                        if let Some(mut c) = consumer.try_lock() {
+                            let occ = c.occupied_len();
+                            if occ > 0 {
+                                c.skip(occ);
+                            }
+                        }
                     }
 
                     // Check playback state
@@ -536,11 +542,12 @@ impl PlaybackEngine {
                         {
                             let mut next_dec_guard = next_decoder.lock();
                             if let Some(ref mut next_dec) = *next_dec_guard {
-                                let next_info = next_dec.info().clone();
-                                if !next_info.is_dop {
+                                let base_next_info = next_dec.info().clone();
+                                if !base_next_info.is_dop {
                                     while next_residual.len() < processed.len() {
                                         match next_dec.decode_next() {
                                             Ok(mut n_raw) => {
+                                                let next_info = next_dec.info().clone();
                                                 // Apply ReplayGain to incoming crossfade track too
                                                 let (n_db, n_peak) = match rg_mode {
                                                     ReplayGainMode::Off => (None, None),
@@ -587,7 +594,10 @@ impl PlaybackEngine {
                                         }
                                     };
                                     for i in 0..mix_len {
-                                        processed[i] = processed[i] * fade_out + next_residual[i] * fade_in;
+                                        processed[i] = (processed[i] * fade_out + next_residual[i] * fade_in).clamp(-0.99, 0.99);
+                                    }
+                                    for i in mix_len..processed.len() {
+                                        processed[i] *= fade_out;
                                     }
                                     next_residual.drain(..mix_len);
                                 }

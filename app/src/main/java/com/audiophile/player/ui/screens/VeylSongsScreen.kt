@@ -920,7 +920,7 @@ fun VeylSongsScreen(
                             text = "Ascending (A-Z)",
                             style = VeylTypography.BodySmall,
                             fontWeight = if (sortAscending) FontWeight.Bold else FontWeight.Medium,
-                            color = if (sortAscending) Color.White else colors.textMuted
+                            color = if (sortAscending) colors.accentSignal else colors.textMuted
                         )
                     }
 
@@ -941,7 +941,7 @@ fun VeylSongsScreen(
                             text = "Descending (Z-A)",
                             style = VeylTypography.BodySmall,
                             fontWeight = if (!sortAscending) FontWeight.Bold else FontWeight.Medium,
-                            color = if (!sortAscending) Color.White else colors.textMuted
+                            color = if (!sortAscending) colors.accentSignal else colors.textMuted
                         )
                     }
                 }

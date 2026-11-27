@@ -95,7 +95,7 @@ fun VeylActionButton(
     )
 
     val iconTint = when {
-        isPrimary -> Color.Black
+        isPrimary -> if (com.audiophile.player.ui.theme.isColorLight(colors.accentSignal)) Color(0xFF0F0F0F) else Color.White
         accentColor != null -> accentColor
         else -> colors.textPrimary
     }

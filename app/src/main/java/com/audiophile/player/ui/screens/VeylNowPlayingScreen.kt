@@ -290,7 +290,7 @@ fun VeylNowPlayingScreen(
                             hasArtwork = track?.hasArtwork,
                             shape = RoundedCornerShape(20.dp),
                             modifier = Modifier.fillMaxSize(),
-                            targetSizePx = 512
+                            targetSizePx = 1024
                         )
                     }
                 }

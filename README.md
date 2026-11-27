@@ -12,7 +12,7 @@
   [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
   [![Audio Engine](https://img.shields.io/badge/Engine-Bit--Perfect%20AAudio%20MMAP-00E5FF?style=flat-square)](https://developer.android.com/ndk/guides/audio/aaudio/aaudio)
   [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-  [![Download APK](https://img.shields.io/badge/Download-APK%20(v2.6.1)-FFB300?style=flat-square&logo=android&logoColor=black)](https://github.com/KARTHIKKJ369/Veyl/raw/main/veyl-debug.apk)
+  [![Release](https://img.shields.io/badge/Release-v2.9.0-FFB300?style=flat-square&logo=android&logoColor=black)](https://github.com/KARTHIKKJ369/Veyl/releases/latest)
 
   ⭐ If you find Veyl useful, star the repository on GitHub!
 
@@ -40,11 +40,14 @@ Veyl bypasses system audio degradation by coupling a pure **Rust audio decoding 
 
 ### Pure Rust Audio Engine (`audiophile-core`)
 - **Multi-Format Decoding**: Powered by Symphonia with native support for FLAC, ALAC, WAV, AIFF, DSD (DSF/DFF), MP3, AAC, Ogg Vorbis, and Opus.
-- **10-Band Parametric Biquad Equalizer**: Direct Form II Transposed filter bank with real-time transfer function computation and interactive curve plotting.
-- **High-Order Sinc Resampling**: Wrapped Rubato 64-point sinc interpolation with Blackman-Harris windowing for precise sample-rate transitions.
-- **TPDF Dithering**: Triangular Probability Density Function noise decorrelation preventing quantization distortion during bit-depth reduction.
-- **Lock-Free Concurrency**: Dedicated audio rendering thread serviced by atomic ring buffers for zero-drop, zero-glitch playback.
-- **Gapless Pre-Buffering**: Seamless track transitions with background pre-buffering across queue boundaries.
+- **10-Band Parametric Biquad Equalizer**: Direct Form II Transposed filter bank with 0.1 dB precision, per-device EQ profiles, auto-preamp headroom, and interactive `0 dB`-anchored response curve.
+- **High-Order Sinc Resampling & EOF Flush**: Wrapped Rubato 64-point sinc interpolation with Blackman-Harris windowing and full tail flushing for seamless gapless boundaries.
+- **24-bit TPDF Dithering**: Lock-free, real-time safe Triangular Probability Density Function dithering applied only when DSP/volume/resampling modifies the stream (bit-perfect & DoP paths remain untouched).
+- **Equal-Power Crossfade & True Gapless**: Linear, Equal-Power (`-3 dB`), and S-Curve crossfade mixing with background pre-buffering.
+- **WSOLA Pitch-Preserved Time Stretching**: Smooth playback speed control without pitch shifting.
+- **ReplayGain & ITU-R BS.775 Downmix**: Track/Album ReplayGain normalization (including Opus `R128_*_GAIN`) with peak clipping protection, plus proper 5.1/7.1 → stereo downmixing.
+- **CUE Sheet Splitting**: Automatic splitting of monolithic FLAC/WAV/APE/WV disc images paired with `.cue` sheets into individual playable tracks.
+- **Lock-Free Audio Callback**: Zero blocking locks on the real-time AAudio `render_audio` thread, with 4 ms cosine anti-click pause ramps and live AAudio xrun telemetry.
 
 ### Hardware-Direct Android HAL
 - **AAudio MMAP Exclusive Stream**: Direct driver-level routing that circumvents OEM audio processing and mixer resampling.
@@ -58,7 +61,7 @@ Veyl bypasses system audio degradation by coupling a pure **Rust audio decoding 
 - **In-Place Synchronized Lyrics**: Word-level illuminated synchronized lyrics with tap-to-seek and ambient backdrop artwork.
 - **Tactile Color Palettes**: Tailored high-contrast aesthetics including *Monochrome Carbon*, *Braun Dieter Rams*, *Macintosh Lab*, and custom user themes.
 - **Unified Search & Filter**: Instant, non-blocking multi-category search across tracks, artists, and albums with inline library filters and background worker parallelization.
-- **Ultra-Lean Native Footprint**: Optimized native packaging reduced APK size by 48% (14 MB release) while maintaining full 120 FPS UI performance.
+- **Ultra-Lean Native Footprint**: R8 code & resource shrinking (`arm64-v8a`) produces a **6.7 MB** release APK with full 120 FPS UI performance.
 
 ### Universal M3U & M3U8 Playlist Management
 - **M3U / M3U8 File Import**: Import playlists seamlessly from `.m3u8` and `.m3u` files across internal storage, SD cards, and USB drives.

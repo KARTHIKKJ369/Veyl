@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 5 Slim Mastering Equalizer Bars with generous adaptive safe-zone breathing room -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M36.9,43h4.2v26h-4.2z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M44.4,49.5h4.2v19.5h-4.2z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M51.9,55h4.2v14h-4.2z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M59.4,49.5h4.2v19.5h-4.2z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M66.9,43h4.2v26h-4.2z" />
+
+    <!-- Slim Electric Cyan Peak Indicator -->
+    <path
+        android:fillColor="#FF38BDF8"
+        android:pathData="M66.9,38.5h4.2v2.2h-4.2z" />
+</vector>

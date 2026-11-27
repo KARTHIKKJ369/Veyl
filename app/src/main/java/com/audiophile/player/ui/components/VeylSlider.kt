@@ -125,8 +125,9 @@ fun VeylSlider(
             val thumbX = (activeWidth - thumbPxW / 2f).coerceIn(0f, canvasWidth - thumbPxW)
             val thumbY = (canvasHeight - thumbPxH) / 2f
 
+            val thumbColor = if (com.audiophile.player.ui.theme.isColorLight(colors.background)) colors.textPrimary else Color.White
             drawRoundRect(
-                color = Color.White,
+                color = thumbColor,
                 topLeft = Offset(thumbX, thumbY),
                 size = Size(thumbPxW, thumbPxH),
                 cornerRadius = CornerRadius(thumbPxW / 2f, thumbPxW / 2f)
@@ -243,8 +244,9 @@ fun VeylBipolarSlider(
             val thumbX = (thumbCenterX - thumbW / 2f).coerceIn(0f, canvasWidth - thumbW)
             val thumbY = (canvasHeight - thumbH) / 2f
 
+            val thumbColor = if (!enabled) colors.textMuted else if (com.audiophile.player.ui.theme.isColorLight(colors.background)) colors.textPrimary else Color.White
             drawRoundRect(
-                color = if (enabled) Color.White else colors.textMuted,
+                color = thumbColor,
                 topLeft = Offset(thumbX, thumbY),
                 size = Size(thumbW, thumbH),
                 cornerRadius = CornerRadius(thumbW / 2f, thumbW / 2f)

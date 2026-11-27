@@ -681,20 +681,13 @@ fun VeylOnboardingScreen(
                                                     )
                                                 }
 
-                                                Surface(
-                                                    shape = RoundedCornerShape(100.dp),
-                                                    color = colors.accentSignal.copy(alpha = 0.15f),
-                                                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.3f))
-                                                ) {
-                                                    Text(
-                                                        text = "AUTO-DETECTED",
-                                                        style = VeylTypography.MonoBadge,
-                                                        color = colors.accentSignal,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                                    )
-                                                }
+                                                Text(
+                                                    text = "AUTO-DETECTED",
+                                                    style = VeylTypography.MonoBadge,
+                                                    color = colors.accentSignal,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
                                             }
 
                                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

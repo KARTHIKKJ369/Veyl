@@ -3,6 +3,7 @@ package com.audiophile.player.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -105,7 +106,7 @@ fun VeylStreamingTasteDialog(
                     ) {
                         CloudRecommendationService.defaultLanguages.forEach { lang ->
                             val isSelected = tempLangs.contains(lang)
-                            Surface(
+                            Column(
                                 modifier = Modifier
                                     .clickable {
                                         if (isSelected) {
@@ -114,20 +115,21 @@ fun VeylStreamingTasteDialog(
                                             tempLangs.add(lang)
                                         }
                                     }
-                                    .clip(RoundedCornerShape(16.dp)),
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (isSelected) colors.accentSignal.copy(alpha = 0.2f) else colors.surfaceElevated,
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    if (isSelected) colors.accentSignal else colors.borderSubtle
-                                )
+                                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = lang,
-                                    style = VeylTypography.BodySmall,
-                                    color = if (isSelected) colors.accentSignal else colors.textPrimary,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    style = VeylTypography.BodyMedium,
+                                    color = if (isSelected) colors.accentSignal else colors.textMuted,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                                Spacer(Modifier.height(3.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(18.dp)
+                                        .height(2.dp)
+                                        .background(if (isSelected) colors.accentSignal else Color.Transparent)
                                 )
                             }
                         }
@@ -148,34 +150,25 @@ fun VeylStreamingTasteDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         tempArtists.forEach { artistName ->
-                            Surface(
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
-                                    .clickable {
-                                        tempArtists.remove(artistName)
-                                    }
-                                    .clip(RoundedCornerShape(16.dp)),
-                                shape = RoundedCornerShape(16.dp),
-                                color = colors.accentSignal.copy(alpha = 0.2f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal)
+                                    .clickable { tempArtists.remove(artistName) }
+                                    .padding(horizontal = 4.dp, vertical = 5.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        text = artistName,
-                                        style = VeylTypography.BodySmall,
-                                        color = colors.accentSignal,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        text = "✕",
-                                        style = VeylTypography.BodySmall,
-                                        color = colors.accentSignal,
-                                        fontSize = 10.sp
-                                    )
-                                }
+                                Text(
+                                    text = artistName,
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.accentSignal,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = "✕",
+                                    style = VeylTypography.BodySmall,
+                                    color = colors.textMuted,
+                                    fontSize = 10.sp
+                                )
                             }
                         }
                     }

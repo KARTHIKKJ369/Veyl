@@ -308,8 +308,8 @@ object ArtworkCache {
         val mem = memoryCache.get(cacheKey)
         if (mem != null) return mem
 
-        // Persistent Disk Thumbnail Cache lookup (<1ms)
-        val diskFile = getDiskCacheFile(cacheKey)
+        // Persistent Disk Thumbnail Cache lookup (<1ms) — thumbnails only (never compress/store main full-res cover art)
+        val diskFile = if (targetSizePx <= 256) getDiskCacheFile(cacheKey) else null
         if (diskFile != null && diskFile.exists() && diskFile.length() > 0) {
             try {
                 val diskBmp = BitmapFactory.decodeFile(diskFile.absolutePath)
