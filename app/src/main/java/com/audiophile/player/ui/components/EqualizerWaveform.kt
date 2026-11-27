@@ -24,13 +24,15 @@ fun EqualizerWaveform(
         .height(100.dp),
     enabled: Boolean = true,
     color: Color = LocalVeylColors.current.accentSignal,
-    fillColor: Color = color.copy(alpha = 0.25f),
-    strokeWidth: Float = 4f,
-    smoothingTension: Float = 0.22f
+    fillColor: Color = color.copy(alpha = 0.22f),
+    strokeWidth: Float = 5f,
+    smoothingTension: Float = 0.24f
 ) {
-    val contentAlpha = if (enabled) 1f else 0.4f
+    val colors = LocalVeylColors.current
+    val contentAlpha = if (enabled) 1f else 0.35f
     val actualColor = color.copy(alpha = color.alpha * contentAlpha)
     val actualFillColor = fillColor.copy(alpha = fillColor.alpha * contentAlpha)
+    val gridColor = colors.borderHairline.copy(alpha = 0.35f)
 
     val minGain = valueRange.start
     val maxGain = valueRange.endInclusive
@@ -42,17 +44,34 @@ fun EqualizerWaveform(
 
         val width = size.width
         val height = size.height
+        val padY = 6.dp.toPx()
+        val usableH = (height - padY * 2f).coerceAtLeast(1f)
 
-        // Draw baseline (0 dB)
-        if (0f in valueRange) {
-            val baselineY = height - ((0f - minGain) / rangeSize) * height
-            drawLine(
-                color = actualColor.copy(alpha = 0.15f),
-                start = Offset(0f, baselineY),
-                end = Offset(width, baselineY),
-                strokeWidth = 1.5f
-            )
+        fun gainToY(g: Float): Float {
+            val norm = ((g.coerceIn(minGain, maxGain) - minGain) / rangeSize)
+            return padY + (1f - norm) * usableH
         }
+
+        // Subtle horizontal dB reference lines (+6, 0, -6)
+        listOf(6f, -6f).forEach { refDb ->
+            if (refDb in valueRange) {
+                val y = gainToY(refDb)
+                drawLine(
+                    color = gridColor,
+                    start = Offset(0f, y),
+                    end = Offset(width, y),
+                    strokeWidth = 1f
+                )
+            }
+        }
+
+        val baselineY = if (0f in valueRange) gainToY(0f) else height / 2f
+        drawLine(
+            color = colors.textMuted.copy(alpha = 0.28f),
+            start = Offset(0f, baselineY),
+            end = Offset(width, baselineY),
+            strokeWidth = 1.5f
+        )
 
         val points = bands.mapIndexed { index, bandValue ->
             val x = if (bands.size > 1) {
@@ -60,9 +79,14 @@ fun EqualizerWaveform(
             } else {
                 width / 2f
             }
-            val clampedVal = bandValue.coerceIn(minGain, maxGain)
-            val y = height - ((clampedVal - minGain) / rangeSize) * height
-            Offset(x, y)
+            // Subtle vertical octave grid line
+            drawLine(
+                color = gridColor.copy(alpha = 0.22f),
+                start = Offset(x, padY),
+                end = Offset(x, height - padY),
+                strokeWidth = 1f
+            )
+            Offset(x, gainToY(bandValue))
         }
 
         if (points.size >= 2) {
@@ -86,24 +110,24 @@ fun EqualizerWaveform(
                 }
             }
 
+            // Fill relative to 0 dB baseline (boosts up, cuts down)
             val fillPath = Path().apply {
                 addPath(strokePath)
-                lineTo(width, height)
-                lineTo(0f, height)
+                lineTo(points.last().x, baselineY)
+                lineTo(points.first().x, baselineY)
                 close()
             }
 
-            // Gradient Fill under curve
             drawPath(
                 path = fillPath,
                 brush = Brush.verticalGradient(
-                    colors = listOf(actualFillColor, Color.Transparent),
-                    startY = 0f,
-                    endY = height
+                    colors = listOf(actualFillColor, actualFillColor.copy(alpha = 0.04f), actualFillColor),
+                    startY = padY,
+                    endY = height - padY
                 )
             )
 
-            // Smooth Curve Line
+            // Crisp Response Curve Line
             drawPath(
                 path = strokePath,
                 color = actualColor,
@@ -114,16 +138,17 @@ fun EqualizerWaveform(
                 )
             )
 
-            // Smooth Band Node Dots
+            // Minimal Band Node Indicators
+            val dotRadius = 3.dp.toPx()
             points.forEach { point ->
                 drawCircle(
-                    color = actualColor,
-                    radius = strokeWidth * 1.6f,
+                    color = colors.surfacePanel,
+                    radius = dotRadius + 1.5f,
                     center = point
                 )
                 drawCircle(
-                    color = Color.White,
-                    radius = strokeWidth * 0.7f,
+                    color = actualColor,
+                    radius = dotRadius,
                     center = point
                 )
             }
@@ -140,9 +165,9 @@ fun EqualizerWaveform(
         .height(100.dp),
     enabled: Boolean = true,
     color: Color = LocalVeylColors.current.accentSignal,
-    fillColor: Color = color.copy(alpha = 0.25f),
-    strokeWidth: Float = 4f,
-    smoothingTension: Float = 0.22f
+    fillColor: Color = color.copy(alpha = 0.22f),
+    strokeWidth: Float = 5f,
+    smoothingTension: Float = 0.24f
 ) {
     EqualizerWaveform(
         bandsProvider = { bands },
@@ -155,4 +180,3 @@ fun EqualizerWaveform(
         smoothingTension = smoothingTension
     )
 }
-

@@ -82,6 +82,7 @@ object ArtworkCache {
             val dir = File(context.cacheDir, "art_thumbs")
             if (!dir.exists()) dir.mkdirs()
             diskCacheDir = dir
+            pruneOldThumbnails(dir)
         }
         if (artPrefs == null) {
             val prefs = context.getSharedPreferences("veyl_artwork_mapping", Context.MODE_PRIVATE)
@@ -106,6 +107,38 @@ object ArtworkCache {
 
     fun getDiskCacheSizeBytes(): Long {
         return diskCacheDir?.listFiles()?.sumOf { it.length() } ?: 0L
+    }
+
+    /**
+     * Enforces a 30-day lifespan and 20 MB cap on cached artwork thumbnails.
+     */
+    private fun pruneOldThumbnails(dir: File) {
+        Thread {
+            try {
+                val files = dir.listFiles()?.filter { it.isFile } ?: return@Thread
+                val now = System.currentTimeMillis()
+                val maxAgeMs = 30L * 24L * 60L * 60L * 1000L
+                val maxTotalBytes = 20L * 1024L * 1024L
+
+                val surviving = mutableListOf<File>()
+                var totalBytes = 0L
+                for (f in files) {
+                    if (now - f.lastModified() > maxAgeMs) {
+                        f.delete()
+                    } else {
+                        surviving.add(f)
+                        totalBytes += f.length()
+                    }
+                }
+                if (totalBytes > maxTotalBytes) {
+                    for (f in surviving.sortedBy { it.lastModified() }) {
+                        if (totalBytes <= maxTotalBytes) break
+                        val len = f.length()
+                        if (f.delete()) totalBytes -= len
+                    }
+                }
+            } catch (_: Exception) {}
+        }.start()
     }
 
     fun invalidateTrackArtwork(vararg uris: String) {

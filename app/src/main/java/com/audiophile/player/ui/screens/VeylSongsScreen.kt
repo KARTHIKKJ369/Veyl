@@ -1170,6 +1170,7 @@ private fun SongCompactRow(
 
         Box(
             modifier = Modifier
+                .padding(end = 10.dp)
                 .size(32.dp)
                 .clip(CircleShape)
                 .clickable { onOptions(track) },

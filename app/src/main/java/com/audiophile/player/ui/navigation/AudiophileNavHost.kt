@@ -93,6 +93,7 @@ fun AudiophileNavHost(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVeylColors.current
+        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination
@@ -133,12 +134,22 @@ fun AudiophileNavHost(
             VeylScreen.Settings
         )
 
+        val hideBottomBarRoutes = setOf(
+            VeylScreen.Queue.route,
+            VeylScreen.Equalizer.route,
+            VeylScreen.Search.route,
+            VeylScreen.TopTracks.route,
+            VeylScreen.LastAdded.route,
+            VeylScreen.History.route
+        )
+        val showBottomBar = currentDestination?.route !in hideBottomBarRoutes
+
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 containerColor = colors.background,
                 contentColor = colors.textPrimary,
                 bottomBar = {
-                    Column(
+                    if (showBottomBar) Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(colors.surfacePanel)
@@ -188,6 +199,7 @@ fun AudiophileNavHost(
                                     },
                                     selected = isSelected,
                                     onClick = {
+                                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                                         if (currentDestination?.route != screen.route) {
                                             navController.navigate(screen.route) {
                                                 launchSingleTop = true
@@ -475,23 +487,27 @@ fun AudiophileNavHost(
             )
         }
 
-        playerContextSheet?.let { sheet ->
-            ModalBottomSheet(
-                onDismissRequest = { playerContextSheet = null },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = colors.background,
-                contentColor = colors.textPrimary
-            ) {
-                when (sheet) {
-                    PlayerContextSheet.QUEUE -> VeylQueueScreen(
-                        controller = controller,
-                        onNavigateBack = { playerContextSheet = null }
-                    )
-                    PlayerContextSheet.EQUALIZER -> VeylEqualizerScreen(
-                        controller = controller,
-                        onNavigateBack = { playerContextSheet = null }
-                    )
-                }
+        AnimatedVisibility(
+            visible = playerContextSheet != null,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = tween(220, easing = FastOutSlowInEasing)
+            ),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = tween(180, easing = FastOutLinearInEasing)
+            )
+        ) {
+            when (playerContextSheet) {
+                PlayerContextSheet.QUEUE -> VeylQueueScreen(
+                    controller = controller,
+                    onNavigateBack = { playerContextSheet = null }
+                )
+                PlayerContextSheet.EQUALIZER -> VeylEqualizerScreen(
+                    controller = controller,
+                    onNavigateBack = { playerContextSheet = null }
+                )
+                null -> Unit
             }
         }
 }

@@ -27,6 +27,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -316,9 +318,16 @@ private fun SettingsSection(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun SettingsRow(title: String, subtitle: String, onClick: () -> Unit, trailing: @Composable () -> Unit) {
     val colors = LocalVeylColors.current
+    val haptic = LocalHapticFeedback.current
     Column {
         Row(
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 13.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                }
+                .padding(vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
@@ -335,10 +344,14 @@ private fun SettingsRow(title: String, subtitle: String, onClick: () -> Unit, tr
 @Composable
 private fun SettingsSwitch(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     val colors = LocalVeylColors.current
+    val haptic = LocalHapticFeedback.current
     SettingsRow(title, subtitle, onClick = { onCheckedChange(!checked) }) {
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onCheckedChange(it)
+            },
             colors = SwitchDefaults.colors(checkedThumbColor = colors.background, checkedTrackColor = colors.accentSignal)
         )
     }

@@ -134,3 +134,121 @@ fun VeylSlider(
         }
     }
 }
+
+/**
+ * Center-zero bipolar precision slider for EQ bands (-12..+12 dB) and Channel Balance (-1..+1).
+ * Fills outward from the center 0-line and matches VeylSlider's minimal hardware aesthetic.
+ */
+@Composable
+fun VeylBipolarSlider(
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    activeColor: Color? = null,
+    inactiveColor: Color? = null
+) {
+    val colors = LocalVeylColors.current
+    val effectiveActive = (activeColor ?: colors.accentSignal).let {
+        if (enabled) it else colors.textMuted.copy(alpha = 0.45f)
+    }
+    val effectiveInactive = inactiveColor ?: colors.surfaceElevated
+
+    val minVal = valueRange.start
+    val maxVal = valueRange.endInclusive
+    val span = (maxVal - minVal).coerceAtLeast(0.001f)
+    val zeroFraction = ((0f - minVal) / span).coerceIn(0f, 1f)
+    val safeFraction = ((value.coerceIn(minVal, maxVal) - minVal) / span).coerceIn(0f, 1f)
+
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableFloatStateOf(safeFraction) }
+
+    val currentFraction = if (isDragging) dragFraction else safeFraction
+
+    val animatedHeight by animateDpAsState(
+        targetValue = if (isDragging) 6.dp else 4.dp,
+        animationSpec = tween(110),
+        label = "bipolarTrackHeight"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(30.dp)
+            .pointerInput(enabled, minVal, maxVal) {
+                if (!enabled) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    val w = size.width.toFloat()
+                    if (w > 0f) {
+                        isDragging = true
+                        dragFraction = (down.position.x / w).coerceIn(0f, 1f)
+                        onValueChange(minVal + dragFraction * span)
+                    }
+
+                    val pointerId = down.id
+                    drag(pointerId) { change ->
+                        if (w > 0f) {
+                            change.consume()
+                            dragFraction = (change.position.x / w).coerceIn(0f, 1f)
+                            onValueChange(minVal + dragFraction * span)
+                        }
+                    }
+
+                    isDragging = false
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxWidth().height(animatedHeight)) {
+            val canvasWidth = size.width
+            val canvasHeight = size.height
+            val cornerRadius = CornerRadius(canvasHeight / 2f, canvasHeight / 2f)
+
+            // 1. Track Background
+            drawRoundRect(
+                color = effectiveInactive,
+                topLeft = Offset(0f, 0f),
+                size = Size(canvasWidth, canvasHeight),
+                cornerRadius = cornerRadius
+            )
+
+            // 2. Center 0-line tick
+            val zeroX = canvasWidth * zeroFraction
+            drawLine(
+                color = colors.textMuted.copy(alpha = 0.45f),
+                start = Offset(zeroX, -3.dp.toPx()),
+                end = Offset(zeroX, canvasHeight + 3.dp.toPx()),
+                strokeWidth = 1.5.dp.toPx()
+            )
+
+            // 3. Bipolar Fill from center zeroX to thumbX
+            val thumbCenterX = (canvasWidth * currentFraction).coerceIn(0f, canvasWidth)
+            val fillLeft = minOf(zeroX, thumbCenterX)
+            val fillWidth = kotlin.math.abs(thumbCenterX - zeroX)
+            if (fillWidth > 1f) {
+                drawRoundRect(
+                    color = effectiveActive,
+                    topLeft = Offset(fillLeft, 0f),
+                    size = Size(fillWidth, canvasHeight),
+                    cornerRadius = cornerRadius
+                )
+            }
+
+            // 4. Precision Thumb Bar
+            val thumbW = 4.dp.toPx()
+            val thumbH = if (isDragging) 18.dp.toPx() else 14.dp.toPx()
+            val thumbX = (thumbCenterX - thumbW / 2f).coerceIn(0f, canvasWidth - thumbW)
+            val thumbY = (canvasHeight - thumbH) / 2f
+
+            drawRoundRect(
+                color = if (enabled) Color.White else colors.textMuted,
+                topLeft = Offset(thumbX, thumbY),
+                size = Size(thumbW, thumbH),
+                cornerRadius = CornerRadius(thumbW / 2f, thumbW / 2f)
+            )
+        }
+    }
+}

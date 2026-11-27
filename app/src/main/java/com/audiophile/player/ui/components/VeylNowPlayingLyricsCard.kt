@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import kotlin.math.roundToInt
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -348,30 +349,41 @@ fun VeylNowPlayingLyricsCard(
                 }
             }
 
-            // Top Header Inside Card: Minimal Provider selector + Roman + Expand + Cover controls
+            // Top Header Inside Card: Minimal icon-only controls (Provider, Expand, Cover)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
                     .align(Alignment.TopCenter),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box {
-                    Text(
-                        text = if (isLoadingLyrics) "LOADING…" else lyricsProvider.label.uppercase(),
-                        style = VeylTypography.MonoBadge,
-                        color = colors.accentSignal,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
+                    Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .size(28.dp)
+                            .clip(CircleShape)
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 showProviderMenu = true
-                            }
-                            .padding(horizontal = 4.dp, vertical = 3.dp)
-                    )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isLoadingLyrics) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 1.5.dp,
+                                color = colors.accentSignal
+                            )
+                        } else {
+                            Icon(
+                                imageVector = VeylIcons.Lyrics,
+                                contentDescription = "Lyrics provider: ${lyricsProvider.label}",
+                                tint = colors.accentSignal.copy(alpha = 0.85f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
                     DropdownMenu(
                         expanded = showProviderMenu,
                         onDismissRequest = { showProviderMenu = false },
@@ -389,6 +401,7 @@ fun VeylNowPlayingLyricsCard(
                                     )
                                 },
                                 onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     showProviderMenu = false
                                     controller.setLyricsProvider(provider)
                                 }
@@ -399,39 +412,45 @@ fun VeylNowPlayingLyricsCard(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     if (onExpandFullscreen != null) {
-                        Text(
-                            text = "Expand",
-                            style = VeylTypography.BodySmall,
-                            color = colors.textSecondary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 11.5.sp,
+                        Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
+                                .size(28.dp)
+                                .clip(CircleShape)
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onExpandFullscreen()
-                                }
-                                .padding(horizontal = 6.dp, vertical = 3.dp)
-                        )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = VeylIcons.ChevronUp,
+                                contentDescription = "Expand lyrics",
+                                tint = colors.textSecondary,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
                     }
 
-                    Text(
-                        text = "Cover",
-                        style = VeylTypography.BodySmall,
-                        color = colors.textPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 11.5.sp,
+                    Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .size(28.dp)
+                            .clip(CircleShape)
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onSwitchToCover()
-                            }
-                            .padding(horizontal = 6.dp, vertical = 3.dp)
-                    )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = VeylIcons.Disc,
+                            contentDescription = "Show cover art",
+                            tint = colors.textSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         }

@@ -418,8 +418,8 @@ fun VeylAlphabetFastScroller(
 
     Box(
         modifier = modifier
-            .padding(end = 6.dp, top = 12.dp, bottom = 96.dp)
-            .width(34.dp)
+            .padding(end = 2.dp, top = 12.dp, bottom = 96.dp)
+            .width(16.dp)
             .height(456.dp)
             .onSizeChanged { railHeightPx = it.height.coerceAtLeast(1) }
             .pointerInput(Unit) {

@@ -82,6 +82,10 @@ fun VeylQueueScreen(
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
 
+    androidx.activity.compose.BackHandler {
+        onNavigateBack()
+    }
+
     val status by controller.status.collectAsState()
     val positionSec by controller.currentPositionSec.collectAsState()
     val queue by controller.queue.collectAsState()

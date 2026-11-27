@@ -1,6 +1,7 @@
 package com.audiophile.player.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,8 +24,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -166,7 +169,14 @@ fun VeylHomeRedesigned(
                             key = { index, track -> "${track.uri}_$index" },
                             contentType = { _, _ -> "continue_tile" }
                         ) { _, track ->
-                            AlbumTile(track = track, onClick = { controller.playTrack(track) })
+                            AlbumTile(
+                                track = track,
+                                isCurrent = track.uri == currentTrack?.uri,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    controller.playTrack(track)
+                                }
+                            )
                         }
                     }
                 }
@@ -185,7 +195,14 @@ fun VeylHomeRedesigned(
                         key = { index, track -> "${track.uri}_$index" },
                         contentType = { _, _ -> "recent_tile" }
                     ) { _, track ->
-                        AlbumTile(track = track, onClick = { controller.playTrack(track) })
+                        AlbumTile(
+                            track = track,
+                            isCurrent = track.uri == currentTrack?.uri,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                controller.playTrack(track)
+                            }
+                        )
                     }
                 }
             }
@@ -267,13 +284,46 @@ private fun SectionHeader(
 }
 
 @Composable
-private fun AlbumTile(track: TrackInfo, onClick: () -> Unit) {
+private fun AlbumTile(track: TrackInfo, isCurrent: Boolean = false, onClick: () -> Unit) {
     val colors = LocalVeylColors.current
-    Column(modifier = Modifier.width(142.dp).clickable(onClick = onClick)) {
-        AsyncAlbumArt(uri = track.uri, hasArtwork = track.hasArtwork, modifier = Modifier.size(142.dp).clip(RoundedCornerShape(14.dp)))
-        Spacer(Modifier.height(9.dp))
-        Text(track.title, style = VeylTypography.BodyMedium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(track.artist ?: "Unknown artist", style = VeylTypography.BodySmall, color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Column(
+        modifier = Modifier
+            .width(144.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(144.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.surfacePanel)
+                .border(
+                    width = if (isCurrent) 1.5.dp else 0.8.dp,
+                    color = if (isCurrent) colors.accentSignal else colors.borderHairline.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(12.dp)
+                )
+        ) {
+            AsyncAlbumArt(
+                uri = track.uri,
+                hasArtwork = track.hasArtwork,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = track.title,
+            style = VeylTypography.BodyMedium,
+            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
+            color = if (isCurrent) colors.accentSignal else colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = track.artist ?: "Unknown artist",
+            style = VeylTypography.BodySmall,
+            color = colors.textMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
