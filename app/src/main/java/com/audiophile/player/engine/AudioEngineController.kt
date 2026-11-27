@@ -291,6 +291,17 @@ class AudioEngineController private constructor(private val context: Context) {
     private val _lyricOffsetMs = MutableStateFlow(prefs.getLong("lyric_offset_ms", 0L))
     val lyricOffsetMs: StateFlow<Long> = _lyricOffsetMs.asStateFlow()
 
+    private val _lyricsProvider = MutableStateFlow(
+        LyricsProvider.fromId(prefs.getString("lyrics_provider", LyricsProvider.AUTO.id))
+    )
+    val lyricsProvider: StateFlow<LyricsProvider> = _lyricsProvider.asStateFlow()
+
+    private val _romanizeLyrics = MutableStateFlow(prefs.getBoolean("romanize_lyrics", false))
+    val romanizeLyrics: StateFlow<Boolean> = _romanizeLyrics.asStateFlow()
+
+    private val _isLoadingLyrics = MutableStateFlow(false)
+    val isLoadingLyrics: StateFlow<Boolean> = _isLoadingLyrics.asStateFlow()
+
     // Online Streaming Engine
     val onlineStreamManager = OnlineStreamManager(context)
     private val _isOnlineStreaming = MutableStateFlow(false)
@@ -851,16 +862,22 @@ class AudioEngineController private constructor(private val context: Context) {
                             val curTrack = currentStatus.currentTrack
                             recordTrackPlayed(currentUri, curTrack)
 
-                            // Load lyrics asynchronously on track change (with online LRCLIB fallback)
+                            // Load lyrics asynchronously on track change across configured provider(s)
                             scope.launch {
-                                val lyrics = LyricsManager.loadLyricsForTrack(
-                                    trackUri = currentUri,
-                                    title = curTrack?.title,
-                                    artist = curTrack?.artist,
-                                    album = curTrack?.album,
-                                    durationSeconds = curTrack?.durationSeconds ?: 0.0,
-                                    allowOnlineFetch = _autoFetchLyrics.value
-                                )
+                                _isLoadingLyrics.value = true
+                                val lyrics = try {
+                                    LyricsManager.loadLyricsForTrack(
+                                        trackUri = currentUri,
+                                        title = curTrack?.title,
+                                        artist = curTrack?.artist,
+                                        album = curTrack?.album,
+                                        durationSeconds = curTrack?.durationSeconds ?: 0.0,
+                                        allowOnlineFetch = _autoFetchLyrics.value,
+                                        preferredProvider = _lyricsProvider.value
+                                    )
+                                } finally {
+                                    _isLoadingLyrics.value = false
+                                }
                                 if (_status.value?.currentTrack?.uri == currentUri) {
                                     _currentLyrics.value = lyrics
                                 }
@@ -1417,15 +1434,60 @@ class AudioEngineController private constructor(private val context: Context) {
             }
             _topTracks.value = tracks.sortedByDescending { playCountPrefs.getInt(it.uri, 0) }.take(50)
             _lastAddedTracks.value = tracks.sortedByDescending { File(it.uri).lastModified() }.take(50)
-            _artistGroups.value = tracks
-                .groupBy { it.artist?.takeIf(String::isNotBlank) ?: "Unknown Artist" }
-                .map { (artist, artistTracks) ->
-                    Triple(artist, artistTracks, artistTracks.mapNotNull { it.album?.takeIf(String::isNotBlank) }.distinct().size.coerceAtLeast(1))
+
+            // Group Artists properly: split featured/collaborating artists so every track by an artist stays grouped together
+            val artistMap = linkedMapOf<String, Pair<String, MutableList<TrackInfo>>>()
+            val artistSplitter = Regex("\\s*(?:,|;|&|\\bfeat\\.?\\b|\\bft\\.?\\b)\\s*", RegexOption.IGNORE_CASE)
+            for (track in tracks) {
+                val rawArtist = track.artist?.takeIf(String::isNotBlank) ?: "Unknown Artist"
+                val parts = if (rawArtist == "Unknown Artist") {
+                    listOf(rawArtist)
+                } else {
+                    rawArtist.split(artistSplitter).map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { listOf(rawArtist) }
+                }
+                for (name in parts.distinctBy { it.lowercase() }) {
+                    val key = name.lowercase()
+                    val existing = artistMap[key]
+                    if (existing == null) {
+                        artistMap[key] = name to mutableListOf(track)
+                    } else {
+                        existing.second.add(track)
+                    }
+                }
+            }
+            _artistGroups.value = artistMap.values
+                .map { (displayName, artistTracks) ->
+                    val distinctTracks = artistTracks.distinctBy { it.uri }
+                    val albumCount = distinctTracks.mapNotNull { it.album?.trim()?.takeIf(String::isNotBlank)?.lowercase() }.distinct().size.coerceAtLeast(1)
+                    Triple(displayName, distinctTracks.sortedBy { it.title.trim().lowercase() }, albumCount)
                 }
                 .sortedBy { it.first.lowercase() }
-            _albumGroups.value = tracks
-                .groupBy { (it.album?.takeIf(String::isNotBlank) ?: "Unknown Album") to (it.artist?.takeIf(String::isNotBlank) ?: "Unknown Artist") }
-                .map { (key, albumTracks) -> Triple(key.first, key.second, albumTracks.sortedBy { it.trackNumber ?: 0u }) }
+
+            // Group Albums strictly by normalized Album Name (not Album+TrackArtist, which splits multi-singer albums!)
+            val albumMap = linkedMapOf<String, Pair<String, MutableList<TrackInfo>>>()
+            for (track in tracks) {
+                val rawAlbum = track.album?.trim()?.takeIf(String::isNotBlank) ?: "Unknown Album"
+                val key = rawAlbum.lowercase()
+                val existing = albumMap[key]
+                if (existing == null) {
+                    albumMap[key] = rawAlbum to mutableListOf(track)
+                } else {
+                    existing.second.add(track)
+                }
+            }
+            _albumGroups.value = albumMap.values
+                .map { (displayAlbum, albumTracks) ->
+                    val albumArtistName = albumTracks.firstNotNullOfOrNull { it.albumArtist?.trim()?.takeIf(String::isNotBlank) }
+                        ?: run {
+                            val primaryArtists = albumTracks.mapNotNull { it.artist?.trim()?.takeIf(String::isNotBlank) }.distinctBy { it.lowercase() }
+                            when {
+                                primaryArtists.isEmpty() -> "Unknown Artist"
+                                primaryArtists.size == 1 -> primaryArtists.first()
+                                else -> "${primaryArtists.first()} & more"
+                            }
+                        }
+                    Triple(displayAlbum, albumArtistName, albumTracks.sortedWith(compareBy<TrackInfo> { it.discNumber ?: 0u }.thenBy { it.trackNumber ?: 0u }.thenBy { it.title.trim().lowercase() }))
+                }
                 .sortedBy { it.first.lowercase() }
         }
     }
@@ -3592,19 +3654,40 @@ class AudioEngineController private constructor(private val context: Context) {
         prefs.edit().putBoolean("auto_fetch_lyrics", enabled).apply()
     }
 
-    fun reloadLyrics(allowOnline: Boolean = true) {
+    fun reloadLyrics(allowOnline: Boolean = true, forceRefresh: Boolean = false) {
         val current = _status.value?.currentTrack ?: return
         scope.launch {
-            val lyrics = LyricsManager.loadLyricsForTrack(
-                trackUri = current.uri,
-                title = current.title,
-                artist = current.artist,
-                album = current.album,
-                durationSeconds = current.durationSeconds,
-                allowOnlineFetch = allowOnline
-            )
-            _currentLyrics.value = lyrics
+            _isLoadingLyrics.value = true
+            val lyrics = try {
+                LyricsManager.loadLyricsForTrack(
+                    trackUri = current.uri,
+                    title = current.title,
+                    artist = current.artist,
+                    album = current.album,
+                    durationSeconds = current.durationSeconds,
+                    allowOnlineFetch = allowOnline,
+                    preferredProvider = _lyricsProvider.value,
+                    forceRefresh = forceRefresh
+                )
+            } finally {
+                _isLoadingLyrics.value = false
+            }
+            if (_status.value?.currentTrack?.uri == current.uri) {
+                _currentLyrics.value = lyrics
+            }
         }
+    }
+
+    fun setLyricsProvider(provider: LyricsProvider) {
+        _lyricsProvider.value = provider
+        prefs.edit().putString("lyrics_provider", provider.id).apply()
+        reloadLyrics(allowOnline = true, forceRefresh = true)
+    }
+
+    fun toggleRomanizeLyrics() {
+        val next = !_romanizeLyrics.value
+        _romanizeLyrics.value = next
+        prefs.edit().putBoolean("romanize_lyrics", next).apply()
     }
 
     fun setGaplessEnabled(enabled: Boolean) {

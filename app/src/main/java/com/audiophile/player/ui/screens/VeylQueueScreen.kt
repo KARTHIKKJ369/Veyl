@@ -1,6 +1,7 @@
 package com.audiophile.player.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import com.audiophile.player.ui.components.VeylListRow
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -28,9 +29,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import com.audiophile.player.ui.components.VeylActionButton
+import com.audiophile.player.ui.components.VeylPlayingBars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -130,7 +134,7 @@ fun VeylQueueScreen(
                 .padding(horizontal = VeylSpacing.md),
             verticalArrangement = Arrangement.spacedBy(VeylSpacing.md)
         ) {
-            // 1. Header Bar: Back, Sequence Title, Quick Control Cluster
+            // 1. Header Bar: Clean borderless navigation & action controls matching Playlists/Library
             item {
                 Spacer(modifier = Modifier.height(VeylSpacing.sm))
                 Row(
@@ -140,131 +144,88 @@ fun VeylQueueScreen(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(VeylSpacing.sm)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        IconButton(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onNavigateBack()
-                            },
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(colors.glassButtonBg)
-                                .border(1.dp, colors.borderHairline, CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.ArrowBack,
-                                contentDescription = "Back to player",
-                                tint = colors.textPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                        VeylActionButton(
+                            icon = VeylIcons.ChevronLeft,
+                            contentDescription = "Back to player",
+                            onClick = onNavigateBack,
+                            iconSizeDp = 22
+                        )
 
                         Column {
                             Text(
-                                text = "PLAYBACK QUEUE",
+                                text = "QUEUE",
                                 style = VeylTypography.MonoBadge,
                                 color = colors.accentSignal
                             )
                             Text(
                                 text = "Now Playing & Queue",
-                                style = VeylTypography.DisplayMedium,
-                                color = colors.textPrimary
+                                style = VeylTypography.TitleLarge,
+                                color = colors.textPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 22.sp
                             )
                         }
                     }
 
-                    // Action Icons (Clear Queue & Shuffle Toggle)
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(VeylSpacing.xs),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (queue.isNotEmpty()) {
-                            IconButton(
+                            VeylActionButton(
+                                icon = VeylIcons.Trash,
+                                contentDescription = "Clear queue",
+                                accentColor = colors.textSecondary,
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     controller.clearQueue()
-                                },
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.glassButtonBg)
-                                    .border(1.dp, colors.borderHairline, CircleShape)
-                            ) {
-                                Icon(
-                                    imageVector = VeylIcons.Trash,
-                                    contentDescription = "Clear queue",
-                                    tint = colors.textSecondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                                }
+                            )
                         }
 
-                        IconButton(
+                        VeylActionButton(
+                            icon = VeylIcons.Shuffle,
+                            contentDescription = if (isShuffle) "Shuffle active" else "Shuffle disabled",
+                            accentColor = if (isShuffle) colors.accentSignal else colors.textSecondary,
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 controller.toggleShuffle()
-                            },
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(if (isShuffle) colors.surfaceElevated else colors.glassButtonBg)
-                                .border(
-                                    1.dp,
-                                    if (isShuffle) colors.borderActive else colors.borderHairline,
-                                    CircleShape
-                                )
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.Shuffle,
-                                contentDescription = if (isShuffle) "Shuffle active" else "Shuffle disabled",
-                                tint = if (isShuffle) colors.accentSignal else colors.textSecondary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                            }
+                        )
                     }
                 }
             }
 
-            // 2. Queue Telemetry Summary Banner (Peak-End Progress Affirmation)
+            // 2. Clean Flat Queue Telemetry Line (No pill/bordered box clutter)
             item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .background(colors.surfacePanel)
-                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
-                        .padding(horizontal = VeylSpacing.md, vertical = VeylSpacing.sm)
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(VeylSpacing.xs)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isPlaying) colors.accentSignal else colors.textMuted)
-                            )
-                            Text(
-                                text = "${queue.size} TRACKS QUEUED",
-                                style = VeylTypography.MonoBadge,
-                                color = colors.textPrimary
-                            )
-                        }
+                        Text(
+                            text = "${queue.size} tracks queued",
+                            style = VeylTypography.BodySmall,
+                            color = colors.textMuted,
+                            fontSize = 12.sp
+                        )
 
                         Text(
-                            text = "$formattedRemainingTime REMAINING",
+                            text = "$formattedRemainingTime remaining",
                             style = VeylTypography.MonoSpec,
-                            color = colors.accentSignal
+                            color = colors.accentSignal,
+                            fontSize = 11.5.sp
                         )
                     }
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = colors.borderHairline.copy(alpha = 0.5f)
+                    )
                 }
             }
 
@@ -439,9 +400,9 @@ private fun ActiveTrackQueueCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(VeylSpacing.RadiusLg))
-            .background(colors.surfaceElevated)
-            .border(1.5.dp, colors.accentSignal, RoundedCornerShape(VeylSpacing.RadiusLg))
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.surfaceElevated.copy(alpha = 0.72f))
+            .border(0.5.dp, colors.borderHairline, RoundedCornerShape(14.dp))
             .clickable(onClick = onTogglePlayPause)
             .padding(VeylSpacing.md)
             .semantics {
@@ -457,33 +418,32 @@ private fun ActiveTrackQueueCard(
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                        .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusSm)),
+                        .clip(RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     AsyncAlbumArt(
                         uri = track.uri,
                         modifier = Modifier.fillMaxSize(),
-                        shape = RoundedCornerShape(VeylSpacing.RadiusSm)
+                        shape = RoundedCornerShape(10.dp)
                     )
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(colors.background.copy(alpha = 0.4f)),
+                            .background(colors.background.copy(alpha = 0.35f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (isPlaying) VeylIcons.Pause else VeylIcons.Play,
                             contentDescription = null,
                             tint = colors.accentSignal,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.width(VeylSpacing.md))
 
-                // Title + Artist + Badge
+                // Title + Artist + Clean Telemetry Text (no bordered/colored pill box)
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -506,26 +466,19 @@ private fun ActiveTrackQueueCard(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(colors.accentSignal.copy(alpha = 0.2f))
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = formatBadge,
-                                style = VeylTypography.MonoBadge,
-                                color = colors.accentSignal,
-                                fontSize = 9.sp
-                            )
-                        }
+                        Text(
+                            text = formatBadge,
+                            style = VeylTypography.MonoBadge,
+                            color = colors.textMuted,
+                            fontSize = 10.sp
+                        )
 
-                        // Equalizer animation bars
-                        if (isPlaying) {
-                            QueueLivePulseEqualizer()
-                        }
+                        VeylPlayingBars(
+                            color = colors.accentSignal,
+                            isAnimating = isPlaying
+                        )
                     }
                 }
             }
@@ -598,9 +551,14 @@ private fun QueueTrackRow(
         "%d:%02d".format(m, s)
     }
 
-    Row(
+    VeylListRow(
+        title = track.title,
+        subtitle = "${track.artist ?: "Unknown Artist"} • $formatBadge",
+        isPlaying = isDragging || isCurrent,
+        isAnimating = isPlaying,
+        trailingText = durationFormatted,
+        onClick = onPlay,
         modifier = Modifier
-            .fillMaxWidth()
             .zIndex(if (isDragging) 10f else 1f)
             .graphicsLayer {
                 translationY = if (isDragging) dragOffsetY else 0f
@@ -608,170 +566,50 @@ private fun QueueTrackRow(
                 scaleY = if (isDragging) 1.02f else 1f
                 shadowElevation = if (isDragging) 24f else 0f
             }
-            .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-            .background(if (isDragging) colors.surfaceElevated else if (isCurrent) colors.surfaceElevated else colors.surfacePanel.copy(alpha = 0.6f))
-            .border(
-                1.dp,
-                if (isDragging || isCurrent) colors.borderActive else colors.borderHairline,
-                RoundedCornerShape(VeylSpacing.RadiusMd)
-            )
-            .clickable(onClick = onPlay)
-            .padding(horizontal = VeylSpacing.md, vertical = VeylSpacing.sm)
             .semantics {
                 contentDescription = "Queue item $index: ${track.title}, Artist: ${track.artist ?: "Unknown"}, $durationFormatted"
             },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Monospace index (e.g. 01, 02)
-        Text(
-            text = "%02d".format(index),
-            style = VeylTypography.MonoSpec,
-            color = if (isDragging || isCurrent) colors.accentSignal else colors.textMuted,
-            modifier = Modifier.width(24.dp)
-        )
-
-        Spacer(modifier = Modifier.width(VeylSpacing.xs))
-
-        // Squircle Thumbnail Art
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                .border(
-                    1.dp,
-                    if (isDragging || isCurrent) colors.accentSignal else colors.borderHairline,
-                    RoundedCornerShape(VeylSpacing.RadiusSm)
-                )
-        ) {
-            AsyncAlbumArt(
-                uri = track.uri,
-                hasArtwork = track.hasArtwork,
-                modifier = Modifier.fillMaxSize(),
-                shape = RoundedCornerShape(VeylSpacing.RadiusSm)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(VeylSpacing.sm))
-
-        // Title + Artist + Format
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
+        leadingContent = {
             Text(
-                text = track.title,
-                style = VeylTypography.TitleMedium,
-                color = if (isDragging || isCurrent) colors.accentSignal else colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                text = "%02d".format(index),
+                style = VeylTypography.MonoSpec,
+                color = if (isDragging || isCurrent) colors.accentSignal else colors.textMuted,
+                modifier = Modifier.width(28.dp)
             )
-
+        },
+        trailingContent = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Text(
-                    text = track.artist ?: "Unknown Artist",
-                    style = VeylTypography.BodySmall,
-                    color = colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-
-                Text(
-                    text = "• $formatBadge",
-                    style = VeylTypography.MonoSpec,
-                    color = colors.textMuted,
-                    fontSize = 10.sp
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(VeylSpacing.xs))
-
-        // Duration
-        Text(
-            text = durationFormatted,
-            style = VeylTypography.MonoSpec,
-            color = colors.textMuted
-        )
-
-        Spacer(modifier = Modifier.width(VeylSpacing.xs))
-
-        // Reorder & Remove Actions
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            IconButton(
-                onClick = onRemove,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = VeylIcons.Trash,
-                    contentDescription = "Remove from queue",
-                    tint = colors.textMuted,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                    .background(if (isDragging) colors.surfaceElevated else colors.glassButtonBg)
-                    .border(
-                        1.dp,
-                        if (isDragging) colors.borderActive else colors.borderHairline,
-                        RoundedCornerShape(VeylSpacing.RadiusSm)
+                IconButton(
+                    onClick = onRemove,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.Trash,
+                        contentDescription = "Remove from queue",
+                        tint = colors.textMuted,
+                        modifier = Modifier.size(16.dp)
                     )
-                    .then(dragHandleModifier)
-                    .padding(6.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = VeylIcons.DragHandle,
-                    contentDescription = "Drag to reorder",
-                    tint = if (isDragging) colors.accentSignal else colors.textSecondary,
-                    modifier = Modifier.size(20.dp)
-                )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
+                        .then(dragHandleModifier)
+                        .padding(6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.DragHandle,
+                        contentDescription = "Drag to reorder",
+                        tint = if (isDragging) colors.accentSignal else colors.textSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun QueueLivePulseEqualizer() {
-    val colors = LocalVeylColors.current
-    val infiniteTransition = rememberInfiniteTransition(label = "queue_eq")
-
-    val h1 by infiniteTransition.animateFloat(
-        initialValue = 4f,
-        targetValue = 12f,
-        animationSpec = infiniteRepeatable(tween(400), RepeatMode.Reverse),
-        label = "h1"
     )
-    val h2 by infiniteTransition.animateFloat(
-        initialValue = 12f,
-        targetValue = 6f,
-        animationSpec = infiniteRepeatable(tween(350), RepeatMode.Reverse),
-        label = "h2"
-    )
-    val h3 by infiniteTransition.animateFloat(
-        initialValue = 6f,
-        targetValue = 14f,
-        animationSpec = infiniteRepeatable(tween(500), RepeatMode.Reverse),
-        label = "h3"
-    )
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.Bottom,
-        modifier = Modifier.height(14.dp)
-    ) {
-        Box(modifier = Modifier.width(2.dp).height(h1.dp).background(colors.accentSignal, RoundedCornerShape(1.dp)))
-        Box(modifier = Modifier.width(2.dp).height(h2.dp).background(colors.accentSignal, RoundedCornerShape(1.dp)))
-        Box(modifier = Modifier.width(2.dp).height(h3.dp).background(colors.accentSignal, RoundedCornerShape(1.dp)))
-    }
 }

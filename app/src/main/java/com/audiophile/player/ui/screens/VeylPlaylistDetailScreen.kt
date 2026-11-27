@@ -3,6 +3,7 @@ package com.audiophile.player.ui.screens
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import com.audiophile.player.ui.components.VeylListRow
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -22,6 +23,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.audiophile.player.ui.components.VeylActionButton
+import com.audiophile.player.ui.components.VeylAlphabetFastScroller
+import com.audiophile.player.ui.components.VeylEmptyState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -90,29 +95,58 @@ fun VeylPlaylistDetailScreen(
     val lastAddedTracks by controller.lastAddedTracks.collectAsStateWithLifecycle()
     val historyTracks by controller.playbackHistory.collectAsStateWithLifecycle()
     val playlists by controller.playlists.collectAsStateWithLifecycle()
+    val artistGroups by controller.artistGroups.collectAsStateWithLifecycle()
+    val albumGroups by controller.albumGroups.collectAsStateWithLifecycle()
     val currentUri by controller.currentUri.collectAsStateWithLifecycle()
+    val playbackState by controller.playbackState.collectAsStateWithLifecycle()
+    val isAudioPlaying = playbackState == uniffi.audiophile_core.PlaybackStateEnum.PLAYING
 
-    var currentPlaylistTitle by remember(title) { mutableStateOf(title) }
+    val isArtistRoute = title.startsWith("artist:")
+    val isAlbumRoute = title.startsWith("album:")
+    val initialDisplayTitle = when {
+        isArtistRoute -> title.removePrefix("artist:")
+        isAlbumRoute -> title.removePrefix("album:")
+        else -> title
+    }
+
+    var currentPlaylistTitle by remember(title) { mutableStateOf(initialDisplayTitle) }
     var selectedTrackForOptions by remember { mutableStateOf<TrackInfo?>(null) }
     var showMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
 
-    val customPlaylist = playlists.find { it.name.equals(currentPlaylistTitle, ignoreCase = true) }
+    val customPlaylist = if (!isArtistRoute && !isAlbumRoute) {
+        playlists.find { it.name.equals(currentPlaylistTitle, ignoreCase = true) }
+    } else null
     val isCustomPlaylist = customPlaylist != null && currentPlaylistTitle !in listOf("Favorites", "Top Tracks", "Last added", "History")
 
     val playlistTracks = remember(
+        title,
         currentPlaylistTitle,
         favoriteUris,
         topTracks,
         lastAddedTracks,
         historyTracks,
         playlists,
+        artistGroups,
+        albumGroups,
         allTracks
     ) {
-        when (currentPlaylistTitle) {
-            "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+        when {
+            isArtistRoute -> {
+                artistGroups.find { it.first.equals(currentPlaylistTitle, ignoreCase = true) }?.second
+                    ?: allTracks.filter { track ->
+                        (track.artist ?: "Unknown Artist").equals(currentPlaylistTitle, ignoreCase = true)
+                    }
+            }
+            isAlbumRoute -> {
+                albumGroups.find { it.first.equals(currentPlaylistTitle, ignoreCase = true) }?.third
+                    ?: allTracks.filter { track ->
+                        (track.album?.takeIf { it.isNotBlank() } ?: "Unknown Album").equals(currentPlaylistTitle, ignoreCase = true)
+                    }
+            }
+            currentPlaylistTitle == "Favorites" -> favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
                 val fName = File(it.uri).name
                 !fName.startsWith(".") &&
                 !fName.contains("trashed", ignoreCase = true) &&
@@ -121,10 +155,10 @@ fun VeylPlaylistDetailScreen(
                 !it.uri.contains("/cache/")
             }.distinctBy {
                 controller.onlineStreamManager.getTargetStorageFileForTrack(it).absolutePath
-            }
-            "Top Tracks" -> if (topTracks.isNotEmpty()) topTracks else allTracks
-            "Last added" -> if (lastAddedTracks.isNotEmpty()) lastAddedTracks else allTracks
-            "History" -> historyTracks
+            }.sortedBy { it.title.trim().lowercase() }
+            currentPlaylistTitle == "Top Tracks" -> if (topTracks.isNotEmpty()) topTracks else allTracks
+            currentPlaylistTitle == "Last added" -> if (lastAddedTracks.isNotEmpty()) lastAddedTracks else allTracks
+            currentPlaylistTitle == "History" -> historyTracks
             else -> {
                 if (customPlaylist != null) {
                     customPlaylist.trackUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
@@ -162,59 +196,92 @@ fun VeylPlaylistDetailScreen(
         (totalDurationSec / 60).toInt() to (totalDurationSec % 60).toInt()
     }
 
-    LazyColumn(
+    val listState = rememberLazyListState()
+    val durationLabel = if (totalMin >= 60) {
+        "${totalMin / 60} hr ${totalMin % 60} min"
+    } else if (totalMin > 0) {
+        "$totalMin min $totalSec sec"
+    } else {
+        "$totalSec sec"
+    }
+
+    Column(
         modifier = modifier
             .fillMaxSize()
-            .background(colors.background),
-        contentPadding = PaddingValues(bottom = 120.dp)
+            .background(colors.background)
     ) {
-        // 1. Top Bar
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onNavigateBack()
-                    },
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Icon(
-                        imageVector = VeylIcons.ChevronLeft,
-                        contentDescription = "Back",
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
+        // Pinned Minimal Header with crafted tactile action buttons
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = 10.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            VeylActionButton(
+                icon = VeylIcons.ChevronLeft,
+                contentDescription = "Back",
+                onClick = onNavigateBack,
+                iconSizeDp = 22
+            )
 
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp)
+            ) {
                 Text(
                     text = currentPlaylistTitle,
-                    style = VeylTypography.TitleMedium,
+                    style = VeylTypography.TitleLarge,
                     color = colors.textPrimary,
                     fontWeight = FontWeight.Bold,
+                    fontSize = 22.sp,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false).padding(horizontal = 12.dp)
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${playlistTracks.size} tracks • $durationLabel",
+                    style = VeylTypography.BodySmall,
+                    color = colors.textMuted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                VeylActionButton(
+                    icon = VeylIcons.Shuffle,
+                    contentDescription = "Shuffle",
+                    onClick = {
+                        if (playlistTracks.isNotEmpty()) {
+                            controller.toggleShuffle()
+                            controller.playTrackList(playlistTracks.shuffled(), startIndex = 0)
+                        }
+                    }
                 )
 
-                Box {
-                    IconButton(
-                        onClick = { showMenu = true },
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        Icon(
-                            imageVector = VeylIcons.MoreVert,
-                            contentDescription = "Options",
-                            tint = colors.textPrimary,
-                            modifier = Modifier.size(22.dp)
-                        )
+                VeylActionButton(
+                    icon = VeylIcons.Play,
+                    contentDescription = "Play All",
+                    isPrimary = true,
+                    onClick = {
+                        if (playlistTracks.isNotEmpty()) {
+                            controller.playTrackList(playlistTracks, startIndex = 0)
+                        }
                     }
+                )
+
+                // Overflow options menu (Export .m3u8, Rename, Delete)
+                Box {
+                    VeylActionButton(
+                        icon = VeylIcons.MoreVert,
+                        contentDescription = "Options",
+                        onClick = { showMenu = true }
+                    )
 
                     DropdownMenu(
                         expanded = showMenu,
@@ -277,278 +344,62 @@ fun VeylPlaylistDetailScreen(
             }
         }
 
-        // 2. Clean, Sleek Hero Playlist Artwork Cover
-        item {
-            val distinctArtTracks = remember(playlistTracks) {
-                playlistTracks.filter { it.hasArtwork || ArtworkCache.getOnlineArtwork(it.uri) != null }.take(4)
-            }
-            val primaryCoverUri = remember(distinctArtTracks, playlistTracks) {
-                distinctArtTracks.firstOrNull()?.uri ?: playlistTracks.firstOrNull()?.uri ?: ""
-            }
+        androidx.compose.material3.HorizontalDivider(
+            thickness = 0.5.dp,
+            color = colors.borderHairline.copy(alpha = 0.25f)
+        )
 
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+        // Track list container: starts at y=0 directly under the header so the A-Z slider aligns cleanly
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 120.dp)
             ) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = colors.surfaceElevated,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
-                    modifier = Modifier
-                        .size(190.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .clickable {
-                            if (playlistTracks.isNotEmpty()) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                controller.playTrackList(playlistTracks, startIndex = 0)
-                            }
-                        }
-                ) {
-                    if (distinctArtTracks.size >= 4) {
-                        // 2x2 Collage Cover for varied playlists
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                AsyncAlbumArt(
-                                    uri = distinctArtTracks[0].uri,
-                                    contentDescription = null,
-                                    modifier = Modifier.weight(1f).fillMaxSize(),
-                                    cornerRadius = 0.dp,
-                                    targetSizePx = 200
-                                )
-                                AsyncAlbumArt(
-                                    uri = distinctArtTracks[1].uri,
-                                    contentDescription = null,
-                                    modifier = Modifier.weight(1f).fillMaxSize(),
-                                    cornerRadius = 0.dp,
-                                    targetSizePx = 200
-                                )
-                            }
-                            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                AsyncAlbumArt(
-                                    uri = distinctArtTracks[2].uri,
-                                    contentDescription = null,
-                                    modifier = Modifier.weight(1f).fillMaxSize(),
-                                    cornerRadius = 0.dp,
-                                    targetSizePx = 200
-                                )
-                                AsyncAlbumArt(
-                                    uri = distinctArtTracks[3].uri,
-                                    contentDescription = null,
-                                    modifier = Modifier.weight(1f).fillMaxSize(),
-                                    cornerRadius = 0.dp,
-                                    targetSizePx = 200
-                                )
-                            }
-                        }
-                    } else if (primaryCoverUri.isNotBlank()) {
-                        AsyncAlbumArt(
-                            uri = primaryCoverUri,
-                            contentDescription = currentPlaylistTitle,
-                            modifier = Modifier.fillMaxSize(),
-                            cornerRadius = 20.dp,
-                            targetSizePx = 360
+                if (playlistTracks.isEmpty()) {
+                    item {
+                        VeylEmptyState(
+                            icon = VeylIcons.QueueList,
+                            title = "No tracks in this list yet",
+                            subtitle = "Add songs from your library or import an M3U8 playlist."
                         )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(colors.surfaceElevated),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.QueueList,
-                                contentDescription = null,
-                                tint = colors.accentSignal,
-                                modifier = Modifier.size(54.dp)
-                            )
-                        }
                     }
-                }
+                } else {
+                    itemsIndexed(
+                        items = playlistTracks,
+                        key = { index, track -> "${track.uri}_$index" },
+                        contentType = { _, _ -> "playlist_track_item" }
+                    ) { index, track ->
+                        val isPlayingThis = currentUri == track.uri
 
-                Spacer(modifier = Modifier.height(18.dp))
-
-                // Playlist Name
-                Text(
-                    text = currentPlaylistTitle,
-                    style = VeylTypography.DisplayLarge,
-                    color = colors.textPrimary,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 24.sp,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // Description
-                Text(
-                    text = description,
-                    style = VeylTypography.Body,
-                    color = colors.textSecondary,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Stats: Total Tracks & Time
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "${playlistTracks.size} tracks",
-                        style = VeylTypography.BodySmall,
-                        color = colors.textMuted
-                    )
-                    Text(
-                        text = "•",
-                        style = VeylTypography.BodySmall,
-                        color = colors.textMuted
-                    )
-                    Text(
-                        text = if (totalMin > 60) "${totalMin / 60} hr ${totalMin % 60} min" else "$totalMin min $totalSec sec",
-                        style = VeylTypography.BodySmall,
-                        color = colors.textMuted
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Play / Shuffle / Export Buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Large Pill Play Button
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = colors.accentSignal),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp)
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                if (playlistTracks.isNotEmpty()) {
-                                    controller.playTrackList(playlistTracks, startIndex = 0)
-                                }
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.Play,
-                                contentDescription = "Play",
-                                tint = colors.surfacePanel,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Play All",
-                                style = VeylTypography.TitleMedium,
-                                color = colors.surfacePanel,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // Shuffle Button
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = colors.surfaceElevated,
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                if (playlistTracks.isNotEmpty()) {
-                                    controller.toggleShuffle()
-                                    controller.playTrackList(playlistTracks.shuffled(), startIndex = 0)
-                                }
-                            }
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.Shuffle,
-                                contentDescription = "Shuffle",
-                                tint = colors.textPrimary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-
-                    // Export Button
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = colors.surfaceElevated,
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                val safeFilename = "${currentPlaylistTitle.replace(Regex("[^a-zA-Z0-9._ -]"), "_")}.m3u8"
-                                exportLauncher.launch(safeFilename)
-                            }
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.Download,
-                                contentDescription = "Export Playlist",
-                                tint = colors.textPrimary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
+                        PlaylistTrackRow(
+                            track = track,
+                            index = index,
+                            isPlaying = isPlayingThis,
+                            isAnimating = isPlayingThis && isAudioPlaying,
+                            onPlay = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                controller.playTrackList(playlistTracks, startIndex = index)
+                            },
+                            onOptions = {
+                                selectedTrackForOptions = track
+                            },
+                            modifier = Modifier.animateItem()
+                        )
                     }
                 }
             }
-        }
 
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-
-        // 3. Track List
-        if (playlistTracks.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(48.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "No tracks in this list yet",
-                        style = VeylTypography.Body,
-                        color = colors.textMuted
-                    )
-                }
-            }
-        } else {
-            itemsIndexed(
-                items = playlistTracks,
-                key = { index, track -> "${track.uri}_$index" },
-                contentType = { _, _ -> "playlist_track_item" }
-            ) { index, track ->
-                val isPlayingThis = currentUri == track.uri
-
-                PlaylistTrackRow(
-                    track = track,
-                    index = index,
-                    isPlaying = isPlayingThis,
-                    onPlay = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        controller.playTrackList(playlistTracks, startIndex = index)
-                    },
-                    onOptions = {
-                        selectedTrackForOptions = track
-                    }
-                )
-            }
+            VeylAlphabetFastScroller(
+                items = playlistTracks.map { it.title },
+                listState = listState,
+                headerItemCount = 0,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
         }
     }
 
@@ -655,104 +506,24 @@ private fun PlaylistTrackRow(
     track: TrackInfo,
     index: Int,
     isPlaying: Boolean,
+    isAnimating: Boolean = isPlaying,
     onPlay: () -> Unit,
     onOptions: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colors = LocalVeylColors.current
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onPlay)
-            .background(if (isPlaying) colors.surfaceElevated.copy(alpha = 0.5f) else Color.Transparent)
-            .padding(horizontal = 20.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Index number or playing animation indicator
-        Box(
-            modifier = Modifier.width(28.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            if (isPlaying) {
-                Icon(
-                    imageVector = VeylIcons.Equalizer,
-                    contentDescription = "Playing",
-                    tint = colors.accentSignal,
-                    modifier = Modifier.size(16.dp)
-                )
-            } else {
-                Text(
-                    text = "${index + 1}",
-                    style = VeylTypography.BodySmall,
-                    color = colors.textMuted,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-
-        // Lightweight Album Art Thumbnail (Zero scroll lag, memory-cached)
-        Box(
-            modifier = Modifier
-                .padding(end = 12.dp)
-                .size(42.dp)
-                .clip(RoundedCornerShape(8.dp))
-        ) {
-            AsyncAlbumArt(
-                uri = track.uri,
-                contentDescription = track.title,
-                modifier = Modifier.fillMaxSize(),
-                cornerRadius = 8.dp,
-                targetSizePx = 120
-            )
-        }
-
-        // Title & Artist
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = track.title,
-                style = VeylTypography.TitleMedium,
-                color = if (isPlaying) colors.accentSignal else colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.Medium
-            )
-            Text(
-                text = track.artist ?: "Unknown Artist",
-                style = VeylTypography.BodySmall,
-                color = colors.textSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        // Duration (fast math formatting without String.format overhead)
-        val totalSec = track.durationSeconds.toInt()
-        if (totalSec > 0) {
-            val m = totalSec / 60
-            val s = totalSec % 60
-            val durationText = if (s < 10) "$m:0$s" else "$m:$s"
-            Text(
-                text = durationText,
-                style = VeylTypography.MonoSpec,
-                color = colors.textMuted,
-                fontSize = 11.sp
-            )
-        }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        // 3-dot options sheet trigger
-        IconButton(
-            onClick = onOptions,
-            modifier = Modifier.size(36.dp)
-        ) {
-            Icon(
-                imageVector = VeylIcons.MoreVert,
-                contentDescription = "Options",
-                tint = colors.textMuted,
-                modifier = Modifier.size(18.dp)
-            )
-        }
+    val subtitle = if (track.formatName.isNotBlank()) {
+        "${track.artist ?: "Unknown Artist"} • ${track.formatName.uppercase()}"
+    } else {
+        track.artist ?: "Unknown Artist"
     }
+    VeylListRow(
+        title = track.title,
+        subtitle = subtitle,
+        isPlaying = isPlaying,
+        isAnimating = isAnimating,
+        durationSeconds = track.durationSeconds,
+        onClick = onPlay,
+        onOptionsClick = onOptions,
+        modifier = modifier
+    )
 }

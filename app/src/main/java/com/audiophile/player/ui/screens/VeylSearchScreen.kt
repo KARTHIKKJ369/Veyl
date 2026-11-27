@@ -4,6 +4,7 @@ import com.audiophile.player.engine.ArtworkCache
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
+import com.audiophile.player.ui.components.VeylListRow
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -806,69 +807,20 @@ private fun SearchTrackRow(
     onClick: () -> Unit,
     onOpenOptions: (() -> Unit)? = null
 ) {
-    val colors = LocalVeylColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AsyncAlbumArt(
-            uri = track.uri,
-            hasArtwork = track.hasArtwork,
-            modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(8.dp))
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                track.title,
-                style = VeylTypography.BodyMedium,
-                color = colors.textPrimary,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                buildString {
-                    track.artist?.let { append(it) }
-                    track.album?.let {
-                        if (isNotEmpty()) append(" \u00b7 ")
-                        append(it)
-                    }
-                },
-                style = VeylTypography.BodySmall,
-                color = colors.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            "${track.formatName} ${track.bitDepth ?: 16}b",
-            style = VeylTypography.MonoSpec,
-            color = colors.accentSignal,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold
-        )
-        if (onOpenOptions != null) {
-            Spacer(Modifier.width(4.dp))
-            IconButton(
-                onClick = onOpenOptions,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = VeylIcons.MoreVert,
-                    contentDescription = "Options",
-                    tint = colors.textMuted,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+    val sub = buildString {
+        track.artist?.let { append(it) }
+        if (track.formatName.isNotBlank()) {
+            if (isNotEmpty()) append(" • ")
+            append(track.formatName.uppercase())
         }
     }
+    VeylListRow(
+        title = track.title,
+        subtitle = sub,
+        durationSeconds = track.durationSeconds,
+        onClick = onClick,
+        onOptionsClick = onOpenOptions
+    )
 }
 
 @Composable
@@ -881,126 +833,34 @@ private fun SearchOnlineSongRow(
     onOpenOptions: (() -> Unit)? = null
 ) {
     val colors = LocalVeylColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isPlaying) colors.surfacePanel.copy(alpha = 0.5f) else colors.surfaceElevated.copy(alpha = 0.35f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Thumbnail with rounded corners
-        AsyncAlbumArt(
-            uri = item.thumbnailUrl,
-            modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(8.dp))
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                item.title,
-                style = VeylTypography.BodyMedium,
-                color = if (isPlaying) colors.accentSignal else colors.textPrimary,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                "${item.artist} \u00b7 ${item.album}",
-                style = VeylTypography.BodySmall,
-                color = colors.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(2.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = colors.accentSignal.copy(alpha = 0.15f)
-                ) {
-                    Text(
-                        "320k STUDIO",
-                        style = VeylTypography.MonoSpec,
-                        color = colors.accentSignal,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                    )
-                }
-                Text(
-                    item.durationText,
-                    style = VeylTypography.MonoSpec,
-                    color = colors.textMuted,
-                    fontSize = 9.sp
-                )
-            }
-        }
-        Spacer(Modifier.width(4.dp))
-
-        // Quick download button to save track directly to device storage
-        IconButton(
-            onClick = onDownloadClick,
-            modifier = Modifier.size(34.dp)
-        ) {
-            Icon(
-                VeylIcons.Download,
-                contentDescription = "Download to device storage",
-                tint = colors.textMuted,
-                modifier = Modifier.size(17.dp)
-            )
-        }
-
-        if (onOpenOptions != null) {
+    VeylListRow(
+        title = item.title,
+        subtitle = "${item.artist} • 320k",
+        isPlaying = isPlaying,
+        trailingText = item.durationText,
+        onClick = onClick,
+        onOptionsClick = onOpenOptions,
+        trailingContent = {
             IconButton(
-                onClick = onOpenOptions,
+                onClick = onDownloadClick,
                 modifier = Modifier.size(34.dp)
             ) {
                 Icon(
-                    VeylIcons.MoreVert,
-                    contentDescription = "Track options",
+                    VeylIcons.Download,
+                    contentDescription = "Download to device storage",
                     tint = colors.textMuted,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(17.dp)
+                )
+            }
+            if (isBuffering) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = colors.accentSignal
                 )
             }
         }
-
-        Spacer(Modifier.width(4.dp))
-
-        if (isBuffering) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                strokeWidth = 2.dp,
-                color = colors.accentSignal
-            )
-        } else if (isPlaying) {
-            Icon(
-                VeylIcons.Waveform,
-                contentDescription = "Playing",
-                tint = colors.accentSignal,
-                modifier = Modifier.size(18.dp)
-            )
-        } else {
-            Surface(
-                shape = CircleShape,
-                color = colors.surfacePanel,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        VeylIcons.Play,
-                        contentDescription = "Stream song",
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            }
-        }
-    }
+    )
 }
 
 @Composable
@@ -1012,47 +872,11 @@ private fun SearchAlbumRow(
     firstTrackHasArtwork: Boolean? = null,
     onClick: () -> Unit
 ) {
-    val colors = LocalVeylColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AsyncAlbumArt(
-            uri = firstTrackUri,
-            hasArtwork = firstTrackHasArtwork,
-            modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(8.dp))
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                albumName,
-                style = VeylTypography.BodyMedium,
-                color = colors.textPrimary,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                "$artist \u00b7 $trackCount tracks",
-                style = VeylTypography.BodySmall,
-                color = colors.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Icon(
-            VeylIcons.Play,
-            contentDescription = "Play album",
-            tint = colors.textMuted,
-            modifier = Modifier.size(16.dp)
-        )
-    }
+    VeylListRow(
+        title = albumName,
+        subtitle = "$artist • $trackCount tracks",
+        onClick = onClick
+    )
 }
 
 @Composable
@@ -1064,50 +888,15 @@ private fun SearchArtistRow(
     firstTrackHasArtwork: Boolean? = null,
     onClick: () -> Unit
 ) {
-    val colors = LocalVeylColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AsyncAlbumArt(
-            uri = firstTrackUri,
-            hasArtwork = firstTrackHasArtwork,
-            modifier = Modifier
-                .size(52.dp)
-                .clip(CircleShape)
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                artistName,
-                style = VeylTypography.BodyMedium,
-                color = colors.textPrimary,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                buildString {
-                    append("$albumCount album")
-                    if (albumCount != 1) append("s")
-                    append(" \u00b7 $trackCount track")
-                    if (trackCount != 1) append("s")
-                },
-                style = VeylTypography.BodySmall,
-                color = colors.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Icon(
-            VeylIcons.Play,
-            contentDescription = "Play artist",
-            tint = colors.textMuted,
-            modifier = Modifier.size(16.dp)
-        )
+    val subtitle = buildString {
+        append("$albumCount album")
+        if (albumCount != 1) append("s")
+        append(" • $trackCount track")
+        if (trackCount != 1) append("s")
     }
+    VeylListRow(
+        title = artistName,
+        subtitle = subtitle,
+        onClick = onClick
+    )
 }

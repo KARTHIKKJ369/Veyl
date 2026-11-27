@@ -1,6 +1,7 @@
 package com.audiophile.player.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import com.audiophile.player.ui.components.VeylListRow
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -615,52 +616,12 @@ private fun FolderRowItem(
     trackCount: Int,
     onClick: () -> Unit
 ) {
-    val colors = LocalVeylColors.current
     val folderName = File(folderPath).name.ifEmpty { folderPath }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-            .background(colors.surfaceElevated)
-            .border(1.dp, colors.borderHairline, RoundedCornerShape(VeylSpacing.RadiusMd))
-            .clickable(onClick = onClick)
-            .padding(VeylSpacing.md),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(VeylSpacing.md)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(VeylSpacing.RadiusSm))
-                .background(colors.surfacePill),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = VeylIcons.Folder,
-                contentDescription = null,
-                tint = colors.accentSignal,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = folderName,
-                style = VeylTypography.TitleMedium,
-                color = colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "$trackCount tracks • $folderPath",
-                style = VeylTypography.MonoSpec,
-                color = colors.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
+    VeylListRow(
+        title = folderName,
+        subtitle = "$trackCount tracks • $folderPath",
+        onClick = onClick
+    )
 }
 
 @Composable
@@ -700,103 +661,31 @@ private fun VeylTrackRow(
         "%d:%02d".format(m, s)
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(VeylSpacing.RadiusMd))
-            .background(if (isCurrent) colors.surfaceElevated else colors.surfacePanel.copy(alpha = 0.6f))
-            .border(
-                1.dp,
-                if (isCurrent) colors.borderActive else colors.borderHairline,
-                RoundedCornerShape(VeylSpacing.RadiusMd)
-            )
-            .clickable(onClick = onPlay)
-            .padding(horizontal = VeylSpacing.md, vertical = VeylSpacing.sm)
-            .semantics {
-                contentDescription = "Track: ${track.title}, Artist: ${track.artist ?: "Unknown"}, Format: $formatBadge, Duration: $durationFormatted"
-            },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Title + Artist + Monospace Telemetry (Name-only, no leading icon/glyph)
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(
-                text = track.title,
-                style = VeylTypography.TitleMedium,
-                color = if (isCurrent) colors.accentSignal else colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+    VeylListRow(
+        title = track.title,
+        subtitle = "${track.artist ?: "Unknown Artist"} • $formatBadge",
+        isPlaying = isCurrent,
+        isAnimating = isPlaying,
+        trailingText = durationFormatted,
+        onClick = onPlay,
+        onOptionsClick = onOpenOptions,
+        modifier = Modifier.semantics {
+            contentDescription = "Track: ${track.title}, Artist: ${track.artist ?: "Unknown"}, Format: $formatBadge, Duration: $durationFormatted"
+        },
+        trailingContent = {
+            IconButton(
+                onClick = onToggleFavorite,
+                modifier = Modifier.size(34.dp)
             ) {
-                Text(
-                    text = track.artist ?: "Unknown Artist",
-                    style = VeylTypography.BodySmall,
-                    color = colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
+                Icon(
+                    imageVector = if (isFavorite) VeylIcons.HeartFilled else VeylIcons.Heart,
+                    contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                    tint = if (isFavorite) colors.accentFavorite else colors.textMuted,
+                    modifier = Modifier.size(18.dp)
                 )
-
-                // Format pill badge
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(if (isCurrent) colors.accentSignal.copy(alpha = 0.2f) else colors.surfacePill)
-                        .padding(horizontal = 5.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = formatBadge,
-                        style = VeylTypography.MonoBadge,
-                        color = if (isCurrent) colors.accentSignal else colors.textMono,
-                        fontSize = 9.sp
-                    )
-                }
             }
         }
-
-        Spacer(modifier = Modifier.width(VeylSpacing.xs))
-
-        // Duration telemetry
-        Text(
-            text = durationFormatted,
-            style = VeylTypography.MonoSpec,
-            color = colors.textMuted
-        )
-
-        Spacer(modifier = Modifier.width(VeylSpacing.xs))
-
-        // Favorite Toggle
-        IconButton(
-            onClick = onToggleFavorite,
-            modifier = Modifier.size(38.dp)
-        ) {
-            Icon(
-                imageVector = if (isFavorite) VeylIcons.HeartFilled else VeylIcons.Heart,
-                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
-                tint = if (isFavorite) colors.accentFavorite else colors.textMuted,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        // More Options Menu (Delete, Playlist, etc.)
-        IconButton(
-            onClick = onOpenOptions,
-            modifier = Modifier.size(38.dp)
-        ) {
-            Icon(
-                imageVector = VeylIcons.MoreVert,
-                contentDescription = "Options",
-                tint = colors.textMuted,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
+    )
 }
 
 @Composable

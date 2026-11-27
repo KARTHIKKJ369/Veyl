@@ -274,7 +274,7 @@ fun AudiophileNavHost(
                         },
                         onPickFolder = onSelectRootFolder,
                         onNavigateToPlaylist = { playlistName ->
-                            navController.navigate("playlist/$playlistName")
+                            navController.navigate("playlist/${android.net.Uri.encode(playlistName)}")
                         }
                     )
                 }
@@ -288,7 +288,7 @@ fun AudiophileNavHost(
                     VeylPlaylistsScreen(
                         controller = controller,
                         onNavigateToPlaylist = { playlistName ->
-                            navController.navigate("playlist/$playlistName")
+                            navController.navigate("playlist/${android.net.Uri.encode(playlistName)}")
                         }
                     )
                 }
@@ -372,11 +372,18 @@ fun AudiophileNavHost(
                     enterTransition = { fadeIn(animationSpec = tween(180)) },
                     exitTransition = { fadeOut(animationSpec = tween(140)) }
                 ) { backStackEntry ->
-                    val playlistName = backStackEntry.arguments?.getString("name") ?: "Playlist"
+                    val rawArg = backStackEntry.arguments?.getString("name") ?: "Playlist"
+                    val playlistName = android.net.Uri.decode(rawArg)
+                    val desc = when {
+                        playlistName == "Favorites" -> "The tracks I like the most"
+                        playlistName.startsWith("artist:") -> "Artist discography"
+                        playlistName.startsWith("album:") -> "Album tracklist"
+                        else -> "Custom Playlist"
+                    }
                     VeylPlaylistDetailScreen(
                         controller = controller,
                         title = playlistName,
-                        description = if (playlistName == "Favorites") "The tracks I like the most" else "Custom Playlist",
+                        description = desc,
                         onNavigateBack = {
                             if (!navController.popBackStack()) {
                                 navController.navigate(VeylScreen.Playlists.route)

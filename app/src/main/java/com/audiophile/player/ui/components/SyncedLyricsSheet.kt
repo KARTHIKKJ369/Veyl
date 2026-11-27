@@ -1,7 +1,10 @@
 package com.audiophile.player.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -10,6 +13,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +39,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -56,16 +62,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.audiophile.player.engine.AsyncAlbumArt
 import com.audiophile.player.engine.AudioEngineController
 import com.audiophile.player.engine.LyricLine
+import com.audiophile.player.engine.LyricsProvider
 import com.audiophile.player.ui.theme.LocalVeylColors
 import com.audiophile.player.ui.theme.VeylIcons
+import com.audiophile.player.ui.theme.VeylOutfitFont
 import com.audiophile.player.ui.theme.VeylTypography
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -97,11 +108,12 @@ fun SyncedLyricsSheet(
     val lyrics by controller.currentLyrics.collectAsState()
     val status by controller.status.collectAsState()
     val offsetMs by controller.lyricOffsetMs.collectAsState()
+    val lyricsProvider by controller.lyricsProvider.collectAsState()
+    val isLoadingLyrics by controller.isLoadingLyrics.collectAsState()
 
     val currentTrack = track
     val curLyrics = lyrics
     val lines = curLyrics?.lines ?: emptyList()
-    val hasWordTiming = curLyrics?.hasWordTiming == true
 
     val positionMs by controller.currentPositionMs.collectAsState()
     val activeIndex = remember(curLyrics, positionMs, offsetMs) {
@@ -115,20 +127,27 @@ fun SyncedLyricsSheet(
     val listState = rememberLazyListState()
     var isUserScrolling by remember { mutableStateOf(false) }
     var showOffsetPanel by remember { mutableStateOf(false) }
+    var showProviderMenu by remember { mutableStateOf(false) }
     var isSearchingOnline by remember { mutableStateOf(false) }
 
-    // Detect user manual scroll to prevent fighting the user
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress) {
-            isUserScrolling = true
-        } else if (isUserScrolling) {
-            // Give the user 4 seconds of idle time before resuming auto-scroll
+    // Trigger "Jump to playing" ONLY on manual finger drag, never on programmatic auto-scroll
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) {
+                isUserScrolling = true
+            }
+        }
+    }
+
+    // Auto-resume following after 4 seconds of manual scroll idle
+    LaunchedEffect(listState.isScrollInProgress, isUserScrolling) {
+        if (!listState.isScrollInProgress && isUserScrolling) {
             delay(4000)
             isUserScrolling = false
         }
     }
 
-    // Auto-scroll to current lyric line when active index changes and user isn't scrolling
+    // Smoothly auto-scroll to active lyric line when active index changes
     LaunchedEffect(activeIndex, isUserScrolling) {
         if (!isUserScrolling && activeIndex in lines.indices) {
             val layoutInfo = listState.layoutInfo
@@ -183,103 +202,106 @@ fun SyncedLyricsSheet(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // 2. Top Navigation Bar: Drag Handle & Meta Header
+            // 2. Top Navigation Bar: Minimal & Compact Header
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .padding(horizontal = 18.dp, vertical = 4.dp)
             ) {
-                // Top Dismiss Chevron & Action Toolbar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onDismiss()
-                        },
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(colors.surfaceElevated.copy(alpha = 0.8f))
-                    ) {
-                        Icon(
-                            imageVector = VeylIcons.ChevronDown,
-                            contentDescription = "Dismiss lyrics",
-                            tint = colors.textPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                    VeylActionButton(
+                        icon = VeylIcons.ChevronDown,
+                        contentDescription = "Dismiss lyrics",
+                        onClick = onDismiss,
+                        iconSizeDp = 24
+                    )
 
-                    // Source & Format Badge
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        val sourceLabel = when {
-                            hasWordTiming -> "WORD SYNC"
-                            lyrics?.source == "lrclib" || lyrics?.source == "lrclib_search" -> "LRCLIB"
-                            lyrics?.source == "file" -> "LOCAL LRC"
-                            lyrics?.source == "embedded" || lyrics?.source == "id3" -> "ID3 TAG"
-                            else -> "SYNCED"
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = colors.accentSignal.copy(alpha = 0.15f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.3f))
-                        ) {
+                        Box {
                             Text(
-                                text = sourceLabel,
-                                style = VeylTypography.MonoSpec,
-                                color = colors.accentSignal,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                text = if (isLoadingLyrics) "Loading…" else lyricsProvider.label,
+                                style = VeylTypography.BodySmall,
+                                color = colors.textSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showProviderMenu = true
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
                             )
+                            DropdownMenu(
+                                expanded = showProviderMenu,
+                                onDismissRequest = { showProviderMenu = false },
+                                containerColor = colors.surfacePanel
+                            ) {
+                                LyricsProvider.entries.forEach { provider ->
+                                    val selected = provider == lyricsProvider
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = provider.label,
+                                                color = if (selected) colors.accentSignal else colors.textPrimary,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                fontSize = 13.sp
+                                            )
+                                        },
+                                        onClick = {
+                                            showProviderMenu = false
+                                            controller.setLyricsProvider(provider)
+                                        }
+                                    )
+                                }
+                            }
                         }
 
-                        // Offset Calibration Toggle Button
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (offsetMs != 0L) colors.accentSignal else colors.surfaceElevated.copy(alpha = 0.8f),
-                            modifier = Modifier.clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                showOffsetPanel = !showOffsetPanel
-                            }
-                        ) {
-                            Text(
-                                text = if (offsetMs == 0L) "Sync" else "%+d ms".format(offsetMs),
-                                style = VeylTypography.MonoSpec,
-                                color = if (offsetMs != 0L) colors.background else colors.textPrimary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
+                        Text(
+                            text = if (offsetMs == 0L) "Sync" else "%+d ms".format(offsetMs),
+                            style = VeylTypography.BodySmall,
+                            color = if (offsetMs != 0L || showOffsetPanel) colors.accentSignal else colors.textSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showOffsetPanel = !showOffsetPanel
+                                }
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Track Title & Artist
+                // Centered Track Title & Artist
                 Text(
                     text = currentTrack?.title ?: "Unknown Track",
                     style = VeylTypography.HeadlineMedium,
                     color = colors.textPrimary,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    textAlign = TextAlign.Center,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Text(
                     text = currentTrack?.artist ?: "Unknown Artist",
                     style = VeylTypography.BodySmall,
                     color = colors.textMuted,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 // Expandable Sync Offset Fine-Tuning Bar
@@ -336,8 +358,8 @@ fun SyncedLyricsSheet(
                 Box(modifier = Modifier.weight(1f)) {
                     LazyColumn(
                         state = listState,
-                        contentPadding = PaddingValues(top = 90.dp, bottom = 140.dp, start = 20.dp, end = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(18.dp),
+                        contentPadding = PaddingValues(top = 20.dp, bottom = 44.dp, start = 16.dp, end = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
                         itemsIndexed(
@@ -345,14 +367,19 @@ fun SyncedLyricsSheet(
                             key = { idx, line -> "${line.timestampMs}_$idx" }
                         ) { index, line ->
                             val isCurrent = index == activeIndex
+                            val isUpcoming = activeIndex >= 0 && index == activeIndex + 1
+                            val isPast = activeIndex >= 0 && index < activeIndex
 
                             LyricLineRow(
                                 line = line,
                                 isCurrent = isCurrent,
+                                isUpcoming = isUpcoming,
+                                isPast = isPast,
                                 controller = controller,
                                 offsetMs = offsetMs,
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    isUserScrolling = false
                                     val seekTargetSec = (line.timestampMs.toDouble() / 1000.0).coerceAtLeast(0.0)
                                     controller.seekTo(seekTargetSec)
                                 }
@@ -364,13 +391,12 @@ fun SyncedLyricsSheet(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(80.dp)
+                            .height(28.dp)
                             .align(Alignment.TopCenter)
                             .background(
                                 Brush.verticalGradient(
                                     colors = listOf(
-                                        colors.background.copy(alpha = 0.95f),
-                                        colors.background.copy(alpha = 0.6f),
+                                        colors.background.copy(alpha = 0.90f),
                                         Color.Transparent
                                     )
                                 )
@@ -381,20 +407,19 @@ fun SyncedLyricsSheet(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(110.dp)
+                            .height(44.dp)
                             .align(Alignment.BottomCenter)
                             .background(
                                 Brush.verticalGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        colors.background.copy(alpha = 0.7f),
-                                        colors.background.copy(alpha = 0.98f)
+                                        colors.background.copy(alpha = 0.95f)
                                     )
                                 )
                             )
                     )
 
-                    // Floating "Resume Sync" Pill when user has scrolled away
+                    // Floating transparent "Jump to playing" button shown ONLY on manual scroll
                     androidx.compose.animation.AnimatedVisibility(
                         visible = isUserScrolling && activeIndex >= 0,
                         enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
@@ -403,11 +428,13 @@ fun SyncedLyricsSheet(
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 24.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = colors.accentSignal,
-                            shadowElevation = 8.dp,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.42f))
+                                .border(0.5.dp, colors.borderHairline.copy(alpha = 0.65f), CircleShape)
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     isUserScrolling = false
@@ -417,26 +444,21 @@ fun SyncedLyricsSheet(
                                         listState.animateScrollToItem(activeIndex, scrollOffset)
                                     }
                                 }
+                                .padding(horizontal = 16.dp, vertical = 9.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = VeylIcons.Play,
-                                    contentDescription = null,
-                                    tint = colors.background,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "Jump to playing",
-                                    style = VeylTypography.TitleMedium,
-                                    color = colors.background,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                            Icon(
+                                imageVector = VeylIcons.Play,
+                                contentDescription = null,
+                                tint = colors.accentSignal,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "Jump to playing",
+                                style = VeylTypography.BodySmall,
+                                color = colors.textPrimary,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
                 }
@@ -537,87 +559,257 @@ fun SyncedLyricsSheet(
                     }
                 }
             }
+
+            // 4. Compact Playback Bar at the bottom of the Lyrics Sheet
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                val curSec = (positionMs / 1000L).toInt().coerceAtLeast(0)
+                val totSec = (currentTrack?.durationSeconds ?: 0.0).toInt().coerceAtLeast(0)
+                val curText = "%d:%02d".format(curSec / 60, curSec % 60)
+                val totText = "%d:%02d".format(totSec / 60, totSec % 60)
+
+                Text(
+                    text = curText,
+                    style = VeylTypography.MonoSpec,
+                    color = colors.textMuted,
+                    fontSize = 11.sp
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    IconButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            controller.skipPrevious()
+                        },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = VeylIcons.Previous,
+                            contentDescription = "Previous",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = colors.accentSignal,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                controller.togglePlayPause()
+                            }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (status?.state == uniffi.audiophile_core.PlaybackStateEnum.PLAYING) VeylIcons.Pause else VeylIcons.Play,
+                                contentDescription = "Play/Pause",
+                                tint = Color.Black,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            controller.skipNext()
+                        },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = VeylIcons.Next,
+                            contentDescription = "Next",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    text = totText,
+                    style = VeylTypography.MonoSpec,
+                    color = colors.textMuted,
+                    fontSize = 11.sp
+                )
+            }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LyricLineRow(
     line: LyricLine,
     isCurrent: Boolean,
+    isUpcoming: Boolean = false,
+    isPast: Boolean = false,
     controller: AudioEngineController,
     offsetMs: Long,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ProgressiveLyricLineContent(
+        line = line,
+        isCurrent = isCurrent,
+        isUpcoming = isUpcoming,
+        isPast = isPast,
+        controller = controller,
+        offsetMs = offsetMs,
+        activeFontSize = 30.sp,
+        activeLineHeight = 38.sp,
+        inactiveFontSize = 21.sp,
+        inactiveLineHeight = 28.sp,
+        onClick = onClick,
+        modifier = modifier.padding(vertical = 4.dp, horizontal = 4.dp)
+    )
+}
+
+/**
+ * Shared centered lyric renderer used by both Expanded Lyrics and Now Playing Lyrics Card.
+ * Uses true word-sync timestamps when present, and smooth synced line transitions otherwise.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun ProgressiveLyricLineContent(
+    line: LyricLine,
+    isCurrent: Boolean,
+    isUpcoming: Boolean,
+    isPast: Boolean,
+    controller: AudioEngineController,
+    offsetMs: Long,
+    activeFontSize: TextUnit,
+    activeLineHeight: TextUnit,
+    inactiveFontSize: TextUnit,
+    inactiveLineHeight: TextUnit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVeylColors.current
 
     val alpha by animateFloatAsState(
-        targetValue = if (isCurrent) 1.0f else 0.36f,
-        animationSpec = tween(220),
+        targetValue = when {
+            isCurrent -> 1.0f
+            isUpcoming -> 0.56f
+            isPast -> 0.24f
+            else -> 0.36f
+        },
+        animationSpec = tween(durationMillis = 260),
         label = "lyricAlpha"
     )
 
+    val scale by animateFloatAsState(
+        targetValue = if (isCurrent) 1.03f else 0.97f,
+        animationSpec = tween(durationMillis = 260),
+        label = "lyricScale"
+    )
+
+    val lineColor by animateColorAsState(
+        targetValue = if (isCurrent) colors.accentSignal else colors.textPrimary,
+        animationSpec = tween(durationMillis = 260),
+        label = "lyricLineColor"
+    )
+
     Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .fillMaxWidth()
-            .graphicsLayer { this.alpha = alpha }
+            .graphicsLayer {
+                this.alpha = alpha
+                this.scaleX = scale
+                this.scaleY = scale
+            }
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp, horizontal = 6.dp)
     ) {
-        if (line.words.isNotEmpty() && isCurrent) {
-            // Word-by-word progressive illumination: ONLY the active line collects high-res positionMs
+        if (isCurrent && line.words.isNotEmpty()) {
+            // Fill smoothly word-by-word ONLY when true word-sync timestamps exist
             val posMs by controller.currentPositionMs.collectAsState()
             val calibratedPosMs = (posMs + offsetMs).coerceAtLeast(0L)
-            val activeWordIdx = line.findActiveWordIndex(calibratedPosMs)
+            val baseDim = Color.White.copy(alpha = 0.42f)
 
             FlowRow(
-                horizontalArrangement = Arrangement.Start,
+                horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                line.words.forEachIndexed { wordIdx, word ->
-                    val isPastWord = wordIdx < activeWordIdx
-                    val isCurrentWord = wordIdx == activeWordIdx
-                    val wordColor = when {
-                        isCurrentWord -> colors.accentSignal
-                        isPastWord -> colors.textPrimary
-                        else -> colors.textMuted.copy(alpha = 0.5f)
+                line.words.forEach { word ->
+                    val span = (word.endMs - word.startMs).coerceAtLeast(80L)
+                    val progress = ((calibratedPosMs - word.startMs).toFloat() / span.toFloat()).coerceIn(0f, 1f)
+                    val wordStyle = when {
+                        progress >= 0.99f -> TextStyle(
+                            fontFamily = VeylOutfitFont,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = activeFontSize,
+                            lineHeight = activeLineHeight,
+                            letterSpacing = (-0.6).sp,
+                            color = colors.accentSignal
+                        )
+                        progress <= 0.01f -> TextStyle(
+                            fontFamily = VeylOutfitFont,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = activeFontSize,
+                            lineHeight = activeLineHeight,
+                            letterSpacing = (-0.6).sp,
+                            color = baseDim
+                        )
+                        else -> {
+                            val s1 = (progress - 0.06f).coerceIn(0.001f, 0.990f)
+                            val s2 = (progress + 0.06f).coerceIn(s1 + 0.001f, 0.999f)
+                            TextStyle(
+                                fontFamily = VeylOutfitFont,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = activeFontSize,
+                                lineHeight = activeLineHeight,
+                                letterSpacing = (-0.6).sp,
+                                brush = Brush.horizontalGradient(
+                                    0.0f to colors.accentSignal,
+                                    s1 to colors.accentSignal,
+                                    s2 to baseDim,
+                                    1.0f to baseDim
+                                )
+                            )
+                        }
                     }
-                    val wordWeight = if (isCurrentWord) FontWeight.Bold else if (isPastWord) FontWeight.SemiBold else FontWeight.Normal
-
                     Text(
-                        text = word.text + " ",
-                        style = VeylTypography.HeadlineMedium,
-                        color = wordColor,
-                        fontWeight = wordWeight,
-                        fontSize = 22.sp,
-                        lineHeight = 32.sp
+                        text = word.text,
+                        style = wordStyle
                     )
                 }
             }
         } else {
-            // Standard line highlight (calm, grounded, no text scaling/jumping)
+            // Clean smooth synced line display (no artificial word-slicing)
             Text(
                 text = line.text,
-                style = if (isCurrent) VeylTypography.HeadlineMedium else VeylTypography.TitleMedium,
-                color = if (isCurrent) colors.accentSignal else colors.textPrimary,
-                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                fontSize = if (isCurrent) 22.sp else 17.sp,
-                lineHeight = if (isCurrent) 32.sp else 24.sp
+                style = TextStyle(
+                    fontFamily = VeylOutfitFont,
+                    fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.SemiBold,
+                    fontSize = if (isCurrent) activeFontSize else inactiveFontSize,
+                    lineHeight = if (isCurrent) activeLineHeight else inactiveLineHeight,
+                    letterSpacing = if (isCurrent) (-0.6).sp else (-0.3).sp
+                ),
+                color = lineColor,
+                textAlign = TextAlign.Center
             )
         }
 
-        // Translation display if present
         if (!line.translation.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = line.translation,
                 style = VeylTypography.BodySmall,
-                color = colors.textMuted.copy(alpha = 0.7f),
-                fontSize = 13.sp
+                color = colors.textMuted.copy(alpha = 0.72f),
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center
             )
         }
     }

@@ -3,6 +3,10 @@ package com.audiophile.player.ui.screens
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import com.audiophile.player.ui.components.VeylActionButton
+import com.audiophile.player.ui.components.VeylEmptyState
+import com.audiophile.player.ui.components.VeylListRow
+import com.audiophile.player.ui.components.VeylScreenHeader
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -99,9 +103,133 @@ fun VeylPlaylistsScreen(
     var isSpotifyImporting by remember { mutableStateOf(false) }
     var spotifyImportError by remember { mutableStateOf<String?>(null) }
 
+    var showM3uScannerDialog by remember { mutableStateOf(false) }
+    var isScanningM3u by remember { mutableStateOf(false) }
+    var discoveredM3uFiles by remember { mutableStateOf<List<M3uCandidate>>(emptyList()) }
+
+    fun scanDeviceForPlaylists() {
+        isScanningM3u = true
+        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val found = linkedMapOf<String, M3uCandidate>()
+
+            fun addFileCandidate(file: File) {
+                val lower = file.name.lowercase()
+                if ((lower.endsWith(".m3u8") || lower.endsWith(".m3u")) && file.canRead()) {
+                    val key = file.absolutePath.lowercase()
+                    found.putIfAbsent(
+                        key,
+                        M3uCandidate(
+                            name = file.name,
+                            folder = file.parentFile?.name ?: "Storage",
+                            modifiedMs = file.lastModified(),
+                            file = file,
+                            key = key
+                        )
+                    )
+                }
+            }
+
+            fun scanDir(dir: File?, depth: Int) {
+                if (dir == null || !dir.exists() || !dir.isDirectory || depth > 5) return
+                val name = dir.name
+                if (name.startsWith(".") || name == "Android") return
+                dir.listFiles()?.forEach { child ->
+                    if (child.isDirectory) {
+                        scanDir(child, depth + 1)
+                    } else if (child.isFile) {
+                        addFileCandidate(child)
+                    }
+                }
+            }
+
+            // 1. Query MediaStore (Downloads & Files) so Download/ .m3u8 files appear even under Android 11+ scoped storage
+            val mediaUris = buildList {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    add(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI)
+                }
+                add(android.provider.MediaStore.Files.getContentUri("external"))
+            }
+            val projection = arrayOf(
+                android.provider.MediaStore.MediaColumns._ID,
+                android.provider.MediaStore.MediaColumns.DISPLAY_NAME,
+                android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                android.provider.MediaStore.MediaColumns.DATE_MODIFIED,
+                android.provider.MediaStore.MediaColumns.DATA
+            )
+            mediaUris.forEach { tableUri ->
+                try {
+                    context.contentResolver.query(
+                        tableUri,
+                        projection,
+                        "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?",
+                        arrayOf("%.m3u%"),
+                        "${android.provider.MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+                    )?.use { cursor ->
+                        val idCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID)
+                        val nameCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.DISPLAY_NAME)
+                        val relCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.RELATIVE_PATH)
+                        val dateCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.DATE_MODIFIED)
+                        val dataCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.DATA)
+
+                        while (cursor.moveToNext()) {
+                            val dispName = if (nameCol != -1) cursor.getString(nameCol) ?: continue else continue
+                            val lower = dispName.lowercase()
+                            if (!lower.endsWith(".m3u8") && !lower.endsWith(".m3u")) continue
+
+                            val dataPath = if (dataCol != -1) cursor.getString(dataCol) else null
+                            val id = cursor.getLong(idCol)
+                            val contentUri = android.content.ContentUris.withAppendedId(tableUri, id)
+                            val relPath = if (relCol != -1) cursor.getString(relCol)?.trimEnd('/') else null
+                            val modMs = if (dateCol != -1) cursor.getLong(dateCol) * 1000L else 0L
+                            val fileObj = dataPath?.let(::File)?.takeIf { it.exists() && it.canRead() }
+                            val key = (dataPath ?: "$relPath/$dispName").lowercase()
+                            val folderLabel = relPath?.substringAfterLast('/')?.ifBlank { "Downloads" }
+                                ?: fileObj?.parentFile?.name
+                                ?: "Downloads"
+
+                            found.putIfAbsent(
+                                key,
+                                M3uCandidate(
+                                    name = dispName,
+                                    folder = folderLabel,
+                                    modifiedMs = modMs,
+                                    file = fileObj,
+                                    contentUri = contentUri,
+                                    key = key
+                                )
+                            )
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
+            // 2. Direct filesystem scan across Download, Music, Documents, Playlists, and root
+            val root = android.os.Environment.getExternalStorageDirectory()
+            listOf(
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC),
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS),
+                File(root, "Download"),
+                File(root, "Downloads"),
+                File(root, "Music"),
+                File(root, "Documents"),
+                File(root, "Playlists"),
+                root
+            ).forEach { scanDir(it, 0) }
+
+            val list = found.values.sortedByDescending { it.modifiedMs }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                discoveredM3uFiles = list
+                isScanningM3u = false
+            }
+        }
+    }
+
     val importPlaylistLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { activityResult ->
+        val uri: Uri? = activityResult.data?.data
         if (uri != null) {
             try {
                 var fileName: String? = null
@@ -153,641 +281,222 @@ fun VeylPlaylistsScreen(
         else playlists.filter { it.name.contains(searchQuery, ignoreCase = true) }
     }
 
-    LazyColumn(
+    Column(
         modifier = modifier
             .fillMaxSize()
-            .background(colors.background),
-        contentPadding = PaddingValues(bottom = 120.dp)
+            .background(colors.background)
     ) {
-        // Header
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Playlists",
-                            style = VeylTypography.DisplayLarge,
-                            color = colors.textPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "${playlists.size + 4} collections",
-                            style = VeylTypography.BodySmall,
-                            color = colors.textMuted
-                        )
-                    }
+        // Unified Screen Header with crafted tactile action buttons (no duplicate pills)
+        VeylScreenHeader(
+            title = "Playlists",
+            subtitle = "${playlists.size + 4} collections"
+        ) {
+            VeylActionButton(
+                icon = VeylIcons.Upload,
+                contentDescription = "Import M3U Playlist",
+                onClick = {
+                    showM3uScannerDialog = true
+                    scanDeviceForPlaylists()
+                }
+            )
 
-                    // Create New Playlist quick button
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = colors.accentSignal,
-                        modifier = Modifier
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                newPlaylistNameInput = ""
-                                showCreatePlaylistDialog = true
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.Plus,
-                                contentDescription = "New Playlist",
-                                tint = Color.Black,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = "New",
-                                style = VeylTypography.BodySmall,
-                                color = Color.Black,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+            VeylActionButton(
+                icon = VeylIcons.Spotify,
+                contentDescription = "Import Spotify Playlist",
+                accentColor = Color(0xFF1ED760),
+                onClick = {
+                    spotifyUrlInput = ""
+                    spotifyImportError = null
+                    showSpotifyImportDialog = true
+                }
+            )
+
+            VeylActionButton(
+                icon = VeylIcons.Plus,
+                contentDescription = "New Playlist",
+                isPrimary = true,
+                onClick = {
+                    newPlaylistNameInput = ""
+                    showCreatePlaylistDialog = true
+                }
+            )
+        }
+
+        androidx.compose.material3.HorizontalDivider(
+            thickness = 0.5.dp,
+            color = colors.borderHairline.copy(alpha = 0.2f)
+        )
+
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(bottom = 120.dp)
+        ) {
+            // Section 1: Hero Featured Playlist - FAVORITES
+            item {
+                val favTracks = remember(favoriteUris, tracks) {
+                    favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
+                        val fName = File(it.uri).name
+                        !fName.startsWith(".") &&
+                        !fName.contains("trashed", ignoreCase = true) &&
+                        !it.title.contains("trashed", ignoreCase = true) &&
+                        !fName.startsWith("veyl_online_stream_") &&
+                        !it.uri.contains("/cache/")
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Actions row: File / M3U Import & Spotify Import
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Import M3U File
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = colors.surfacePanel,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(42.dp)
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                importPlaylistLauncher.launch(arrayOf("*/*"))
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                VeylListRow(
+                    title = "Favorites",
+                    subtitle = "${favTracks.size} loved tracks • Auto-updated",
+                    onClick = { onNavigateToPlaylist("Favorites") },
+                    trailingContent = {
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                if (favTracks.isNotEmpty()) {
+                                    controller.playTrackList(favTracks, startIndex = 0)
+                                }
+                            },
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(
-                                imageVector = VeylIcons.Upload,
-                                contentDescription = "Import File",
-                                tint = colors.textPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Import M3U",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textPrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    // Import Spotify Playlist
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = colors.surfacePanel,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1ED760).copy(alpha = 0.45f)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(42.dp)
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                spotifyUrlInput = ""
-                                spotifyImportError = null
-                                showSpotifyImportDialog = true
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.Spotify,
-                                contentDescription = "Import Spotify",
-                                tint = Color(0xFF1ED760),
+                                imageVector = VeylIcons.Play,
+                                contentDescription = "Play Favorites",
+                                tint = colors.textMuted,
                                 modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Spotify",
-                                style = VeylTypography.BodySmall,
-                                color = colors.textPrimary,
-                                fontWeight = FontWeight.Bold
-                            )
                         }
                     }
-                }
+                )
             }
-        }
 
-        // Section 1: Hero Featured Playlist - FAVORITES
-        item {
-            val favTracks = remember(favoriteUris, tracks) {
-                favoriteUris.mapNotNull { controller.resolveTrackInfo(it) }.filter {
-                    val fName = File(it.uri).name
-                    !fName.startsWith(".") &&
-                    !fName.contains("trashed", ignoreCase = true) &&
-                    !it.title.contains("trashed", ignoreCase = true) &&
-                    !fName.startsWith("veyl_online_stream_") &&
-                    !it.uri.contains("/cache/")
-                }
-            }
-            val favCoverUri = remember(favTracks) { favTracks.firstOrNull()?.uri ?: "" }
-
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = colors.surfacePanel,
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.accentSignal.copy(alpha = 0.35f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .clickable {
-                        onNavigateToPlaylist("Favorites")
-                    }
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(modifier = Modifier.size(62.dp)) {
-                        if (favCoverUri.isNotBlank()) {
-                            AsyncAlbumArt(
-                                uri = favCoverUri,
-                                contentDescription = "Favorites",
-                                modifier = Modifier.fillMaxSize(),
-                                cornerRadius = 14.dp,
-                                targetSizePx = 150
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        Brush.linearGradient(
-                                            listOf(colors.accentSignal, colors.accentSignal.copy(alpha = 0.65f))
-                                        )
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = VeylIcons.FavoriteFilled,
-                                    contentDescription = null,
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
-                        }
-                        // Red heart badge on cover
-                        Surface(
-                            shape = CircleShape,
-                            color = Color(0xFFE91E63),
-                            modifier = Modifier
-                                .size(22.dp)
-                                .align(Alignment.BottomEnd)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = VeylIcons.FavoriteFilled,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Favorites",
-                            style = VeylTypography.TitleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.textPrimary
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "${favTracks.size} loved tracks • Auto-updated",
-                            style = VeylTypography.BodySmall,
-                            color = colors.textMuted
-                        )
-                    }
-
-                    // Direct 1-tap Play Favorites
-                    IconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            if (favTracks.isNotEmpty()) {
-                                controller.playTrackList(favTracks, startIndex = 0)
-                            }
-                        },
-                        modifier = Modifier.size(42.dp)
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = colors.accentSignal,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = VeylIcons.Play,
-                                    contentDescription = "Play Favorites",
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section 2: Smart Collections Row (Top Tracks, Recently Added, History)
-        item {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+            // Section 2: Smart Collections (Name-Only Unified Rows)
+            item {
                 Text(
                     text = "SMART COLLECTIONS",
                     style = VeylTypography.MonoBadge,
                     color = colors.textMuted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Card 1: Top Tracks
-                    val topTracksCover = remember(topTracks) { topTracks.firstOrNull()?.uri ?: "" }
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = colors.surfacePanel,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { onNavigateToPlaylist("Top Tracks") }
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(68.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                            ) {
-                                if (topTracksCover.isNotBlank()) {
-                                    AsyncAlbumArt(
-                                        uri = topTracksCover,
-                                        contentDescription = "Top Tracks",
-                                        modifier = Modifier.fillMaxSize(),
-                                        cornerRadius = 10.dp,
-                                        targetSizePx = 140
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(colors.surfaceElevated),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(VeylIcons.Equalizer, null, tint = colors.accentSignal, modifier = Modifier.size(24.dp))
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "Top Tracks",
-                                style = VeylTypography.BodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.textPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${topTracks.size} tracks",
-                                style = VeylTypography.MonoSpec,
-                                fontSize = 10.sp,
-                                color = colors.textMuted
-                            )
-                        }
-                    }
-
-                    // Card 2: Recently Added
-                    val lastAddedCover = remember(lastAddedTracks) { lastAddedTracks.firstOrNull()?.uri ?: "" }
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = colors.surfacePanel,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { onNavigateToPlaylist("Last added") }
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(68.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                            ) {
-                                if (lastAddedCover.isNotBlank()) {
-                                    AsyncAlbumArt(
-                                        uri = lastAddedCover,
-                                        contentDescription = "Recently Added",
-                                        modifier = Modifier.fillMaxSize(),
-                                        cornerRadius = 10.dp,
-                                        targetSizePx = 140
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(colors.surfaceElevated),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(VeylIcons.QueueList, null, tint = colors.accentSignal, modifier = Modifier.size(24.dp))
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "Recent Added",
-                                style = VeylTypography.BodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.textPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${lastAddedTracks.size} tracks",
-                                style = VeylTypography.MonoSpec,
-                                fontSize = 10.sp,
-                                color = colors.textMuted
-                            )
-                        }
-                    }
-
-                    // Card 3: History
-                    val historyCover = remember(historyTracks) { historyTracks.firstOrNull()?.uri ?: "" }
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = colors.surfacePanel,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { onNavigateToPlaylist("History") }
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(68.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                            ) {
-                                if (historyCover.isNotBlank()) {
-                                    AsyncAlbumArt(
-                                        uri = historyCover,
-                                        contentDescription = "History",
-                                        modifier = Modifier.fillMaxSize(),
-                                        cornerRadius = 10.dp,
-                                        targetSizePx = 140
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(colors.surfaceElevated),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(VeylIcons.Shuffle, null, tint = colors.accentSignal, modifier = Modifier.size(24.dp))
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "History",
-                                style = VeylTypography.BodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.textPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${historyTracks.size} tracks",
-                                style = VeylTypography.MonoSpec,
-                                fontSize = 10.sp,
-                                color = colors.textMuted
-                            )
-                        }
-                    }
-                }
             }
-        }
 
-        // Section 3: Custom Playlists Header
-        item {
-            Text(
-                text = "MY PLAYLISTS (${filteredPlaylists.size})",
-                style = VeylTypography.MonoBadge,
-                color = colors.textMuted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-        }
-
-        if (filteredPlaylists.isEmpty()) {
             item {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = colors.surfacePanel,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = VeylIcons.QueueList,
-                            contentDescription = null,
-                            tint = colors.textMuted,
-                            modifier = Modifier.size(36.dp)
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            text = "No custom playlists yet",
-                            style = VeylTypography.TitleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.textPrimary
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = "Create a new playlist or import one from Spotify above!",
-                            style = VeylTypography.BodySmall,
-                            color = colors.textMuted
-                        )
-                    }
-                }
+                VeylListRow(
+                    title = "Top Tracks",
+                    subtitle = "Most played • ${topTracks.size} tracks",
+                    onClick = { onNavigateToPlaylist("Top Tracks") }
+                )
+                VeylListRow(
+                    title = "Recent Added",
+                    subtitle = "Latest additions • ${lastAddedTracks.size} tracks",
+                    onClick = { onNavigateToPlaylist("Last added") }
+                )
+                VeylListRow(
+                    title = "History",
+                    subtitle = "Recently played • ${historyTracks.size} tracks",
+                    onClick = { onNavigateToPlaylist("History") }
+                )
             }
-        } else {
-            items(filteredPlaylists, key = { it.id }) { pl ->
-                var showPlaylistOptions by remember { mutableStateOf(false) }
 
-                val playlistCoverUri: String = remember(pl, tracks) {
-                    if (!pl.coverUrl.isNullOrBlank()) {
-                        pl.coverUrl!!
-                    } else {
-                        val online = ArtworkCache.getOnlineArtwork(pl.id) ?: ArtworkCache.getOnlineArtwork(pl.name)
-                        if (!online.isNullOrBlank()) {
-                            online
-                        } else {
-                            val firstWithArt = pl.trackUris.firstOrNull { uri ->
-                                val t = controller.resolveTrackInfo(uri)
-                                t?.hasArtwork == true || ArtworkCache.getOnlineArtwork(uri) != null
-                            } ?: pl.trackUris.firstOrNull() ?: ""
-                            firstWithArt
+            // Section 3: Custom Playlists Header
+            item {
+                Text(
+                    text = "MY PLAYLISTS (${filteredPlaylists.size})",
+                    style = VeylTypography.MonoBadge,
+                    color = colors.textMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+
+            if (filteredPlaylists.isEmpty()) {
+                item {
+                    VeylEmptyState(
+                        icon = VeylIcons.QueueList,
+                        title = "No custom playlists yet",
+                        subtitle = "Create a new playlist or import an M3U8 / Spotify list above.",
+                        actionLabel = "New Playlist",
+                        onAction = {
+                            newPlaylistNameInput = ""
+                            showCreatePlaylistDialog = true
                         }
-                    }
+                    )
                 }
+            } else {
+                items(filteredPlaylists, key = { it.id }) { pl ->
+                    var showPlaylistOptions by remember { mutableStateOf(false) }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(colors.surfacePanel)
-                        .clickable {
-                            onNavigateToPlaylist(pl.name)
-                        }
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Real Playlist Cover Artwork
-                    Box(modifier = Modifier.size(54.dp)) {
-                        if (playlistCoverUri.isNotBlank()) {
-                            AsyncAlbumArt(
-                                uri = playlistCoverUri,
-                                contentDescription = pl.name,
-                                modifier = Modifier.fillMaxSize(),
-                                cornerRadius = 12.dp,
-                                targetSizePx = 140
-                            )
-                        } else {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = colors.surfaceElevated,
-                                modifier = Modifier.fillMaxSize(),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline)
+                    VeylListRow(
+                        title = pl.name,
+                        subtitle = "${pl.trackUris.size} tracks",
+                        onClick = { onNavigateToPlaylist(pl.name) },
+                        modifier = Modifier.animateItem(),
+                        trailingContent = {
+                            IconButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    val plTracks = pl.trackUris.mapNotNull { controller.resolveTrackInfo(it) }
+                                    if (plTracks.isNotEmpty()) {
+                                        controller.playTrackList(plTracks, startIndex = 0)
+                                    }
+                                },
+                                modifier = Modifier.size(44.dp)
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = VeylIcons.Play,
+                                    contentDescription = "Play Playlist",
+                                    tint = colors.textMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            Box {
+                                IconButton(
+                                    onClick = { showPlaylistOptions = true },
+                                    modifier = Modifier.size(44.dp)
+                                ) {
                                     Icon(
-                                        imageVector = VeylIcons.QueueList,
-                                        contentDescription = null,
-                                        tint = colors.accentSignal.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(22.dp)
+                                        imageVector = VeylIcons.MoreVert,
+                                        contentDescription = "Playlist Options",
+                                        tint = colors.textMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = showPlaylistOptions,
+                                    onDismissRequest = { showPlaylistOptions = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Rename") },
+                                        onClick = {
+                                            showPlaylistOptions = false
+                                            playlistToRename = pl
+                                            renamePlaylistInput = pl.name
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Export (.m3u8)") },
+                                        onClick = {
+                                            showPlaylistOptions = false
+                                            playlistToExport = pl
+                                            exportPlaylistLauncher.launch("${pl.name}.m3u8")
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Delete", color = Color(0xFFEF4444)) },
+                                        onClick = {
+                                            showPlaylistOptions = false
+                                            playlistToDelete = pl
+                                        }
                                     )
                                 }
                             }
                         }
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = pl.name,
-                            style = VeylTypography.TitleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "${pl.trackUris.size} tracks",
-                            style = VeylTypography.BodySmall,
-                            color = colors.textMuted
-                        )
-                    }
-
-                    // Quick Play Button
-                    IconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            val plTracks = pl.trackUris.mapNotNull { controller.resolveTrackInfo(it) }
-                            if (plTracks.isNotEmpty()) {
-                                controller.playTrackList(plTracks, startIndex = 0)
-                            }
-                        },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = VeylIcons.Play,
-                            contentDescription = "Play Playlist",
-                            tint = colors.textMuted,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    Box {
-                        IconButton(
-                            onClick = { showPlaylistOptions = true },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = VeylIcons.MoreVert,
-                                contentDescription = "Playlist Options",
-                                tint = colors.textMuted,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        DropdownMenu(
-                            expanded = showPlaylistOptions,
-                            onDismissRequest = { showPlaylistOptions = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Rename") },
-                                onClick = {
-                                    showPlaylistOptions = false
-                                    playlistToRename = pl
-                                    renamePlaylistInput = pl.name
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Export (.m3u8)") },
-                                onClick = {
-                                    showPlaylistOptions = false
-                                    playlistToExport = pl
-                                    exportPlaylistLauncher.launch("${pl.name}.m3u8")
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Delete", color = Color(0xFFEF4444)) },
-                                onClick = {
-                                    showPlaylistOptions = false
-                                    playlistToDelete = pl
-                                }
-                            )
-                        }
-                    }
+                    )
                 }
             }
         }
@@ -1003,4 +712,176 @@ fun VeylPlaylistsScreen(
             }
         )
     }
+
+    // Dialog: In-App .m3u8 / .m3u Playlist Scanner + System Picker Fallback
+    if (showM3uScannerDialog) {
+        val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        androidx.compose.runtime.DisposableEffect(lifecycleOwner, showM3uScannerDialog) {
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                    scanDeviceForPlaylists()
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+        val needsAllFilesGrant = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R &&
+            !android.os.Environment.isExternalStorageManager()
+
+        AlertDialog(
+            onDismissRequest = { showM3uScannerDialog = false },
+            containerColor = colors.surfacePanel,
+            title = {
+                Text(
+                    text = "Import Playlist (.m3u8 / .m3u)",
+                    style = VeylTypography.TitleMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (needsAllFilesGrant) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    try {
+                                        val intent = android.content.Intent(
+                                            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                            Uri.parse("package:${context.packageName}")
+                                        )
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        val fallback = android.content.Intent(
+                                            android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
+                                        )
+                                        context.startActivity(fallback)
+                                    }
+                                }
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Grant All Files Access to scan Downloads",
+                                style = VeylTypography.BodySmall,
+                                color = colors.accentSignal,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "Allow",
+                                style = VeylTypography.BodySmall,
+                                color = colors.accentSignal,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (isScanningM3u) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = colors.accentSignal
+                            )
+                            Text(
+                                text = "Scanning storage for .m3u8 & .m3u files…",
+                                style = VeylTypography.BodySmall,
+                                color = colors.textMuted
+                            )
+                        }
+                    } else if (discoveredM3uFiles.isEmpty()) {
+                        Text(
+                            text = "No .m3u8 or .m3u files found automatically in Download, Music, or Documents.",
+                            style = VeylTypography.BodySmall,
+                            color = colors.textMuted,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        Text(
+                            text = "Tap a playlist file to import:",
+                            style = VeylTypography.BodySmall,
+                            color = colors.textMuted
+                        )
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                        ) {
+                            items(discoveredM3uFiles, key = { it.key }) { candidate ->
+                                com.audiophile.player.ui.components.VeylListRow(
+                                    title = candidate.name,
+                                    subtitle = candidate.folder,
+                                    onClick = {
+                                        try {
+                                            val stream = candidate.file?.inputStream()
+                                                ?: candidate.contentUri?.let { context.contentResolver.openInputStream(it) }
+                                            if (stream == null) {
+                                                Toast.makeText(context, "Unable to open file", Toast.LENGTH_SHORT).show()
+                                                return@VeylListRow
+                                            }
+                                            val defaultTitle = candidate.name.substringBeforeLast(".")
+                                            stream.use { ins ->
+                                                val result = controller.importPlaylist(ins, defaultTitle, tracks)
+                                                result.onSuccess { pl ->
+                                                    showM3uScannerDialog = false
+                                                    Toast.makeText(
+                                                        context,
+                                                        "Imported \"${pl.name}\" (${pl.trackUris.size} tracks)",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }.onFailure { err ->
+                                                    Toast.makeText(context, "Import failed: ${err.message}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showM3uScannerDialog = false
+                        val intent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                        }
+                        importPlaylistLauncher.launch(android.content.Intent.createChooser(intent, "Browse Files"))
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accentSignal)
+                ) {
+                    Text("Browse Files", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showM3uScannerDialog = false }) {
+                    Text("Close", color = colors.textMuted)
+                }
+            }
+        )
+    }
 }
+
+private data class M3uCandidate(
+    val name: String,
+    val folder: String,
+    val modifiedMs: Long,
+    val file: File? = null,
+    val contentUri: Uri? = null,
+    val key: String
+)

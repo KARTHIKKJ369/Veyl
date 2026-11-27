@@ -218,6 +218,7 @@ fun VeylNowPlayingScreen(
                     VeylNowPlayingLyricsCard(
                         controller = controller,
                         onSwitchToCover = { isLyricsMode = false },
+                        onExpandFullscreen = { showLyricsSheet = true },
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
