@@ -77,6 +77,11 @@ fun VeylSettingsRedesigned(
     val dac by controller.connectedDac.collectAsState()
     val isAutoplay by controller.isAutoplayEnabled.collectAsState()
     val playDuringCalls by controller.playDuringCalls.collectAsState()
+    val crossfadeSeconds by controller.crossfadeSeconds.collectAsState()
+    val replayGainMode by controller.replayGainMode.collectAsState()
+    val bufferFrameSize by controller.bufferFrameSize.collectAsState()
+    val autoEqPreamp by controller.autoEqPreamp.collectAsState()
+    val xrunCount by controller.xrunCount.collectAsState()
     var showAdvanced by remember { mutableStateOf(false) }
     var showTasteDialog by remember { mutableStateOf(false) }
 
@@ -175,6 +180,55 @@ fun VeylSettingsRedesigned(
         item {
             SettingsSection("Listening") {
                 SettingsSwitch("Gapless playback", "Move between tracks without a pause", gapless, controller::setGaplessEnabled)
+                SettingsRow(
+                    title = "Crossfade",
+                    subtitle = if (crossfadeSeconds <= 0.05f) "Off" else "${crossfadeSeconds.toInt()} seconds equal-power overlap",
+                    onClick = {
+                        val next = when {
+                            crossfadeSeconds < 1.5f -> 2f
+                            crossfadeSeconds < 3.5f -> 4f
+                            crossfadeSeconds < 5.5f -> 6f
+                            else -> 0f
+                        }
+                        controller.setCrossfadeSeconds(next)
+                    },
+                    trailing = {
+                        Text(
+                            if (crossfadeSeconds <= 0.05f) "Off" else "${crossfadeSeconds.toInt()}s",
+                            style = VeylTypography.BodySmall,
+                            color = colors.accentSignal,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                )
+                SettingsRow(
+                    title = "ReplayGain",
+                    subtitle = when (replayGainMode) {
+                        uniffi.audiophile_core.ReplayGainModeEnum.OFF -> "Disabled (raw dynamics)"
+                        uniffi.audiophile_core.ReplayGainModeEnum.TRACK -> "Track loudness with peak protection"
+                        uniffi.audiophile_core.ReplayGainModeEnum.ALBUM -> "Album loudness (preserves track contrast)"
+                    },
+                    onClick = {
+                        val next = when (replayGainMode) {
+                            uniffi.audiophile_core.ReplayGainModeEnum.OFF -> uniffi.audiophile_core.ReplayGainModeEnum.TRACK
+                            uniffi.audiophile_core.ReplayGainModeEnum.TRACK -> uniffi.audiophile_core.ReplayGainModeEnum.ALBUM
+                            uniffi.audiophile_core.ReplayGainModeEnum.ALBUM -> uniffi.audiophile_core.ReplayGainModeEnum.OFF
+                        }
+                        controller.setReplayGainMode(next)
+                    },
+                    trailing = {
+                        Text(
+                            when (replayGainMode) {
+                                uniffi.audiophile_core.ReplayGainModeEnum.OFF -> "Off"
+                                uniffi.audiophile_core.ReplayGainModeEnum.TRACK -> "Track"
+                                uniffi.audiophile_core.ReplayGainModeEnum.ALBUM -> "Album"
+                            },
+                            style = VeylTypography.BodySmall,
+                            color = colors.accentSignal,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                )
                 SettingsSwitch("Find synced lyrics", "Fetch lyrics when available", lyrics, controller::setAutoFetchLyrics)
                 SettingsSwitch(
                     "Play during phone calls",
@@ -199,6 +253,21 @@ fun VeylSettingsRedesigned(
                 )
                 if (showAdvanced) {
                     SettingsSwitch("Bit-perfect output", "Use the source sample rate with a compatible USB DAC", bitPerfect, controller::setBitPerfectEnabled)
+                    SettingsSwitch("EQ auto-preamp headroom", "Prevent clipping when boosting EQ bands", autoEqPreamp, controller::setAutoEqPreamp)
+                    SettingsRow(
+                        title = "Audio buffer size",
+                        subtitle = "$bufferFrameSize frames${if (xrunCount > 0) " • $xrunCount xruns" else " • 0 xruns"}",
+                        onClick = {
+                            val next = when (bufferFrameSize) {
+                                128 -> 256
+                                256 -> 512
+                                512 -> 1024
+                                else -> 128
+                            }
+                            controller.setBufferFrameSize(next)
+                        },
+                        trailing = { Text("${bufferFrameSize}f", style = VeylTypography.BodySmall, color = colors.accentSignal) }
+                    )
                     SettingsRow(
                         title = "DSD playback",
                         subtitle = if (dsdMode == DsdModeEnum.DO_P) "DoP" else "PCM conversion",

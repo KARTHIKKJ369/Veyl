@@ -242,6 +242,10 @@ pub mod android_oboe {
             self.stream.get_sample_rate()
         }
 
+        pub fn xrun_count(&self) -> i32 {
+            self.stream.get_xrun_count().unwrap_or(0)
+        }
+
         pub fn stop(&mut self) -> Result<(), OutputError> {
             self.stream.stop().map_err(|e| OutputError::StartFailed(format!("{:?}", e)))
         }

@@ -44,6 +44,11 @@ pub struct AudioStreamInfo {
     /// ReplayGain track gain in dB (e.g. -6.5 means reduce by 6.5dB)
     /// None if no ReplayGain tags were found
     pub replaygain_db: Option<f32>,
+    /// ReplayGain album gain in dB, if present
+    pub replaygain_album_db: Option<f32>,
+    /// Linear peak amplitude (0.0..1.0+) for ReplayGain clipping protection
+    pub replaygain_track_peak: Option<f32>,
+    pub replaygain_album_peak: Option<f32>,
     /// Whether this stream is currently packaged as bit-exact DoP (DSD over PCM)
     pub is_dop: bool,
 }
@@ -123,6 +128,9 @@ impl AudioDecoder {
             codec_name,
             container_name: "DSF".to_string(),
             replaygain_db: None,
+            replaygain_album_db: None,
+            replaygain_track_peak: None,
+            replaygain_album_peak: None,
             is_dop: matches!(dsd_mode, DsdPlaybackMode::DoP),
         };
 
@@ -174,6 +182,9 @@ impl AudioDecoder {
             codec_name,
             container_name: "DSDIFF".to_string(),
             replaygain_db: None,
+            replaygain_album_db: None,
+            replaygain_track_peak: None,
+            replaygain_album_peak: None,
             is_dop: matches!(dsd_mode, DsdPlaybackMode::DoP),
         };
 
@@ -276,6 +287,7 @@ impl AudioDecoder {
             .make(&track.codec_params, &decoder_opts)
             .map_err(DecodeError::Symphonia)?;
 
+        let rg = Self::extract_replaygain_info(&source.uri());
         let info = AudioStreamInfo {
             sample_rate,
             channels,
@@ -284,7 +296,10 @@ impl AudioDecoder {
             total_frames,
             codec_name,
             container_name,
-            replaygain_db: Self::extract_replaygain(&source.uri()),
+            replaygain_db: rg.track_gain_db,
+            replaygain_album_db: rg.album_gain_db,
+            replaygain_track_peak: rg.track_peak,
+            replaygain_album_peak: rg.album_peak,
             is_dop: false,
         };
 
@@ -300,27 +315,48 @@ impl AudioDecoder {
         })
     }
 
-    /// Extract ReplayGain track gain from file tags using lofty.
-    fn extract_replaygain(uri: &str) -> Option<f32> {
+    /// Extract ReplayGain track/album gain and peak tags (including Opus R128_*_GAIN) via lofty.
+    fn extract_replaygain_info(uri: &str) -> ReplayGainInfo {
+        let mut out = ReplayGainInfo::default();
         let path = std::path::Path::new(uri);
-        let tagged_file = Probe::open(path).ok()?.read().ok()?;
+        let Ok(probe) = Probe::open(path) else { return out; };
+        let Ok(tagged_file) = probe.read() else { return out; };
 
         for tag in tagged_file.tags() {
             for item in tag.items() {
-                let key_str = format!("{:?}", item.key());
-                if key_str.to_uppercase().contains("REPLAYGAIN_TRACK_GAIN") {
-                    if let lofty::tag::ItemValue::Text(val) = item.value() {
-                        let cleaned = val.trim().to_lowercase().replace("db", "").trim().to_string();
-                        if let Ok(gain) = cleaned.trim().parse::<f32>() {
-                            log::info!("ReplayGain track gain found: {:.2} dB for {}", gain, uri);
-                            return Some(gain);
+                let key_str = format!("{:?}", item.key()).to_uppercase();
+                if let lofty::tag::ItemValue::Text(val) = item.value() {
+                    let cleaned = val.trim().to_lowercase().replace("db", "").trim().to_string();
+                    if key_str.contains("REPLAYGAIN_TRACK_GAIN") {
+                        if let Ok(g) = cleaned.parse::<f32>() {
+                            out.track_gain_db = Some(g);
+                        }
+                    } else if key_str.contains("REPLAYGAIN_ALBUM_GAIN") {
+                        if let Ok(g) = cleaned.parse::<f32>() {
+                            out.album_gain_db = Some(g);
+                        }
+                    } else if key_str.contains("REPLAYGAIN_TRACK_PEAK") {
+                        if let Ok(p) = cleaned.parse::<f32>() {
+                            if p > 0.0 { out.track_peak = Some(p); }
+                        }
+                    } else if key_str.contains("REPLAYGAIN_ALBUM_PEAK") {
+                        if let Ok(p) = cleaned.parse::<f32>() {
+                            if p > 0.0 { out.album_peak = Some(p); }
+                        }
+                    } else if key_str.contains("R128_TRACK_GAIN") && out.track_gain_db.is_none() {
+                        // Opus R128 tags are Q7.8 fixed-point dB relative to -23 LUFS (+5 dB aligns to -18 LUFS ReplayGain)
+                        if let Ok(q78) = cleaned.parse::<f32>() {
+                            out.track_gain_db = Some((q78 / 256.0) + 5.0);
+                        }
+                    } else if key_str.contains("R128_ALBUM_GAIN") && out.album_gain_db.is_none() {
+                        if let Ok(q78) = cleaned.parse::<f32>() {
+                            out.album_gain_db = Some((q78 / 256.0) + 5.0);
                         }
                     }
                 }
             }
         }
-
-        None
+        out
     }
 
     pub fn info(&self) -> &AudioStreamInfo {
@@ -426,11 +462,8 @@ impl AudioDecoder {
                                 // Stereo (L, R)
                                 interleaved.extend_from_slice(raw_samples);
                             } else {
-                                // Multi-channel (downmix to stereo: L=ch0, R=ch1)
-                                for f in 0..num_frames {
-                                    interleaved.push(raw_samples[f * num_channels]);
-                                    interleaved.push(raw_samples[f * num_channels + 1]);
-                                }
+                                // Standard ITU-R BS.775 multi-channel -> stereo downmix
+                                downmix_multichannel_to_stereo(raw_samples, num_channels, num_frames, &mut interleaved);
                             }
 
                             self.current_frame += num_frames as u64;
@@ -484,5 +517,63 @@ impl AudioDecoder {
                 Ok(actual_seconds)
             }
         }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ReplayGainInfo {
+    track_gain_db: Option<f32>,
+    album_gain_db: Option<f32>,
+    track_peak: Option<f32>,
+    album_peak: Option<f32>,
+}
+
+/// ITU-R BS.775 multi-channel (3.0, 4.0, 5.1, 7.1) to stereo downmix preserving center vocals and LFE.
+pub fn downmix_multichannel_to_stereo(
+    raw_samples: &[f32],
+    num_channels: usize,
+    num_frames: usize,
+    out: &mut Vec<f32>,
+) {
+    const INV_SQRT2: f32 = std::f32::consts::FRAC_1_SQRT_2;
+    for f in 0..num_frames {
+        let base = f * num_channels;
+        let l = raw_samples[base];
+        let r = raw_samples[base + 1];
+        let (out_l, out_r) = match num_channels {
+            3 => {
+                // L, R, C
+                let c = raw_samples[base + 2] * INV_SQRT2;
+                ((l + c) * 0.707, (r + c) * 0.707)
+            }
+            4 => {
+                // L, R, Ls, Rs
+                let ls = raw_samples[base + 2] * INV_SQRT2;
+                let rs = raw_samples[base + 3] * INV_SQRT2;
+                ((l + ls) * 0.707, (r + rs) * 0.707)
+            }
+            5 | 6 => {
+                // 5.0 / 5.1: L, R, C, LFE, Ls, Rs
+                let c = raw_samples[base + 2] * INV_SQRT2;
+                let lfe = if num_channels == 6 { raw_samples[base + 3] * 0.25 } else { 0.0 };
+                let ls_idx = if num_channels == 6 { base + 4 } else { base + 3 };
+                let rs_idx = if num_channels == 6 { base + 5 } else { base + 4 };
+                let ls = raw_samples[ls_idx] * INV_SQRT2;
+                let rs = raw_samples[rs_idx] * INV_SQRT2;
+                ((l + c + lfe + ls) * 0.58, (r + c + lfe + rs) * 0.58)
+            }
+            _ => {
+                // 7.1+: L, R, C, LFE, Ls, Rs, Lrs, Rrs
+                let c = raw_samples[base + 2] * INV_SQRT2;
+                let lfe = raw_samples[base + 3] * 0.25;
+                let ls = raw_samples[base + 4] * INV_SQRT2;
+                let rs = raw_samples[base + 5] * INV_SQRT2;
+                let lrs = if num_channels >= 8 { raw_samples[base + 6] * 0.5 } else { 0.0 };
+                let rrs = if num_channels >= 8 { raw_samples[base + 7] * 0.5 } else { 0.0 };
+                ((l + c + lfe + ls + lrs) * 0.50, (r + c + lfe + rs + rrs) * 0.50)
+            }
+        };
+        out.push(out_l);
+        out.push(out_r);
     }
 }

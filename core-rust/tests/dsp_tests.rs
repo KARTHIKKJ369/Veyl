@@ -344,4 +344,48 @@ fn test_tube_warmth_audible_harmonics() {
     assert!((warmed - clean_sample).abs() > 0.02, "Tube warmth must produce measurable harmonic difference, got {} vs {}", warmed, clean_sample);
 }
 
+#[test]
+fn test_stream_resampler_flush_drains_tail() {
+    use audiophile_core::resampler::StreamResampler;
+    let mut r = StreamResampler::new(44100, 48000, 2);
+    // Feed fewer than 1024 frames (chunk_size) -> process_interleaved holds them pending
+    let input = vec![0.25f32; 400 * 2];
+    let immediate = r.process_interleaved(&input);
+    assert!(immediate.is_empty(), "Partial chunk should buffer before flush");
+    let flushed = r.flush();
+    assert!(!flushed.is_empty(), "flush() must drain remaining tail frames at EOF");
+    let out_frames = flushed.len() / 2;
+    assert!(out_frames >= 400 && out_frames <= 460, "Expected ~435 output frames for 400 @ 44.1->48k, got {}", out_frames);
+}
+
+#[test]
+fn test_itu_multichannel_downmix_preserves_center_and_surround() {
+    use audiophile_core::decoder::downmix_multichannel_to_stereo;
+    // 5.1 layout: L, R, C, LFE, Ls, Rs — put vocal on Center only
+    let raw = vec![0.0, 0.0, 0.8, 0.0, 0.0, 0.0];
+    let mut out = Vec::new();
+    downmix_multichannel_to_stereo(&raw, 6, 1, &mut out);
+    assert_eq!(out.len(), 2);
+    assert!(out[0] > 0.25 && out[1] > 0.25, "Center channel must fold equally into L/R stereo: {:?}", out);
+    assert!((out[0] - out[1]).abs() < 1e-5);
+}
+
+#[test]
+fn test_wsola_time_stretcher_changes_duration_cleanly() {
+    use audiophile_core::dsp::TimeStretcher;
+    let mut ts = TimeStretcher::new(48000.0, 2);
+    ts.set_speed(1.5);
+    let frames = 8192;
+    let mut input = vec![0.0f32; frames * 2];
+    for i in 0..frames {
+        let t = i as f32 / 48000.0;
+        let s = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
+        input[i * 2] = s;
+        input[i * 2 + 1] = s;
+    }
+    let stretched = ts.process_interleaved(&input);
+    let out_frames = stretched.len() / 2;
+    assert!(out_frames > 0 && out_frames < frames, "1.5x speed should produce fewer frames cleanly, got {} from {}", out_frames, frames);
+}
+
 

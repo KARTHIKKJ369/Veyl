@@ -158,6 +158,50 @@ impl StreamResampler {
 
         output_interleaved
     }
+
+    /// Flush any remaining pending frames (< chunk_size) at end-of-stream by
+    /// zero-padding to `chunk_size` and trimming the resampled output proportionally.
+    pub fn flush(&mut self) -> Vec<f32> {
+        if self.is_identity() || self.pending_frames == 0 {
+            self.reset();
+            return Vec::new();
+        }
+
+        let remaining = self.pending_frames;
+        let mut chunk_input: Vec<Vec<f32>> = Vec::with_capacity(self.channels);
+        for ch in 0..self.channels {
+            let mut buf = Vec::with_capacity(self.chunk_size);
+            buf.extend_from_slice(&self.pending_input[ch][..remaining]);
+            buf.resize(self.chunk_size, 0.0);
+            chunk_input.push(buf);
+        }
+
+        self.pending_input.iter_mut().for_each(|c| c.clear());
+        self.pending_frames = 0;
+
+        let expected_out_frames = ((remaining as f64) * (self.output_rate / self.input_rate)).round() as usize;
+        let mut output_interleaved = Vec::new();
+
+        if let Ok(resampled_channels) = self.inner.process(&chunk_input, None) {
+            if !resampled_channels.is_empty() {
+                let out_frames = resampled_channels[0].len().min(expected_out_frames);
+                output_interleaved.reserve(out_frames * self.channels);
+                for f in 0..out_frames {
+                    for ch in 0..self.channels {
+                        output_interleaved.push(
+                            if ch < resampled_channels.len() {
+                                resampled_channels[ch][f]
+                            } else {
+                                0.0
+                            }
+                        );
+                    }
+                }
+            }
+        }
+        self.inner.reset();
+        output_interleaved
+    }
 }
 
 // Note: std::fmt::Debug can't be derived for rubato types, implement manually

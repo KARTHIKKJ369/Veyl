@@ -1,7 +1,8 @@
 use parking_lot::Mutex;
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapRb;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::f32::consts::FRAC_PI_2;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -12,11 +13,25 @@ use crate::dsd::DsdPlaybackMode;
 use crate::dsp::{
     calculate_levels, calculate_spectrum_16, ChannelBalance, CrossfeedFilter, CrossfeedPreset,
     LevelMetrics, LoudnessNormalizer, ParametricEqualizer, PeakLimiter, Spatializer360,
-    SubBassExciter, TpdfDither, TubeWarmthExciter, VocalClarity,
+    SubBassExciter, TimeStretcher, TpdfDither, TubeWarmthExciter, VocalClarity,
 };
 use crate::output::AudioRenderCallback;
 use crate::resampler::StreamResampler;
 use crate::source::LocalFileSource;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrossfadeCurve {
+    Linear,
+    EqualPower,
+    SCurve,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayGainMode {
+    Off,
+    Track,
+    Album,
+}
 
 /// Apply perceptual (logarithmic) volume curve.
 /// Maps a linear 0.0–1.0 slider to a power curve that matches human hearing.
@@ -100,10 +115,21 @@ pub struct PlaybackEngine {
     channel_balance: Arc<Mutex<ChannelBalance>>,
     limiter: Arc<Mutex<PeakLimiter>>,
     playback_speed: Arc<Mutex<f32>>,
+    time_stretcher: Arc<Mutex<TimeStretcher>>,
     #[allow(dead_code)]
     dither: Arc<Mutex<TpdfDither>>,
     resampler: Arc<Mutex<Option<StreamResampler>>>,
     render_volume: Arc<Mutex<f32>>,
+    crossfade_seconds: Arc<Mutex<f32>>,
+    crossfade_curve: Arc<Mutex<CrossfadeCurve>>,
+    replaygain_mode: Arc<Mutex<ReplayGainMode>>,
+
+    // Lock-free Real-Time Render State (Zero blocking locks on audio callback!)
+    is_playing_atomic: Arc<AtomicBool>,
+    is_dop_atomic: Arc<AtomicBool>,
+    volume_bits_atomic: Arc<AtomicU32>,
+    position_nanos_atomic: Arc<AtomicU64>,
+    latest_metrics: Arc<Mutex<(LevelMetrics, [f32; 16])>>,
 
     // Playback State
     state: Arc<Mutex<PlaybackEngineState>>,
@@ -116,6 +142,8 @@ pub struct PlaybackEngine {
     // Decoder Management
     active_decoder: Arc<Mutex<Option<AudioDecoder>>>,
     next_decoder: Arc<Mutex<Option<AudioDecoder>>>,
+    next_preloaded_item: Arc<Mutex<Option<TrackQueueItem>>>,
+    gapless_enabled: Arc<AtomicBool>,
 
     // Concurrency controls
     is_running: Arc<AtomicBool>,
@@ -141,9 +169,19 @@ impl PlaybackEngine {
         let channel_balance = Arc::new(Mutex::new(ChannelBalance::new()));
         let limiter = Arc::new(Mutex::new(PeakLimiter::new()));
         let playback_speed = Arc::new(Mutex::new(1.0f32));
+        let time_stretcher = Arc::new(Mutex::new(TimeStretcher::new(output_sample_rate, output_channels)));
         let dither = Arc::new(Mutex::new(TpdfDither::new()));
         let resampler = Arc::new(Mutex::new(None));
         let dsd_mode = Arc::new(Mutex::new(DsdPlaybackMode::PcmDecimation));
+        let crossfade_seconds = Arc::new(Mutex::new(0.0f32));
+        let crossfade_curve = Arc::new(Mutex::new(CrossfadeCurve::EqualPower));
+        let replaygain_mode = Arc::new(Mutex::new(ReplayGainMode::Track));
+
+        let is_playing_atomic = Arc::new(AtomicBool::new(false));
+        let is_dop_atomic = Arc::new(AtomicBool::new(false));
+        let volume_bits_atomic = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+        let position_nanos_atomic = Arc::new(AtomicU64::new(0));
+        let latest_metrics = Arc::new(Mutex::new((LevelMetrics::default(), [0.0f32; 16])));
 
         let state = Arc::new(Mutex::new(PlaybackEngineState {
             playback_state: PlaybackState::Stopped,
@@ -168,6 +206,8 @@ impl PlaybackEngine {
         let queue = Arc::new(Mutex::new(Vec::new()));
         let active_decoder = Arc::new(Mutex::new(None));
         let next_decoder = Arc::new(Mutex::new(None));
+        let next_preloaded_item = Arc::new(Mutex::new(None));
+        let gapless_enabled = Arc::new(AtomicBool::new(true));
 
         let engine = Self {
             output_sample_rate: Arc::new(Mutex::new(output_sample_rate)),
@@ -183,15 +223,26 @@ impl PlaybackEngine {
             channel_balance,
             limiter,
             playback_speed,
+            time_stretcher,
             dither,
             resampler,
             render_volume: Arc::new(Mutex::new(0.0)),
+            crossfade_seconds,
+            crossfade_curve,
+            replaygain_mode,
+            is_playing_atomic,
+            is_dop_atomic,
+            volume_bits_atomic,
+            position_nanos_atomic,
+            latest_metrics,
             state,
             queue,
             ring_buffer_producer: Arc::new(Mutex::new(producer)),
             ring_buffer_consumer: Arc::new(Mutex::new(consumer)),
             active_decoder,
             next_decoder,
+            next_preloaded_item,
+            gapless_enabled,
             is_running,
             seek_requested_frame,
             flush_requested,
@@ -264,6 +315,8 @@ impl PlaybackEngine {
         let is_running = Arc::clone(&self.is_running);
         let active_decoder = Arc::clone(&self.active_decoder);
         let next_decoder = Arc::clone(&self.next_decoder);
+        let next_preloaded_item = Arc::clone(&self.next_preloaded_item);
+        let gapless_enabled = Arc::clone(&self.gapless_enabled);
         let producer = Arc::clone(&self.ring_buffer_producer);
         let resampler = Arc::clone(&self.resampler);
         let state = Arc::clone(&self.state);
@@ -274,11 +327,20 @@ impl PlaybackEngine {
         let dsd_mode_arc = Arc::clone(&self.dsd_mode);
         let consumer = Arc::clone(&self.ring_buffer_consumer);
         let playback_speed_arc = Arc::clone(&self.playback_speed);
+        let time_stretcher_arc = Arc::clone(&self.time_stretcher);
+        let crossfade_sec_arc = Arc::clone(&self.crossfade_seconds);
+        let crossfade_curve_arc = Arc::clone(&self.crossfade_curve);
+        let replaygain_mode_arc = Arc::clone(&self.replaygain_mode);
+        let is_playing_atomic = Arc::clone(&self.is_playing_atomic);
+        let is_dop_atomic = Arc::clone(&self.is_dop_atomic);
+        let pos_nanos_atomic = Arc::clone(&self.position_nanos_atomic);
 
         thread::Builder::new()
             .name("audiophile-decode-worker".to_string())
             .spawn(move || {
                 let mut residual: Vec<f32> = Vec::with_capacity(16384);
+                let mut next_residual: Vec<f32> = Vec::with_capacity(16384);
+                let mut next_resampler: Option<StreamResampler> = None;
 
                 while is_running.load(Ordering::Relaxed) {
                     let output_rate = *output_rate_arc.lock() as u32;
@@ -287,6 +349,9 @@ impl PlaybackEngine {
                     let seek_frame = seek_req.swap(u64::MAX, Ordering::SeqCst);
                     if seek_frame != u64::MAX {
                         residual.clear();
+                        next_residual.clear();
+                        next_resampler = None;
+                        time_stretcher_arc.lock().reset();
                         let mut dec_guard = active_decoder.lock();
                         if let Some(ref mut dec) = *dec_guard {
                             let target_sec = seek_frame as f64 / dec.info().sample_rate as f64;
@@ -300,6 +365,9 @@ impl PlaybackEngine {
                     // Check if a flush was requested (new track loaded or rate change)
                     if flush_req.swap(false, Ordering::SeqCst) {
                         residual.clear();
+                        next_residual.clear();
+                        next_resampler = None;
+                        time_stretcher_arc.lock().reset();
                         if let Some(ref mut r) = *resampler.lock() {
                             r.reset();
                         }
@@ -351,6 +419,11 @@ impl PlaybackEngine {
                     let mut track_sample_rate = 0;
                     let mut is_dop = false;
                     let mut replaygain_db = None;
+                    let mut replaygain_album_db = None;
+                    let mut replaygain_track_peak = None;
+                    let mut replaygain_album_peak = None;
+                    let mut active_remaining_sec = f64::MAX;
+                    let mut active_duration_sec = 0.0;
 
                     {
                         let mut dec_guard = active_decoder.lock();
@@ -362,6 +435,13 @@ impl PlaybackEngine {
                                     track_sample_rate = info.sample_rate;
                                     is_dop = info.is_dop;
                                     replaygain_db = info.replaygain_db;
+                                    replaygain_album_db = info.replaygain_album_db;
+                                    replaygain_track_peak = info.replaygain_track_peak;
+                                    replaygain_album_peak = info.replaygain_album_peak;
+                                    active_duration_sec = info.duration_seconds;
+                                    if active_duration_sec > 0.0 {
+                                        active_remaining_sec = (active_duration_sec - dec.current_time_seconds()).max(0.0);
+                                    }
                                 }
                                 Err(DecodeError::EndOfStream) => {
                                     track_ended = true;
@@ -374,12 +454,25 @@ impl PlaybackEngine {
                         }
                     }
 
-                    // 4. Apply ReplayGain normalization, resample if necessary, push into ring buffer
+                    // 4. Apply ReplayGain normalization (Off/Track/Album + peak clamp), resample & time-stretch cleanly
                     if let Some(mut raw_samples) = decoded_chunk {
-                        // Apply ReplayGain loudness normalization (if tags exist)
-                        if let Some(rg_db) = replaygain_db {
+                        let rg_mode = *replaygain_mode_arc.lock();
+                        let (selected_db, selected_peak) = match rg_mode {
+                            ReplayGainMode::Off => (None, None),
+                            ReplayGainMode::Track => (replaygain_db, replaygain_track_peak),
+                            ReplayGainMode::Album => (
+                                replaygain_album_db.or(replaygain_db),
+                                replaygain_album_peak.or(replaygain_track_peak),
+                            ),
+                        };
+                        if let Some(rg_db) = selected_db {
                             let clamped_db = rg_db.clamp(-24.0, 12.0);
-                            let linear_gain = 10.0f32.powf(clamped_db / 20.0);
+                            let mut linear_gain = 10.0f32.powf(clamped_db / 20.0);
+                            if let Some(peak) = selected_peak {
+                                if peak > 0.0 {
+                                    linear_gain = linear_gain.min(0.99 / peak);
+                                }
+                            }
                             for sample in raw_samples.iter_mut() {
                                 *sample *= linear_gain;
                             }
@@ -391,30 +484,19 @@ impl PlaybackEngine {
                         }
 
                         let speed = *playback_speed_arc.lock();
-                        let effective_rate = if (speed - 1.0).abs() > 0.01 {
-                            (track_sample_rate as f32 * speed).round() as u32
-                        } else {
-                            track_sample_rate
-                        };
 
-                        // Resample if necessary to match hardware output rate
-                        let resampled = if !is_dop && effective_rate > 0 && output_rate > 0 && effective_rate != output_rate {
+                        // Resample at true native rate -> output_rate (pitch-neutral)
+                        let mut processed = if !is_dop && track_sample_rate > 0 && output_rate > 0 && track_sample_rate != output_rate {
                             let mut res_guard = resampler.lock();
                             let needs_rebuild = match *res_guard {
                                 Some(ref r) => {
-                                    (r.input_rate - effective_rate as f64).abs() > 0.1
+                                    (r.input_rate - track_sample_rate as f64).abs() > 0.1
                                         || (r.output_rate - output_rate as f64).abs() > 0.1
                                 }
                                 None => true,
                             };
                             if needs_rebuild {
-                                log::info!(
-                                    "Dynamic Resampler: adapting from {} Hz (speed: {:.2}x) to hardware output {} Hz",
-                                    effective_rate,
-                                    speed,
-                                    output_rate
-                                );
-                                *res_guard = Some(StreamResampler::new(effective_rate, output_rate, 2));
+                                *res_guard = Some(StreamResampler::new(track_sample_rate, output_rate, 2));
                             }
                             if let Some(ref mut r) = *res_guard {
                                 r.process_interleaved(&raw_samples)
@@ -422,7 +504,6 @@ impl PlaybackEngine {
                                 raw_samples
                             }
                         } else {
-                            // Exact rate match or DoP - bypass resampler and drop if stale
                             let mut res_guard = resampler.lock();
                             if res_guard.is_some() {
                                 *res_guard = None;
@@ -430,7 +511,82 @@ impl PlaybackEngine {
                             raw_samples
                         };
 
-                        residual.extend(resampled);
+                        // Apply pitch-preserved WSOLA time-stretching if playback_speed != 1.0
+                        if !is_dop && (speed - 1.0).abs() > 0.01 && !processed.is_empty() {
+                            let mut ts = time_stretcher_arc.lock();
+                            ts.set_speed(speed);
+                            processed = ts.process_interleaved(&processed);
+                        }
+
+                        // Equal-power / Linear / S-Curve Crossfade overlap mixing into next_decoder
+                        let cf_sec = *crossfade_sec_arc.lock() as f64;
+                        if !is_dop
+                            && cf_sec > 0.05
+                            && active_duration_sec > cf_sec + 1.0
+                            && active_remaining_sec <= cf_sec
+                            && !processed.is_empty()
+                        {
+                            let mut next_dec_guard = next_decoder.lock();
+                            if let Some(ref mut next_dec) = *next_dec_guard {
+                                let next_info = next_dec.info().clone();
+                                if !next_info.is_dop {
+                                    while next_residual.len() < processed.len() {
+                                        match next_dec.decode_next() {
+                                            Ok(mut n_raw) => {
+                                                // Apply ReplayGain to incoming crossfade track too
+                                                let (n_db, n_peak) = match rg_mode {
+                                                    ReplayGainMode::Off => (None, None),
+                                                    ReplayGainMode::Track => (next_info.replaygain_db, next_info.replaygain_track_peak),
+                                                    ReplayGainMode::Album => (
+                                                        next_info.replaygain_album_db.or(next_info.replaygain_db),
+                                                        next_info.replaygain_album_peak.or(next_info.replaygain_track_peak),
+                                                    ),
+                                                };
+                                                if let Some(db) = n_db {
+                                                    let mut lg = 10.0f32.powf(db.clamp(-24.0, 12.0) / 20.0);
+                                                    if let Some(p) = n_peak {
+                                                        if p > 0.0 { lg = lg.min(0.99 / p); }
+                                                    }
+                                                    for s in n_raw.iter_mut() { *s *= lg; }
+                                                }
+                                                let n_res = if next_info.sample_rate != output_rate && output_rate > 0 {
+                                                    let need_nr = match next_resampler {
+                                                        Some(ref nr) => (nr.input_rate - next_info.sample_rate as f64).abs() > 0.1 || (nr.output_rate - output_rate as f64).abs() > 0.1,
+                                                        None => true,
+                                                    };
+                                                    if need_nr {
+                                                        next_resampler = Some(StreamResampler::new(next_info.sample_rate, output_rate, 2));
+                                                    }
+                                                    next_resampler.as_mut().map(|nr| nr.process_interleaved(&n_raw)).unwrap_or(n_raw)
+                                                } else {
+                                                    n_raw
+                                                };
+                                                next_residual.extend(n_res);
+                                            }
+                                            Err(_) => break,
+                                        }
+                                    }
+
+                                    let mix_len = processed.len().min(next_residual.len());
+                                    let t = ((cf_sec - active_remaining_sec) / cf_sec).clamp(0.0, 1.0) as f32;
+                                    let curve = *crossfade_curve_arc.lock();
+                                    let (fade_out, fade_in) = match curve {
+                                        CrossfadeCurve::Linear => (1.0 - t, t),
+                                        CrossfadeCurve::EqualPower => ((t * FRAC_PI_2).cos(), (t * FRAC_PI_2).sin()),
+                                        CrossfadeCurve::SCurve => {
+                                            let s = t * t * (3.0 - 2.0 * t);
+                                            (1.0 - s, s)
+                                        }
+                                    };
+                                    for i in 0..mix_len {
+                                        processed[i] = processed[i] * fade_out + next_residual[i] * fade_in;
+                                    }
+                                    next_residual.drain(..mix_len);
+                                }
+                            }
+                        }
+
+                        residual.extend(processed);
 
                         let mut prod = producer.lock();
                         let vacant = prod.vacant_len();
@@ -444,6 +600,17 @@ impl PlaybackEngine {
 
                     // 5. Handle gapless boundary or track end
                     if track_ended {
+                        // Flush any remaining tail frames inside the resampler before finishing track
+                        {
+                            let mut res_guard = resampler.lock();
+                            if let Some(ref mut r) = *res_guard {
+                                let tail = r.flush();
+                                if !tail.is_empty() {
+                                    residual.extend(tail);
+                                }
+                            }
+                        }
+
                         // Drain any remaining residual before switching
                         while !residual.is_empty() {
                             let mut prod = producer.lock();
@@ -459,34 +626,63 @@ impl PlaybackEngine {
                             }
                         }
 
-                        // Handle Gapless Transition: switch to next preloaded decoder
+                        // Handle Gapless Transition: switch to next preloaded decoder if gapless is enabled
+                        let is_gapless = gapless_enabled.load(Ordering::Relaxed);
                         let mut next_dec_guard = next_decoder.lock();
                         let mut active_dec_guard = active_decoder.lock();
 
-                        if let Some(next_dec) = next_dec_guard.take() {
+                        if is_gapless && next_dec_guard.is_some() {
+                            let next_dec = next_dec_guard.take().unwrap();
                             let next_info = next_dec.info().clone();
-                            if !next_info.is_dop && next_info.sample_rate != output_rate {
-                                *resampler.lock() = Some(StreamResampler::new(next_info.sample_rate, output_rate, 2));
+                            let preloaded_meta = next_preloaded_item.lock().take();
+
+                            // Carry over crossfade resampler/residual if crossfade had already begun
+                            if let Some(nr) = next_resampler.take() {
+                                *resampler.lock() = Some(nr);
                             } else {
-                                *resampler.lock() = None;
+                                let mut res_guard = resampler.lock();
+                                if !next_info.is_dop && next_info.sample_rate != output_rate {
+                                    let needs_new = match *res_guard {
+                                        Some(ref r) => {
+                                            (r.input_rate - next_info.sample_rate as f64).abs() > 0.1
+                                                || (r.output_rate - output_rate as f64).abs() > 0.1
+                                        }
+                                        None => true,
+                                    };
+                                    if needs_new {
+                                        *res_guard = Some(StreamResampler::new(next_info.sample_rate, output_rate, 2));
+                                    }
+                                } else {
+                                    *res_guard = None;
+                                }
+                            }
+                            if !next_residual.is_empty() {
+                                residual.extend(next_residual.drain(..));
                             }
 
                             *active_dec_guard = Some(next_dec);
+                            is_dop_atomic.store(next_info.is_dop, Ordering::Relaxed);
+                            pos_nanos_atomic.store(0, Ordering::Relaxed);
 
                             let mut s = state.lock();
                             s.current_track_index += 1;
-                            let q = queue.lock();
-                            if s.current_track_index < q.len() {
-                                s.current_track = Some(TrackQueueItem {
-                                    uri: q[s.current_track_index].uri.clone(),
-                                    title: q[s.current_track_index].title.clone(),
-                                    artist: q[s.current_track_index].artist.clone(),
-                                    album: q[s.current_track_index].album.clone(),
-                                    duration_seconds: q[s.current_track_index].duration_seconds,
-                                });
+                            if let Some(meta) = preloaded_meta {
+                                s.current_track = Some(meta);
+                            } else {
+                                let q = queue.lock();
+                                if s.current_track_index < q.len() {
+                                    s.current_track = Some(TrackQueueItem {
+                                        uri: q[s.current_track_index].uri.clone(),
+                                        title: q[s.current_track_index].title.clone(),
+                                        artist: q[s.current_track_index].artist.clone(),
+                                        album: q[s.current_track_index].album.clone(),
+                                        duration_seconds: q[s.current_track_index].duration_seconds,
+                                    });
+                                }
                             }
                             s.duration_seconds = next_info.duration_seconds;
                             s.position_seconds = 0.0;
+                            s.is_bit_perfect = next_info.sample_rate == output_rate;
                             s.is_dop = next_info.is_dop;
                             s.current_stream_info = Some(next_info);
                         } else {
@@ -546,6 +742,7 @@ impl PlaybackEngine {
                                     thread::sleep(Duration::from_millis(15));
                                 }
                                 if !flush_req.load(Ordering::SeqCst) {
+                                    is_playing_atomic.store(false, Ordering::Relaxed);
                                     let mut s = state.lock();
                                     s.playback_state = PlaybackState::Ended;
                                 }
@@ -566,6 +763,7 @@ impl PlaybackEngine {
 
         // Clear any preloaded gapless next decoder to prevent stale track bleed on user skip
         *self.next_decoder.lock() = None;
+        *self.next_preloaded_item.lock() = None;
 
         // ── FLUSH: Drain all stale audio from the ring buffer before loading new track ──
         {
@@ -598,6 +796,9 @@ impl PlaybackEngine {
 
         // Signal decode worker to clear its residual buffer and reset resampler
         self.flush_requested.store(true, Ordering::SeqCst);
+        self.position_nanos_atomic.store(0, Ordering::Relaxed);
+        self.is_dop_atomic.store(info.is_dop, Ordering::Relaxed);
+        self.is_playing_atomic.store(true, Ordering::Relaxed);
 
         {
             let mut s = self.state.lock();
@@ -620,13 +821,50 @@ impl PlaybackEngine {
     }
 
     /// Preload the next track for gapless boundary switching
-    pub fn preload_next_track(&self, uri: &str) -> Result<(), EngineError> {
+    pub fn preload_next_track(&self, uri: &str, title: &str, artist: &str, album: &str) -> Result<(), EngineError> {
         let source = LocalFileSource::new(uri);
         let dsd_mode = *self.dsd_mode.lock();
         let decoder = AudioDecoder::open_with_dsd_mode(&source, dsd_mode)?;
+        let info = decoder.info().clone();
+        *self.next_preloaded_item.lock() = Some(TrackQueueItem {
+            uri: uri.to_string(),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            album: album.to_string(),
+            duration_seconds: info.duration_seconds,
+        });
         let mut next = self.next_decoder.lock();
         *next = Some(decoder);
         Ok(())
+    }
+
+    pub fn clear_next_track(&self) {
+        *self.next_decoder.lock() = None;
+        *self.next_preloaded_item.lock() = None;
+    }
+
+    pub fn set_gapless_enabled(&self, enabled: bool) {
+        self.gapless_enabled.store(enabled, Ordering::Relaxed);
+        let mut s = self.state.lock();
+        s.gapless_enabled = enabled;
+        if !enabled {
+            self.clear_next_track();
+        }
+    }
+
+    pub fn set_crossfade(&self, seconds: f32, curve: CrossfadeCurve) {
+        let clamped = seconds.clamp(0.0, 12.0);
+        *self.crossfade_seconds.lock() = clamped;
+        *self.crossfade_curve.lock() = curve;
+        self.state.lock().crossfade_duration_seconds = clamped;
+    }
+
+    pub fn set_replaygain_mode(&self, mode: ReplayGainMode) {
+        *self.replaygain_mode.lock() = mode;
+    }
+
+    pub fn get_replaygain_mode(&self) -> ReplayGainMode {
+        *self.replaygain_mode.lock()
     }
 
     pub fn play(&self) {
@@ -634,18 +872,23 @@ impl PlaybackEngine {
         if s.current_track.is_some() {
             if s.playback_state == PlaybackState::Ended || s.playback_state == PlaybackState::Stopped {
                 s.position_seconds = 0.0;
+                self.position_nanos_atomic.store(0, Ordering::Relaxed);
                 self.seek_requested_frame.store(0, Ordering::SeqCst);
             }
             s.playback_state = PlaybackState::Playing;
+            self.is_playing_atomic.store(true, Ordering::Relaxed);
         }
     }
 
     pub fn pause(&self) {
+        self.is_playing_atomic.store(false, Ordering::Relaxed);
         let mut s = self.state.lock();
         s.playback_state = PlaybackState::Paused;
     }
 
     pub fn stop(&self) {
+        self.is_playing_atomic.store(false, Ordering::Relaxed);
+        self.position_nanos_atomic.store(0, Ordering::Relaxed);
         let mut s = self.state.lock();
         s.playback_state = PlaybackState::Stopped;
         s.position_seconds = 0.0;
@@ -656,7 +899,8 @@ impl PlaybackEngine {
             let s = self.state.lock();
             s.current_stream_info.as_ref().map(|i| i.sample_rate).unwrap_or(44100)
         };
-        let frame = (seconds * sample_rate as f64) as u64;
+        let clamped_sec = seconds.max(0.0);
+        let frame = (clamped_sec * sample_rate as f64) as u64;
 
         // Drain consumer ring buffer immediately so new audio plays without 1.5s delay
         {
@@ -667,22 +911,49 @@ impl PlaybackEngine {
             }
         }
 
+        self.position_nanos_atomic.store((clamped_sec * 1_000_000_000.0) as u64, Ordering::Relaxed);
         {
             let mut s = self.state.lock();
-            s.position_seconds = seconds;
+            s.position_seconds = clamped_sec;
         }
 
         self.seek_requested_frame.store(frame, Ordering::SeqCst);
     }
 
     pub fn set_volume(&self, volume: f32) {
+        let clamped = volume.clamp(0.0, 1.0);
+        self.volume_bits_atomic.store(clamped.to_bits(), Ordering::Relaxed);
         let mut s = self.state.lock();
-        s.volume = volume.clamp(0.0, 1.0);
+        s.volume = clamped;
     }
 
     pub fn get_state(&self) -> PlaybackEngineState {
-        let s = self.state.lock();
-        s.clone()
+        let mut s = self.state.lock().clone();
+        let pos = (self.position_nanos_atomic.load(Ordering::Relaxed) as f64) / 1_000_000_000.0;
+        s.position_seconds = if s.duration_seconds > 0.0 {
+            pos.min(s.duration_seconds)
+        } else {
+            pos
+        };
+        if let Some(m) = self.latest_metrics.try_lock() {
+            s.levels = m.0.clone();
+            s.spectrum = m.1.to_vec();
+        }
+        // Honest end-to-end bit-perfect check
+        let eq_active = self.equalizer.try_lock().map(|eq| {
+            eq.enabled && (eq.preamp_db.abs() > 1e-4 || eq.bands.iter().any(|b| b.enabled && b.gain_db.abs() > 1e-4))
+        }).unwrap_or(false);
+        let dsp_active = eq_active
+            || self.tube_exciter.try_lock().map(|t| t.enabled && t.drive >= 0.01).unwrap_or(false)
+            || self.spatializer.try_lock().map(|sp| sp.enabled).unwrap_or(false)
+            || self.sub_bass.try_lock().map(|sb| sb.enabled && sb.intensity >= 0.01).unwrap_or(false)
+            || self.vocal_clarity.try_lock().map(|vc| vc.enabled && vc.clarity >= 0.01).unwrap_or(false)
+            || self.loudness_normalizer.try_lock().map(|ln| ln.enabled).unwrap_or(false)
+            || self.crossfeed.try_lock().map(|cf| cf.preset != CrossfeedPreset::Off).unwrap_or(false)
+            || (s.volume < 0.999);
+        let native_match = s.current_stream_info.as_ref().map(|i| i.sample_rate == *self.output_sample_rate.lock() as u32).unwrap_or(false);
+        s.is_bit_perfect = s.is_dop || (native_match && !dsp_active);
+        s
     }
 
     pub fn set_eq_enabled(&self, enabled: bool) {
@@ -858,29 +1129,55 @@ impl PlaybackEngine {
     }
 }
 
-/// Implementation of the audio render callback called by AAudio/Oboe/CPAL thread
+/// Implementation of the audio render callback called by AAudio/Oboe/CPAL thread.
+/// Strictly lock-free and allocation-free on hot audio path to prevent xruns.
 impl AudioRenderCallback for PlaybackEngine {
     fn render_audio(&self, buffer: &mut [f32], frames: usize, channels: usize) {
         let total_samples = frames * channels;
 
-        let (is_playing, is_dop, volume) = {
-            let s = self.state.lock();
-            (
-                s.playback_state == PlaybackState::Playing,
-                s.is_dop,
-                s.volume,
-            )
-        };
+        let is_playing = self.is_playing_atomic.load(Ordering::Relaxed);
+        let is_dop = self.is_dop_atomic.load(Ordering::Relaxed);
+        let volume = f32::from_bits(self.volume_bits_atomic.load(Ordering::Relaxed));
 
         if !is_playing {
-            buffer.fill(0.0);
-            *self.render_volume.lock() = 0.0;
+            // Smooth 3-4ms anti-click ramp down if paused mid-waveform instead of abrupt zero-step
+            let prev_v = self.render_volume.try_lock().map(|g| *g).unwrap_or(0.0);
+            if prev_v > 0.0005 && !is_dop {
+                let mut read_samples = 0;
+                if let Some(mut consumer) = self.ring_buffer_consumer.try_lock() {
+                    read_samples = consumer.pop_slice(&mut buffer[..total_samples]);
+                }
+                if read_samples > 0 {
+                    let ramp_frames = frames.min(192);
+                    for f in 0..frames {
+                        let g = if f < ramp_frames {
+                            prev_v * (1.0 - (f as f32 / ramp_frames as f32))
+                        } else {
+                            0.0
+                        };
+                        for ch in 0..channels {
+                            let idx = f * channels + ch;
+                            buffer[idx] = if idx < read_samples { buffer[idx] * g } else { 0.0 };
+                        }
+                    }
+                } else {
+                    buffer[..total_samples].fill(0.0);
+                }
+            } else {
+                buffer[..total_samples].fill(0.0);
+            }
+            if let Some(mut g) = self.render_volume.try_lock() {
+                *g = 0.0;
+            }
             return;
         }
 
         let read_samples = {
-            let mut consumer = self.ring_buffer_consumer.lock();
-            consumer.pop_slice(&mut buffer[..total_samples])
+            if let Some(mut consumer) = self.ring_buffer_consumer.try_lock() {
+                consumer.pop_slice(&mut buffer[..total_samples])
+            } else {
+                0
+            }
         };
 
         // Fill remaining with silence if underrun
@@ -890,84 +1187,54 @@ impl AudioRenderCallback for PlaybackEngine {
 
         // CRIT-01: In DoP (DSD over PCM) mode, audio data consists of bit-packed 1-bit DSD
         // with alternating 0x05 / 0xFA marker sync bytes in the top 8 bits.
-        // Any digital scaling, volume attenuation, or biquad filtering mutates these markers,
-        // which causes the receiving USB DAC to fail DSD synchronization and output 0 dBFS deafening noise.
-        // Therefore, DSP and volume processing MUST be completely bypassed for DoP.
+        // Any DSP or scaling mutates markers, so bypass completely for DoP.
         if !is_dop {
-            // 1. Process DSP Equalizer
-            {
-                let mut eq = self.equalizer.lock();
+            if let Some(mut eq) = self.equalizer.try_lock() {
                 eq.process_interleaved(buffer);
             }
-
-            // 2. Process Sub-Bass Exciter (Missing Fundamental harmonics)
-            {
-                let mut sub = self.sub_bass.lock();
+            if let Some(mut sub) = self.sub_bass.try_lock() {
                 sub.process_interleaved(buffer, channels);
             }
-
-            // 4. Process Vocal Clarity (Formant intelligibility)
-            {
-                let mut voc = self.vocal_clarity.lock();
+            if let Some(mut voc) = self.vocal_clarity.try_lock() {
                 voc.process_interleaved(buffer, channels);
             }
-
-            // 4. Process Tube Warmth & Analog Harmonic Exciter (Musical 2nd/3rd harmonics)
-            {
-                let mut tube = self.tube_exciter.lock();
+            if let Some(mut tube) = self.tube_exciter.try_lock() {
                 tube.process_interleaved(buffer);
             }
-
-            // 5. Process 360° Panoramic Spatializer (Mid/Side soundstage width)
-            {
-                let mut spat = self.spatializer.lock();
+            if let Some(mut spat) = self.spatializer.try_lock() {
                 spat.process_interleaved(buffer, channels);
             }
-
-            // 6. Process Headphone Crossfeed (Binaural stereo soundstage)
-            {
-                let mut xfeed = self.crossfeed.lock();
+            if let Some(mut xfeed) = self.crossfeed.try_lock() {
                 xfeed.process_interleaved(buffer, channels);
             }
-
-            // 7. Process Dynamic Loudness Normalization (EBU R128 / target LUFS with freeze gate)
-            {
-                let mut norm = self.loudness_normalizer.lock();
+            if let Some(mut norm) = self.loudness_normalizer.try_lock() {
                 norm.process_interleaved(buffer, channels);
             }
-
-            // 8. Process Precision L/R Channel Balance (Constant-power panning)
-            {
-                let bal = self.channel_balance.lock();
+            if let Some(bal) = self.channel_balance.try_lock() {
                 bal.process_interleaved(buffer, channels);
             }
-
-            // 9. Process Soft-Knee Peak Limiter (Guarantees zero clipping distortion & speaker safety)
-            {
-                let lim = self.limiter.lock();
+            if let Some(lim) = self.limiter.try_lock() {
                 lim.process_interleaved(buffer);
             }
 
-            // 7. Apply Master Volume with perceptual logarithmic curve and smooth ramping
+            // Apply Master Volume with perceptual logarithmic curve and smooth ramping
             let target_vol = perceptual_volume(volume);
-            let mut vol_guard = self.render_volume.lock();
-            let start_vol = *vol_guard;
-
-            if (start_vol - target_vol).abs() > 0.0001 || (target_vol - 1.0).abs() > f32::EPSILON {
-                let step = (target_vol - start_vol) / (frames as f32).max(1.0);
-                let mut current_v = start_vol;
-                for f in 0..frames {
-                    current_v += step;
-                    for ch in 0..channels {
-                        buffer[f * channels + ch] *= current_v;
+            if let Some(mut vol_guard) = self.render_volume.try_lock() {
+                let start_vol = *vol_guard;
+                if (start_vol - target_vol).abs() > 0.0001 || (target_vol - 1.0).abs() > f32::EPSILON {
+                    let step = (target_vol - start_vol) / (frames as f32).max(1.0);
+                    let mut current_v = start_vol;
+                    for f in 0..frames {
+                        current_v += step;
+                        for ch in 0..channels {
+                            buffer[f * channels + ch] *= current_v;
+                        }
                     }
                 }
                 *vol_guard = target_vol;
-            } else {
-                *vol_guard = target_vol;
             }
 
-            // Soft-clamp and protect against NaN / denormals to guarantee speaker safety
+            // Protect against NaN / denormals to guarantee speaker safety
             for sample in buffer.iter_mut() {
                 if !sample.is_finite() {
                     *sample = 0.0;
@@ -975,31 +1242,22 @@ impl AudioRenderCallback for PlaybackEngine {
             }
         }
 
-        // Calculate visualizer metrics & spectrum
-        let levels = calculate_levels(buffer, channels);
-        let spectrum = calculate_spectrum_16(buffer, channels);
-
+        // Advance atomic position counter with zero state lock
         let actual_frames = read_samples / channels.max(1);
-        let output_rate = *self.output_sample_rate.lock() as f64;
-        let speed = *self.playback_speed.lock() as f64;
-        let delta_seconds = if output_rate > 0.0 {
-            (actual_frames as f64 / output_rate) * speed
-        } else {
-            0.0
-        };
+        let output_rate = self.output_sample_rate.try_lock().map(|r| *r as f64).unwrap_or(48000.0);
+        let speed = self.playback_speed.try_lock().map(|sp| *sp as f64).unwrap_or(1.0);
+        if output_rate > 0.0 && actual_frames > 0 {
+            let delta_seconds = (actual_frames as f64 / output_rate) * speed;
+            self.position_nanos_atomic.fetch_add((delta_seconds * 1_000_000_000.0) as u64, Ordering::Relaxed);
+        }
 
-        {
-            let mut s = self.state.lock();
-            if delta_seconds > 0.0 {
-                let new_pos = s.position_seconds + delta_seconds;
-                s.position_seconds = if s.duration_seconds > 0.0 {
-                    new_pos.min(s.duration_seconds)
-                } else {
-                    new_pos
-                };
+        // Update levels non-blockingly when metrics mutex is free
+        if let Some(mut m) = self.latest_metrics.try_lock() {
+            m.0 = calculate_levels(buffer, channels);
+            let spec = calculate_spectrum_16(buffer, channels);
+            for (i, v) in spec.iter().take(16).enumerate() {
+                m.1[i] = *v;
             }
-            s.levels = levels;
-            s.spectrum = spectrum;
         }
     }
 }

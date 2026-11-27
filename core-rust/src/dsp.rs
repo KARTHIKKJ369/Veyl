@@ -1317,4 +1317,119 @@ impl VocalClarity {
     }
 }
 
+/// Real-time WSOLA (Waveform Similarity Overlap-Add) time-stretcher.
+/// Preserves musical pitch across 0.5x–2.0x playback speeds without chipmunk artifacts.
+#[derive(Debug, Clone)]
+pub struct TimeStretcher {
+    pub speed: f32,
+    channels: usize,
+    win_len: usize,
+    hop_out: usize,
+    search_radius: usize,
+    hann: Vec<f32>,
+    in_buf: Vec<f32>,
+    out_buf: Vec<f32>,
+    out_read_pos: usize,
+    ola_tail: Vec<f32>,
+}
+
+impl TimeStretcher {
+    pub fn new(sample_rate: f32, channels: usize) -> Self {
+        let ch = channels.max(1);
+        // ~42ms window at 48kHz, scaled cleanly for higher rates
+        let win_len = ((sample_rate / 48000.0).max(0.5) * 2048.0).round() as usize;
+        let win_len = (win_len / 2) * 2; // even
+        let hop_out = win_len / 2;
+        let search_radius = (win_len / 8).max(32);
+
+        let mut hann = Vec::with_capacity(win_len);
+        for i in 0..win_len {
+            let w = 0.5 * (1.0 - (2.0 * PI * i as f32 / win_len as f32).cos());
+            hann.push(w);
+        }
+
+        Self {
+            speed: 1.0,
+            channels: ch,
+            win_len,
+            hop_out,
+            search_radius,
+            hann,
+            in_buf: Vec::with_capacity(win_len * ch * 4),
+            out_buf: Vec::with_capacity(win_len * ch * 2),
+            out_read_pos: 0,
+            ola_tail: vec![0.0; hop_out * ch],
+        }
+    }
+
+    pub fn set_speed(&mut self, speed: f32) {
+        self.speed = speed.clamp(0.5, 2.0);
+    }
+
+    pub fn reset(&mut self) {
+        self.in_buf.clear();
+        self.out_buf.clear();
+        self.out_read_pos = 0;
+        self.ola_tail.fill(0.0);
+    }
+
+    pub fn process_interleaved(&mut self, input: &[f32]) -> Vec<f32> {
+        if (self.speed - 1.0).abs() < 0.01 || input.is_empty() {
+            return input.to_vec();
+        }
+
+        self.in_buf.extend_from_slice(input);
+        self.out_buf.clear();
+        self.out_read_pos = 0;
+
+        let ch = self.channels;
+        let hop_in = ((self.hop_out as f32) * self.speed).round().max(1.0) as usize;
+        let needed_frames = self.win_len + self.search_radius + hop_in;
+
+        while self.in_buf.len() / ch >= needed_frames {
+            // Find best alignment offset within [0 .. search_radius] matching previous ola_tail
+            let mut best_offset = 0usize;
+            let mut best_corr = f32::NEG_INFINITY;
+
+            // Compare first `hop_out` frames of candidate window against `ola_tail` (channel 0 energy correlation)
+            let compare_len = self.hop_out.min(256);
+            for off in (0..=self.search_radius).step_by(2) {
+                let mut corr = 0.0f32;
+                for f in 0..compare_len {
+                    let a = self.ola_tail[f * ch];
+                    let b = self.in_buf[(off + f) * ch];
+                    corr += a * b;
+                }
+                if corr > best_corr {
+                    best_corr = corr;
+                    best_offset = off;
+                }
+            }
+
+            // Overlap-add first half with ola_tail, emit `hop_out` frames, save second half into ola_tail
+            for f in 0..self.hop_out {
+                let w_in = self.hann[f];
+                for c in 0..ch {
+                    let s_new = self.in_buf[(best_offset + f) * ch + c] * w_in;
+                    let s_old = self.ola_tail[f * ch + c];
+                    self.out_buf.push(s_old + s_new);
+                }
+            }
+
+            for f in 0..self.hop_out {
+                let w_out = self.hann[self.hop_out + f];
+                for c in 0..ch {
+                    self.ola_tail[f * ch + c] =
+                        self.in_buf[(best_offset + self.hop_out + f) * ch + c] * w_out;
+                }
+            }
+
+            let consume = (hop_in * ch).min(self.in_buf.len());
+            self.in_buf.drain(..consume);
+        }
+
+        self.out_buf.clone()
+    }
+}
+
 

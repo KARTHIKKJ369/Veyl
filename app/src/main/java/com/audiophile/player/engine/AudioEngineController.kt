@@ -85,7 +85,7 @@ enum class AppExperienceMode {
 enum class CrossfadeCurve(val id: String, val title: String, val description: String) {
     EQUAL_POWER("equal_power", "Equal Power (-3 dB)", "Constant acoustic power across transition with zero center sag"),
     LINEAR("linear", "Linear", "Direct linear volume slope between tracks"),
-    EXPONENTIAL("exponential", "Exponential", "Smooth logarithmic curve for ambient & classical transitions")
+    S_CURVE("s_curve", "S-Curve", "Smooth S-shaped curve for ambient & classical transitions")
 }
 
 
@@ -338,6 +338,21 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private val _bufferFrameSize = MutableStateFlow(prefs.getInt("buffer_frame_size", 128))
     val bufferFrameSize: StateFlow<Int> = _bufferFrameSize.asStateFlow()
+
+    private val _replayGainMode = MutableStateFlow(
+        runCatching {
+            uniffi.audiophile_core.ReplayGainModeEnum.valueOf(
+                prefs.getString("replaygain_mode", "TRACK") ?: "TRACK"
+            )
+        }.getOrDefault(uniffi.audiophile_core.ReplayGainModeEnum.TRACK)
+    )
+    val replayGainMode: StateFlow<uniffi.audiophile_core.ReplayGainModeEnum> = _replayGainMode.asStateFlow()
+
+    private val _autoEqPreamp = MutableStateFlow(prefs.getBoolean("auto_eq_preamp", true))
+    val autoEqPreamp: StateFlow<Boolean> = _autoEqPreamp.asStateFlow()
+
+    private val _xrunCount = MutableStateFlow(0)
+    val xrunCount: StateFlow<Int> = _xrunCount.asStateFlow()
 
     // Dark / Light Theme Mode
     private val _isDarkMode = MutableStateFlow(prefs.getBoolean("is_dark_mode", true))
@@ -694,6 +709,12 @@ class AudioEngineController private constructor(private val context: Context) {
         }
     }
 
+    private fun toNativeCrossfadeCurve(curve: CrossfadeCurve): uniffi.audiophile_core.CrossfadeCurveEnum = when (curve) {
+        CrossfadeCurve.LINEAR -> uniffi.audiophile_core.CrossfadeCurveEnum.LINEAR
+        CrossfadeCurve.EQUAL_POWER -> uniffi.audiophile_core.CrossfadeCurveEnum.EQUAL_POWER
+        CrossfadeCurve.S_CURVE -> uniffi.audiophile_core.CrossfadeCurveEnum.S_CURVE
+    }
+
     private fun syncAllDspState(engine: AudiophileEngineHandle) {
         engine.setDsdMode(_dsdMode.value)
         engine.setCrossfeedPreset(_crossfeedPreset.value)
@@ -705,6 +726,9 @@ class AudioEngineController private constructor(private val context: Context) {
         engine.setChannelBalance(_channelBalance.value)
         engine.setLimiterEnabled(false)
         engine.setPlaybackSpeed(_playbackSpeed.value)
+        engine.setGaplessEnabled(_gaplessEnabled.value)
+        engine.setCrossfade(_crossfadeSeconds.value, toNativeCrossfadeCurve(_crossfadeCurve.value))
+        engine.setReplaygainMode(_replayGainMode.value)
         engine.setEqEnabled(_isEqEnabled.value)
     }
 
@@ -731,6 +755,7 @@ class AudioEngineController private constructor(private val context: Context) {
                     scope.launch {
                         delay(250) // Let Android audio HAL settle routing
                         refreshHardwareOutput()
+                        restoreEqState()
                     }
                 }
             }
@@ -745,6 +770,7 @@ class AudioEngineController private constructor(private val context: Context) {
                     scope.launch {
                         delay(250) // Let Android audio HAL settle routing
                         refreshHardwareOutput()
+                        restoreEqState()
                     }
                 }
             }
@@ -752,15 +778,74 @@ class AudioEngineController private constructor(private val context: Context) {
         audioManager.registerAudioDeviceCallback(deviceCallback, null)
     }
 
+    private fun getActiveOutputDeviceKey(): String {
+        val dac = connectedDac.value
+        if (dac != null) {
+            return "usb_${dac.name.replace(Regex("[^a-zA-Z0-9]"), "_").take(32)}"
+        }
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return "default"
+        val sinks = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        val priorityDev = sinks.firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET
+        }
+        if (priorityDev != null) {
+            val name = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                priorityDev.productName?.toString()?.takeIf { it.isNotBlank() } ?: priorityDev.type.toString()
+            } else {
+                priorityDev.type.toString()
+            }
+            return "ext_${name.replace(Regex("[^a-zA-Z0-9]"), "_").take(32)}"
+        }
+        return "speaker"
+    }
+
+    private fun getOptimalNonUsbSampleRate(requestedRate: Int): Int {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return 48000
+        val sinks = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        val activeSink = sinks.firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET
+        } ?: return 48000
+
+        val supported = activeSink.sampleRates.filter { it > 0 }
+        if (supported.isEmpty()) return 48000
+        if (supported.contains(requestedRate)) return requestedRate
+        val multiples = supported.filter { it % requestedRate == 0 || requestedRate % it == 0 }
+        if (multiples.isNotEmpty()) return multiples.maxOrNull() ?: 48000
+        return if (supported.contains(48000)) 48000 else supported.maxOrNull() ?: 48000
+    }
+
+    private fun applyAutoPreampForBands(gains: List<Float>) {
+        if (!_autoEqPreamp.value) {
+            withNativeEngine { it.setEqPreamp(0f) }
+            return
+        }
+        val maxBoost = gains.maxOfOrNull { it.coerceAtLeast(0f) } ?: 0f
+        withNativeEngine { it.setEqPreamp(-maxBoost) }
+    }
+
     private fun restoreEqState() {
         val enabled = _isEqEnabled.value
+        val devKey = getActiveOutputDeviceKey()
         withNativeEngine { it.setEqEnabled(enabled) }
         val defaultBands = withNativeEngine { it.getEqBands() } ?: emptyList()
+        val resolvedGains = mutableListOf<Float>()
         for (i in defaultBands.indices) {
-            val savedGain = prefs.getFloat("eq_band_$i", defaultBands[i].gainDb)
+            val savedGain = if (prefs.contains("eq_${devKey}_band_$i")) {
+                prefs.getFloat("eq_${devKey}_band_$i", 0f)
+            } else {
+                prefs.getFloat("eq_band_$i", defaultBands[i].gainDb)
+            }
+            resolvedGains.add(savedGain)
             val b = defaultBands[i]
             withNativeEngine { it.setEqBand(i.toUInt(), savedGain, b.frequency, b.q) }
         }
+        applyAutoPreampForBands(resolvedGains)
         refreshEq()
     }
 
@@ -905,6 +990,9 @@ class AudioEngineController private constructor(private val context: Context) {
                                 _status.value = currentStatus.copy(currentTrack = enrichedTrack)
                             } else {
                                 _status.value = currentStatus
+                            }
+                            if (tickCount % 15 == 0) {
+                                withNativeEngine { it.getXrunCount() }?.let { _xrunCount.value = it }
                             }
                         }
                         tickCount++
@@ -2754,6 +2842,26 @@ class AudioEngineController private constructor(private val context: Context) {
                     if (!realTrackArt.isNullOrBlank()) it.copy(thumbnailUrl = realTrackArt) else it
                 }
                 onlineStreamManager.prefetchNextTrack(songItem)
+            } else if (_gaplessEnabled.value || _crossfadeSeconds.value > 0.05f) {
+                val localPath = if (isOnline) {
+                    onlineStreamManager.getTargetStorageFileForTrack(nextTrack).absolutePath
+                } else {
+                    nextTrack.uri
+                }
+                val dac = connectedDac.value
+                val rateSwitchingDac = _bitPerfectEnabled.value && dac != null && nextTrack.sampleRate != currentOutputSampleRate
+                if (!rateSwitchingDac && File(localPath).exists()) {
+                    withNativeEngine {
+                        it.preloadNextTrack(
+                            uri = localPath,
+                            title = nextTrack.title,
+                            artist = nextTrack.artist ?: "Unknown Artist",
+                            album = nextTrack.album ?: ""
+                        )
+                    }
+                } else {
+                    withNativeEngine { it.clearNextTrack() }
+                }
             }
         }
     }
@@ -3087,9 +3195,12 @@ class AudioEngineController private constructor(private val context: Context) {
                     Log.i("AudioEngineController", "Switching DAC sample rate to $optimalRate Hz for bit-perfect playback")
                     reconfigureHardwareOutput(optimalRate, dac.id, exclusive = true)
                 }
-            } else if (dac == null && currentOutputSampleRate != 48000u) {
-                Log.i("AudioEngineController", "Restoring standard 48000 Hz shared output for internal audio")
-                reconfigureHardwareOutput(48000u, null, exclusive = false)
+            } else if (dac == null) {
+                val sinkRate = getOptimalNonUsbSampleRate(actualTrack.sampleRate.toInt()).toUInt()
+                if (sinkRate != currentOutputSampleRate) {
+                    Log.i("AudioEngineController", "Matching active Bluetooth/wired sink sample rate: $sinkRate Hz")
+                    reconfigureHardwareOutput(sinkRate, null, exclusive = false)
+                }
             }
 
             isTransitioning = false
@@ -3135,7 +3246,8 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun reconfigureHardwareOutput(sampleRate: UInt, deviceId: Int?, exclusive: Boolean): Boolean {
         return try {
-            val success = withNativeEngine { it.reconfigureOutput(sampleRate, 2u, deviceId, exclusive) } ?: false
+            val bufFrames = _bufferFrameSize.value.coerceIn(64, 4096).toUInt()
+            val success = withNativeEngine { it.reconfigureOutput(sampleRate, 2u, deviceId, exclusive, bufFrames) } ?: false
             if (success) {
                 val actualRate = withNativeEngine { it.getOutputSampleRate() } ?: sampleRate
                 currentOutputSampleRate = actualRate
@@ -3266,14 +3378,18 @@ class AudioEngineController private constructor(private val context: Context) {
     }
 
     fun setEqBandGain(index: Int, gainDb: Float) {
+        val devKey = getActiveOutputDeviceKey()
         prefs.edit()
             .putFloat("eq_band_$index", gainDb)
+            .putFloat("eq_${devKey}_band_$index", gainDb)
             .putString("eq_preset", "Custom")
             .apply()
         _currentEqPreset.value = "Custom"
         val bands = _eqBands.value
         if (index in bands.indices) {
             val b = bands[index]
+            val updatedGains = bands.mapIndexed { i, band -> if (i == index) gainDb else band.gainDb }
+            applyAutoPreampForBands(updatedGains)
             updateEqBand(index.toUInt(), gainDb, b.frequency, b.q)
         }
     }
@@ -3282,9 +3398,11 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun setEqPreset(name: String, gains: List<Float>) {
         _currentEqPreset.value = name
+        val devKey = getActiveOutputDeviceKey()
         val editor = prefs.edit().putString("eq_preset", name)
         for (i in gains.indices) {
             editor.putFloat("eq_band_$i", gains[i])
+            editor.putFloat("eq_${devKey}_band_$i", gains[i])
         }
         editor.putBoolean("eq_enabled", true)
         editor.apply()
@@ -3303,6 +3421,7 @@ class AudioEngineController private constructor(private val context: Context) {
                 }
                 engine.setEqEnabled(true)
             }
+            applyAutoPreampForBands(gains)
             refreshEq()
         }
     }
@@ -3693,16 +3812,42 @@ class AudioEngineController private constructor(private val context: Context) {
     fun setGaplessEnabled(enabled: Boolean) {
         _gaplessEnabled.value = enabled
         prefs.edit().putBoolean("gapless_enabled", enabled).apply()
+        nativeScope.launch {
+            withNativeEngine { it.setGaplessEnabled(enabled) }
+            if (enabled) scheduleNextTrackPrefetch()
+        }
     }
 
     fun setCrossfadeSeconds(sec: Float) {
         _crossfadeSeconds.value = sec
         prefs.edit().putFloat("crossfade_seconds", sec).apply()
+        nativeScope.launch {
+            withNativeEngine { it.setCrossfade(sec, toNativeCrossfadeCurve(_crossfadeCurve.value)) }
+            if (sec > 0.05f) scheduleNextTrackPrefetch()
+        }
     }
 
     fun setCrossfadeCurve(curve: CrossfadeCurve) {
         _crossfadeCurve.value = curve
         prefs.edit().putString("crossfade_curve", curve.name).apply()
+        nativeScope.launch {
+            withNativeEngine { it.setCrossfade(_crossfadeSeconds.value, toNativeCrossfadeCurve(curve)) }
+        }
+    }
+
+    fun setReplayGainMode(mode: uniffi.audiophile_core.ReplayGainModeEnum) {
+        _replayGainMode.value = mode
+        prefs.edit().putString("replaygain_mode", mode.name).apply()
+        nativeScope.launch {
+            withNativeEngine { it.setReplaygainMode(mode) }
+        }
+    }
+
+    fun setAutoEqPreamp(enabled: Boolean) {
+        _autoEqPreamp.value = enabled
+        prefs.edit().putBoolean("auto_eq_preamp", enabled).apply()
+        applyAutoPreampForBands(_eqBands.value.map { it.gainDb })
+        refreshEq()
     }
 
     fun startDiagnosticTone(type: DacToneType) {
@@ -3717,6 +3862,9 @@ class AudioEngineController private constructor(private val context: Context) {
     fun setBufferFrameSize(size: Int) {
         _bufferFrameSize.value = size
         prefs.edit().putInt("buffer_frame_size", size).apply()
+        nativeScope.launch {
+            refreshHardwareOutput()
+        }
     }
 
     fun refreshEq() {

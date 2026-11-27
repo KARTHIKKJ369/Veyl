@@ -66,6 +66,20 @@ pub enum CrossfeedPresetEnum {
     Vintage,
 }
 
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CrossfadeCurveEnum {
+    Linear,
+    EqualPower,
+    SCurve,
+}
+
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ReplayGainModeEnum {
+    Off,
+    Track,
+    Album,
+}
+
 #[derive(uniffi::Record, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AudioMetrics {
     pub rms_left: f32,
@@ -188,7 +202,7 @@ impl AudiophileEngineHandle {
         self.engine.set_dsd_mode(rust_mode);
     }
 
-    pub fn reconfigure_output(&self, sample_rate: u32, channels: u32, device_id: Option<i32>, exclusive: bool) -> bool {
+    pub fn reconfigure_output(&self, sample_rate: u32, channels: u32, device_id: Option<i32>, exclusive: bool, buffer_frames: Option<u32>) -> bool {
         let sharing_mode = if exclusive {
             output::OutputSharingMode::Exclusive
         } else {
@@ -200,7 +214,7 @@ impl AudiophileEngineHandle {
             channels,
             sharing_mode,
             sample_format: output::OutputSampleFormat::F32,
-            buffer_size_frames: None,
+            buffer_size_frames: buffer_frames,
             device_id,
         };
 
@@ -288,8 +302,46 @@ impl AudiophileEngineHandle {
         self.engine.play_track(&uri, &title, &artist, &album).is_ok()
     }
 
-    pub fn preload_next_track(&self, uri: String) -> bool {
-        self.engine.preload_next_track(&uri).is_ok()
+    pub fn preload_next_track(&self, uri: String, title: String, artist: String, album: String) -> bool {
+        self.engine.preload_next_track(&uri, &title, &artist, &album).is_ok()
+    }
+
+    pub fn clear_next_track(&self) {
+        self.engine.clear_next_track();
+    }
+
+    pub fn set_gapless_enabled(&self, enabled: bool) {
+        self.engine.set_gapless_enabled(enabled);
+    }
+
+    pub fn set_crossfade(&self, seconds: f32, curve: CrossfadeCurveEnum) {
+        let rust_curve = match curve {
+            CrossfadeCurveEnum::Linear => engine::CrossfadeCurve::Linear,
+            CrossfadeCurveEnum::EqualPower => engine::CrossfadeCurve::EqualPower,
+            CrossfadeCurveEnum::SCurve => engine::CrossfadeCurve::SCurve,
+        };
+        self.engine.set_crossfade(seconds, rust_curve);
+    }
+
+    pub fn set_replaygain_mode(&self, mode: ReplayGainModeEnum) {
+        let rust_mode = match mode {
+            ReplayGainModeEnum::Off => engine::ReplayGainMode::Off,
+            ReplayGainModeEnum::Track => engine::ReplayGainMode::Track,
+            ReplayGainModeEnum::Album => engine::ReplayGainMode::Album,
+        };
+        self.engine.set_replaygain_mode(rust_mode);
+    }
+
+    pub fn get_xrun_count(&self) -> i32 {
+        #[cfg(target_os = "android")]
+        {
+            let out = self.audio_output.lock();
+            out.as_ref().map(|s| s.xrun_count()).unwrap_or(0)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            0
+        }
     }
 
     pub fn play(&self) {

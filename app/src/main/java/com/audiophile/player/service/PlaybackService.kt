@@ -89,7 +89,12 @@ class PlaybackService : MediaBrowserServiceCompat() {
                         engineController.refreshHardwareOutput()
                     }
                     if (isDucked) {
-                        engineController.setVolume(preDuckVolume)
+                        val targetVol = preDuckVolume
+                        val startVol = engineController.volume
+                        for (step in 1..6) {
+                            engineController.setVolume(startVol + (targetVol - startVol) * (step / 6f))
+                            delay(22)
+                        }
                         isDucked = false
                     }
                     if (shouldResume) {
@@ -139,12 +144,20 @@ class PlaybackService : MediaBrowserServiceCompat() {
                         preDuckVolume = engineController.volume.coerceAtLeast(0.8f)
                         isDucked = true
                     }
-                    engineController.setVolume(0.5f * preDuckVolume)
-                    // Auto-restore volume after 1800ms in case Android HAL does not deliver AUDIOFOCUS_GAIN
+                    // Smooth 150ms ramp down + auto-restore ramp
                     audioFocusJob = serviceScope.launch {
-                        delay(1800)
+                        val duckTarget = 0.45f * preDuckVolume
+                        for (step in 1..6) {
+                            engineController.setVolume(preDuckVolume + (duckTarget - preDuckVolume) * (step / 6f))
+                            delay(25)
+                        }
+                        delay(1650)
                         if (isDucked) {
-                            engineController.setVolume(preDuckVolume)
+                            val startVol = engineController.volume
+                            for (step in 1..6) {
+                                engineController.setVolume(startVol + (preDuckVolume - startVol) * (step / 6f))
+                                delay(25)
+                            }
                             isDucked = false
                         }
                     }
