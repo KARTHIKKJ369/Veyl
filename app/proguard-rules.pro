@@ -5,6 +5,7 @@
 -keepclassmembers class uniffi.** { *; }
 -keep class com.sun.jna.** { *; }
 -keepclassmembers class * extends com.sun.jna.* { public *; }
+-dontwarn java.awt.**
 
 # OkHttp & Okio
 -dontwarn okhttp3.**

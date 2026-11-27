@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -109,6 +110,7 @@ fun VeylNowPlayingScreen(
 
     val track by controller.currentTrack.collectAsState()
     val currentTrack = track
+    val engineStatus by controller.status.collectAsState()
     val playbackState by controller.playbackState.collectAsState()
     val isPlaying = playbackState == PlaybackStateEnum.PLAYING
     val isShuffle by controller.isShuffleEnabled.collectAsState()
@@ -184,28 +186,71 @@ fun VeylNowPlayingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
+                .navigationBarsPadding()
                 .padding(horizontal = 24.dp)
-                .padding(top = 8.dp, bottom = 28.dp),
+                .padding(top = 6.dp, bottom = 18.dp),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Drag Handle (Clean and minimal)
-            Box(
+            // 1. Minimal Header Bar matching VeylQueueScreen / Library aesthetic
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(28.dp),
-                contentAlignment = Alignment.Center
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = colors.textMuted.copy(alpha = 0.35f),
-                    modifier = Modifier.size(width = 36.dp, height = 4.dp)
-                ) {}
+                IconButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onNavigateBack()
+                    },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.ChevronDown,
+                        contentDescription = "Minimize player",
+                        tint = colors.textSecondary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val fmt = engineStatus?.codecName?.takeIf { it.isNotBlank() } ?: track?.formatName ?: "PCM"
+                    val srK = ((engineStatus?.sampleRate ?: track?.sampleRate ?: 44100u).toFloat() / 1000f)
+                    val srText = if (srK % 1f == 0f) "${srK.toInt()} kHz" else "${"%.1f".format(srK)} kHz"
+                    val bitText = (engineStatus?.bitDepth ?: track?.bitDepth)?.let { " / ${it}-bit" } ?: ""
+                    Text(
+                        text = if (engineStatus?.isBitPerfect == true) "BIT-PERFECT" else "NOW PLAYING",
+                        style = VeylTypography.MonoBadge,
+                        color = if (engineStatus?.isBitPerfect == true) colors.accentSignal else colors.textMuted,
+                        fontSize = 10.sp
+                    )
+                    Text(
+                        text = "$fmt • $srText$bitText",
+                        style = VeylTypography.MonoSpec,
+                        color = colors.textSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onNavigateToDsp()
+                    },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.Equalizer,
+                        contentDescription = "Equalizer & DSP",
+                        tint = colors.textSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // 2. Center: Switch between Album Cover and Synced Lyrics Card in-place
+            // 2. Center: Album Cover / Synced Lyrics Card with clean hairline frame
             AnimatedContent(
                 targetState = isLyricsMode,
                 transitionSpec = {
@@ -224,12 +269,17 @@ fun VeylNowPlayingScreen(
                             .aspectRatio(1f)
                     )
                 } else {
-                    Card(
-                        shape = RoundedCornerShape(24.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(colors.surfaceElevated)
+                            .border(
+                                width = 1.dp,
+                                color = colors.borderHairline.copy(alpha = 0.45f),
+                                shape = RoundedCornerShape(20.dp)
+                            )
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 isLyricsMode = true
@@ -238,7 +288,7 @@ fun VeylNowPlayingScreen(
                         AsyncAlbumArt(
                             uri = track?.uri ?: "",
                             hasArtwork = track?.hasArtwork,
-                            shape = RoundedCornerShape(24.dp),
+                            shape = RoundedCornerShape(20.dp),
                             modifier = Modifier.fillMaxSize(),
                             targetSizePx = 512
                         )
@@ -361,39 +411,33 @@ fun VeylNowPlayingScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // 5. Main Playback Controls: Previous, Clean Circle Play/Pause FAB, Next
+            // 5. Main Playback Controls: Clean borderless Previous/Next + Signal Circle Play/Pause
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 2.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Previous Track
-                Surface(
-                    shape = CircleShape,
-                    color = colors.surfaceElevated,
-                    modifier = Modifier.size(56.dp)
-                ) {
-                    IconButton(onClick = {
+                IconButton(
+                    onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.skipPrevious()
-                    }) {
-                        Icon(
-                            imageVector = VeylIcons.Previous,
-                            contentDescription = "Previous",
-                            tint = colors.textPrimary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
+                    },
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.Previous,
+                        contentDescription = "Previous",
+                        tint = colors.textPrimary,
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
 
-                // Center Circular Play/Pause FAB in Signal Chartreuse
                 Surface(
                     shape = CircleShape,
                     color = colors.accentSignal,
-                    shadowElevation = 8.dp,
-                    modifier = Modifier.size(76.dp)
+                    modifier = Modifier.size(68.dp)
                 ) {
                     IconButton(
                         onClick = {
@@ -406,106 +450,84 @@ fun VeylNowPlayingScreen(
                             imageVector = if (isPlaying) VeylIcons.Pause else VeylIcons.Play,
                             contentDescription = if (isPlaying) "Pause" else "Play",
                             tint = colors.background,
-                            modifier = Modifier.size(34.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                 }
 
-                // Next Track
-                Surface(
-                    shape = CircleShape,
-                    color = colors.surfaceElevated,
-                    modifier = Modifier.size(56.dp)
-                ) {
-                    IconButton(onClick = {
+                IconButton(
+                    onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.skipNext()
-                    }) {
-                        Icon(
-                            imageVector = VeylIcons.Next,
-                            contentDescription = "Next",
-                            tint = colors.textPrimary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
+                    },
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Icon(
+                        imageVector = VeylIcons.Next,
+                        contentDescription = "Next",
+                        tint = colors.textPrimary,
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
             }
 
-            // 6. Bottom Action Toolbar
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = colors.surfacePanel,
+            // 6. Clean Borderless Bottom Action Row (matching Veyl's flat minimal design)
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp)
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Repeat Mode Toggle
-                    IconButton(onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        controller.toggleRepeat()
-                    }) {
-                        Icon(
-                            imageVector = when (repeatMode) {
-                                RepeatMode.ONE -> VeylIcons.RepeatOne
-                                else -> VeylIcons.Repeat
-                            },
-                            contentDescription = "Repeat",
-                            tint = if (repeatMode != RepeatMode.OFF) colors.accentSignal else colors.textMuted,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                IconButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    controller.toggleRepeat()
+                }) {
+                    Icon(
+                        imageVector = when (repeatMode) {
+                            RepeatMode.ONE -> VeylIcons.RepeatOne
+                            else -> VeylIcons.Repeat
+                        },
+                        contentDescription = "Repeat",
+                        tint = if (repeatMode != RepeatMode.OFF) colors.accentSignal else colors.textMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
 
-                    // Shuffle Toggle
-                    IconButton(onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        controller.toggleShuffle()
-                    }) {
-                        Icon(
-                            imageVector = VeylIcons.Shuffle,
-                            contentDescription = "Shuffle",
-                            tint = if (isShuffle) colors.accentSignal else colors.textMuted,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                IconButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    controller.toggleShuffle()
+                }) {
+                    Icon(
+                        imageVector = VeylIcons.Shuffle,
+                        contentDescription = "Shuffle",
+                        tint = if (isShuffle) colors.accentSignal else colors.textMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
 
-                    // Queue List
-                    IconButton(onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onNavigateToQueue()
-                    }) {
-                        Icon(
-                            imageVector = VeylIcons.QueueList,
-                            contentDescription = "Queue",
-                            tint = colors.textMuted,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                IconButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onNavigateToQueue()
+                }) {
+                    Icon(
+                        imageVector = VeylIcons.QueueList,
+                        contentDescription = "Queue",
+                        tint = colors.textMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
 
-                    // Synced Lyrics Toggle Button
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isLyricsMode) colors.surfaceElevated else Color.Transparent,
-                        modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                    ) {
-                        IconButton(onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            isLyricsMode = !isLyricsMode
-                        }) {
-                            Icon(
-                                imageVector = VeylIcons.Lyrics,
-                                contentDescription = "Lyrics",
-                                tint = if (isLyricsMode) colors.accentSignal else colors.textMuted,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
+                IconButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    isLyricsMode = !isLyricsMode
+                }) {
+                    Icon(
+                        imageVector = VeylIcons.Lyrics,
+                        contentDescription = "Lyrics",
+                        tint = if (isLyricsMode) colors.accentSignal else colors.textMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         }
