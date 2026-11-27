@@ -501,13 +501,34 @@ impl AudioDecoder {
                 track_id,
                 time_base,
             } => {
-                let time = Time::from(time_seconds);
-                let seek_to = SeekTo::Time {
-                    time,
-                    track_id: Some(*track_id),
+                // Clamp seek target slightly inside duration so seeking to 100% doesn't hit OutOfBounds/EOF
+                let safe_time = if self.info.duration_seconds > 0.5 {
+                    time_seconds.clamp(0.0, (self.info.duration_seconds - 0.25).max(0.0))
+                } else {
+                    time_seconds.max(0.0)
                 };
-
-                let seeked = reader.seek(SeekMode::Accurate, seek_to).map_err(DecodeError::Symphonia)?;
+                let time = Time::from(safe_time);
+                let seeked = match reader.seek(
+                    SeekMode::Accurate,
+                    SeekTo::Time {
+                        time,
+                        track_id: Some(*track_id),
+                    },
+                ) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        // Fallback to Coarse seek if Accurate fails (e.g. formats without seek table or near EOF)
+                        reader
+                            .seek(
+                                SeekMode::Coarse,
+                                SeekTo::Time {
+                                    time,
+                                    track_id: Some(*track_id),
+                                },
+                            )
+                            .map_err(DecodeError::Symphonia)?
+                    }
+                };
                 decoder.reset();
 
                 let actual_time = time_base.calc_time(seeked.actual_ts);

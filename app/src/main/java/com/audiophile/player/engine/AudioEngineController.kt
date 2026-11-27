@@ -813,7 +813,10 @@ class AudioEngineController private constructor(private val context: Context) {
         } ?: return 48000
 
         val supported = activeSink.sampleRates.filter { it > 0 }
-        if (supported.isEmpty()) return 48000
+        if (supported.isEmpty()) {
+            val mixerRate = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()
+            return if (mixerRate != null && mixerRate > 0) mixerRate else 48000
+        }
         if (supported.contains(requestedRate)) return requestedRate
         val multiples = supported.filter { it % requestedRate == 0 || requestedRate % it == 0 }
         if (multiples.isNotEmpty()) return multiples.maxOrNull() ?: 48000
@@ -881,6 +884,9 @@ class AudioEngineController private constructor(private val context: Context) {
 
     private var lastTransitionTimestamp = 0L
 
+    @Volatile private var activeCueTrack: TrackInfo? = null
+    @Volatile private var activeCueRange: CueSheetParser.CueRange? = null
+
     private fun startPolling() {
         pollJob?.cancel()
         pollJob = nativeScope.launch {
@@ -920,14 +926,29 @@ class AudioEngineController private constructor(private val context: Context) {
                         // Enforce A-B loop segment
                         val a = _loopPointA.value
                         val b = _loopPointB.value
-                        if (a != null && b != null && b > a && pos >= b) {
+                        val cue = activeCueRange
+                        val cueTrack = activeCueTrack
+                        val effectivePos = if (cue != null) {
+                            (pos - cue.startSec).coerceIn(0.0, (cue.endSec - cue.startSec).coerceAtLeast(1.0))
+                        } else pos
+
+                        if (a != null && b != null && b > a && effectivePos >= b) {
                             seekTo(a)
                         }
 
-                        _currentPositionSec.value = pos
-                        _currentPositionMs.value = (pos * 1000.0).toLong()
+                        _currentPositionSec.value = effectivePos
+                        _currentPositionMs.value = (effectivePos * 1000.0).toLong()
 
-                        val currentUri = currentStatus.currentTrack?.uri
+                        val normalizedStatus = if (cue != null && cueTrack != null) {
+                            val cueDur = (cue.endSec - cue.startSec).coerceAtLeast(1.0)
+                            currentStatus.copy(
+                                currentTrack = cueTrack,
+                                positionSeconds = effectivePos,
+                                durationSeconds = cueDur
+                            )
+                        } else currentStatus
+
+                        val currentUri = normalizedStatus.currentTrack?.uri
                         val lastStatus = _status.value
                         val trackChanged = currentUri != null && currentUri != lastTrackUri
 
@@ -944,7 +965,7 @@ class AudioEngineController private constructor(private val context: Context) {
                             }
 
                             // Record play count and history with active track info
-                            val curTrack = currentStatus.currentTrack
+                            val curTrack = normalizedStatus.currentTrack
                             recordTrackPlayed(currentUri, curTrack)
 
                             // Load lyrics asynchronously on track change across configured provider(s)
@@ -974,22 +995,22 @@ class AudioEngineController private constructor(private val context: Context) {
                         // Update _status: on track change, playback state change, or throttled every ~3 ticks (~100ms)
                         val shouldUpdateStatus = trackChanged ||
                                 lastStatus == null ||
-                                lastStatus.state != currentStatus.state ||
-                                lastStatus.sampleRate != currentStatus.sampleRate ||
+                                lastStatus.state != normalizedStatus.state ||
+                                lastStatus.sampleRate != normalizedStatus.sampleRate ||
                                 (tickCount % 3 == 0)
 
                         if (shouldUpdateStatus) {
                             if (_isOnlineStreaming.value && _currentOnlineSong.value != null) {
                                 val s = _currentOnlineSong.value!!
-                                val enrichedTrack = currentStatus.currentTrack?.copy(
+                                val enrichedTrack = normalizedStatus.currentTrack?.copy(
                                     title = s.title,
                                     artist = s.artist,
                                     album = s.album,
                                     hasArtwork = true
                                 )
-                                _status.value = currentStatus.copy(currentTrack = enrichedTrack)
+                                _status.value = normalizedStatus.copy(currentTrack = enrichedTrack)
                             } else {
-                                _status.value = currentStatus
+                                _status.value = normalizedStatus
                             }
                             if (tickCount % 15 == 0) {
                                 withNativeEngine { it.getXrunCount() }?.let { _xrunCount.value = it }
@@ -1001,11 +1022,12 @@ class AudioEngineController private constructor(private val context: Context) {
                         val now = System.currentTimeMillis()
 
                         // Reset transition lock once new track is playing at start
-                        if (pos < 1.5 && isPlaying) {
+                        if (effectivePos < 1.5 && isPlaying) {
                             isTransitioning = false
                         }
 
-                        val isEnded = currentStatus.state == PlaybackStateEnum.ENDED
+                        val cueEnded = cue != null && isPlaying && cue.endSec > cue.startSec && pos >= (cue.endSec - 0.12)
+                        val isEnded = normalizedStatus.state == PlaybackStateEnum.ENDED || cueEnded
 
                         if (isEnded && !isTransitioning && (now - lastTransitionTimestamp > 1500L)) {
                             isTransitioning = true
@@ -1680,6 +1702,8 @@ class AudioEngineController private constructor(private val context: Context) {
         setGaplessEnabled(true)
         setCrossfadeSeconds(0f)
         setCrossfadeCurve(CrossfadeCurve.EQUAL_POWER)
+        setReplayGainMode(uniffi.audiophile_core.ReplayGainModeEnum.TRACK)
+        setAutoEqPreamp(true)
         setAutoFetchLyrics(true)
         setPlayDuringCalls(false)
     }
@@ -2433,26 +2457,25 @@ class AudioEngineController private constructor(private val context: Context) {
                             else -> ext.uppercase()
                         }
 
-                        tracks.add(
-                            TrackInfo(
-                                uri = path,
-                                title = title,
-                                artist = if (artist == "<unknown>") "Unknown Artist" else artist,
-                                album = if (album == "<unknown>") "Unknown Album" else album,
-                                albumArtist = null,
-                                genre = null,
-                                year = year,
-                                trackNumber = trackNum,
-                                discNumber = null,
-                                durationSeconds = (durationMs / 1000.0).coerceAtLeast(1.0),
-                                sampleRate = 44100u,
-                                bitDepth = 16u,
-                                bitrate = null,
-                                channels = 2u,
-                                formatName = formatName,
-                                hasArtwork = true
-                            )
+                        val scannedTrack = TrackInfo(
+                            uri = path,
+                            title = title,
+                            artist = if (artist == "<unknown>") "Unknown Artist" else artist,
+                            album = if (album == "<unknown>") "Unknown Album" else album,
+                            albumArtist = null,
+                            genre = null,
+                            year = year,
+                            trackNumber = trackNum,
+                            discNumber = null,
+                            durationSeconds = (durationMs / 1000.0).coerceAtLeast(1.0),
+                            sampleRate = 44100u,
+                            bitDepth = 16u,
+                            bitrate = null,
+                            channels = 2u,
+                            formatName = formatName,
+                            hasArtwork = true
                         )
+                        tracks.addAll(CueSheetParser.splitIfCuePresent(scannedTrack))
                     }
                 }
 
@@ -3125,7 +3148,8 @@ class AudioEngineController private constructor(private val context: Context) {
 
     fun playTrack(track: TrackInfo) {
         var actualTrack = track
-        val f = File(actualTrack.uri)
+        val cueRange = CueSheetParser.parseCueUri(actualTrack.uri)
+        val f = File(cueRange?.basePath ?: actualTrack.uri)
         if (!f.exists()) {
             val targetFile = onlineStreamManager.getTargetStorageFileForTrack(actualTrack)
             if (targetFile.exists() && targetFile.length() > 50_000L) {
@@ -3209,12 +3233,36 @@ class AudioEngineController private constructor(private val context: Context) {
             _currentPositionSec.value = 0.0
             _currentPositionMs.value = 0L
 
-            withNativeEngine { engine -> engine.playTrack(
-                uri = actualTrack.uri,
-                title = actualTrack.title,
-                artist = actualTrack.artist,
-                album = actualTrack.album
-            ) }
+            if (cueRange != null) {
+                val prevCueBase = activeCueRange?.basePath
+                activeCueTrack = actualTrack
+                activeCueRange = cueRange
+                if (prevCueBase == cueRange.basePath) {
+                    withNativeEngine { engine ->
+                        engine.seek(cueRange.startSec)
+                        engine.play()
+                    }
+                } else {
+                    withNativeEngine { engine ->
+                        engine.playTrack(
+                            uri = cueRange.basePath,
+                            title = actualTrack.title,
+                            artist = actualTrack.artist,
+                            album = actualTrack.album
+                        )
+                        engine.seek(cueRange.startSec)
+                    }
+                }
+            } else {
+                activeCueTrack = null
+                activeCueRange = null
+                withNativeEngine { engine -> engine.playTrack(
+                    uri = actualTrack.uri,
+                    title = actualTrack.title,
+                    artist = actualTrack.artist,
+                    album = actualTrack.album
+                ) }
+            }
 
             // Re-apply user's persistent equalizer state on track transition
             withNativeEngine { it.setEqEnabled(_isEqEnabled.value) }
@@ -3353,7 +3401,8 @@ class AudioEngineController private constructor(private val context: Context) {
         _status.value?.let { current ->
             _status.value = current.copy(positionSeconds = safeSeconds)
         }
-        nativeScope.launch { withNativeEngine { it.seek(safeSeconds) } }
+        val targetSec = activeCueRange?.let { it.startSec + safeSeconds } ?: safeSeconds
+        nativeScope.launch { withNativeEngine { it.seek(targetSec) } }
     }
 
     /** Current software volume (0.0–1.0). Exposed so PlaybackService can save it before ducking. */

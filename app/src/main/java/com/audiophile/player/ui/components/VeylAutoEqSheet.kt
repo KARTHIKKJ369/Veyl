@@ -51,6 +51,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -168,13 +171,38 @@ fun VeylAutoEqBottomSheet(
     val colors = LocalVeylColors.current
     val haptic = LocalHapticFeedback.current
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedBrand by remember { mutableStateOf("All") }
     var showCustomInput by remember { mutableStateOf(false) }
     var customInputText by remember { mutableStateOf("") }
+    var customInputName by remember { mutableStateOf("AutoEQ Custom") }
     var customInputError by remember { mutableStateOf<String?>(null) }
+
+    val txtPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                if (!text.isNullOrBlank()) {
+                    customInputText = text
+                    val rawName = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.')?.trim()
+                    if (!rawName.isNullOrBlank()) {
+                        customInputName = rawName.take(32)
+                    }
+                    customInputError = null
+                    showCustomInput = true
+                } else {
+                    customInputError = "Selected file is empty."
+                }
+            } catch (e: Exception) {
+                customInputError = "Could not read file: ${e.message}"
+            }
+        }
+    }
 
     val currentProfileName by controller.currentEqPreset.collectAsState()
     val isEqEnabled by controller.isEqEnabled.collectAsState()
@@ -412,7 +440,7 @@ fun VeylAutoEqBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Paste 10-band comma/space separated dB gains (e.g. 3.5, 2.0, 0, -1.5, ...):",
+                        text = "Paste AutoEQ Parametric/GraphicEQ .txt or 10-band dB gains:",
                         style = VeylTypography.BodySmall,
                         color = colors.textSecondary,
                         fontSize = 11.5.sp
@@ -425,13 +453,13 @@ fun VeylAutoEqBottomSheet(
                         },
                         placeholder = {
                             Text(
-                                text = "3.5, 2.5, 0.5, 0.0, 0.0, 0.0, -0.5, 1.0, -1.0, 1.5",
+                                text = "Filter 1: ON PK Fc 105 Hz Gain 4.1 dB Q 0.70\nor: 3.5, 2.5, 0.5, 0.0, ...",
                                 style = VeylTypography.MonoSpec,
                                 color = colors.textMuted,
                                 fontSize = 11.sp
                             )
                         },
-                        maxLines = 3,
+                        maxLines = 5,
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = colors.accentSignal,
@@ -452,25 +480,46 @@ fun VeylAutoEqBottomSheet(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = colors.surfacePanel,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.borderHairline),
+                            modifier = Modifier.clickable {
+                                txtPickerLauncher.launch(arrayOf("text/plain", "text/*", "*/*"))
+                            }
+                        ) {
+                            Text(
+                                text = "Load .txt File",
+                                style = VeylTypography.BodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.textPrimary,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = colors.accentSignal,
                             modifier = Modifier.clickable {
-                                val tokens = customInputText
-                                    .replace(";", ",")
-                                    .split(",", " ", "\n", "\t")
-                                    .mapNotNull { it.trim().toFloatOrNull() }
-
-                                if (tokens.size >= 10) {
-                                    val gains = tokens.take(10)
+                                val parsed = parseAutoEqText(customInputText)
+                                if (parsed != null) {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    controller.setEqPreset("AutoEQ Custom", gains)
+                                    val (bands, gainsOnly) = parsed
+                                    if (bands != null) {
+                                        controller.setEqPreset(customInputName, bands.map { it.second })
+                                        bands.forEachIndexed { idx, (fc, gain, q) ->
+                                            controller.updateEqBand(idx.toUInt(), gain, fc, q)
+                                        }
+                                    } else if (gainsOnly != null) {
+                                        controller.setEqPreset(customInputName, gainsOnly)
+                                    }
                                     controller.toggleEq(true)
                                     onDismiss()
                                 } else {
-                                    customInputError = "Found ${tokens.size} gain values. Exactly 10 required (one per ISO band)."
+                                    customInputError = "Unrecognized format. Paste AutoEQ ParametricEQ/GraphicEQ .txt or 10 dB values."
                                 }
                             }
                         ) {
@@ -664,4 +713,78 @@ private fun AutoEqCard(
             }
         }
     }
+}
+
+/**
+ * Parses AutoEQ ParametricEQ (.txt), GraphicEQ (.txt), or 10-band raw dB gains.
+ * Returns Pair(parametricBandsOrNull, tenBandGainsOrNull).
+ */
+private fun parseAutoEqText(raw: String): Pair<List<Triple<Float, Float, Float>>?, List<Float>?>? {
+    val text = raw.trim()
+    if (text.isEmpty()) return null
+
+    // 1. EqualizerAPO ParametricEQ: "Filter 1: ON PK Fc 105 Hz Gain 4.1 dB Q 0.70"
+    val filterRegex = Regex(
+        """Filter\s+\d+\s*:\s*ON\s+(?:PK|LSC|HSC)\s+Fc\s+([0-9.]+)\s*Hz\s+Gain\s+([-+]?[0-9.]+)\s*dB(?:\s+Q\s+([0-9.]+))?""",
+        RegexOption.IGNORE_CASE
+    )
+    val peqMatches = filterRegex.findAll(text).toList()
+    if (peqMatches.isNotEmpty()) {
+        val defaultFreqs = listOf(31f, 63f, 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f, 16000f)
+        val parsed = peqMatches.take(10).map { m ->
+            val fc = (m.groupValues[1].toFloatOrNull() ?: 1000f).coerceIn(20f, 20000f)
+            val gain = (m.groupValues[2].toFloatOrNull() ?: 0f).coerceIn(-15f, 15f)
+            val q = (m.groupValues.getOrNull(3)?.toFloatOrNull() ?: 1.41f).coerceIn(0.2f, 12f)
+            Triple(fc, gain, q)
+        }.toMutableList()
+        while (parsed.size < 10) {
+            parsed.add(Triple(defaultFreqs[parsed.size], 0f, 1.41f))
+        }
+        return parsed to null
+    }
+
+    // 2. AutoEQ GraphicEQ: "GraphicEQ: 25 -1.2; 40 0.5; ..."
+    if (text.contains("GraphicEQ:", ignoreCase = true)) {
+        val body = text.substringAfter("GraphicEQ:", "").substringBefore("\n")
+        val pts = body.split(";").mapNotNull { seg ->
+            val parts = seg.trim().split(Regex("\\s+"))
+            if (parts.size >= 2) {
+                val f = parts[0].toFloatOrNull()
+                val g = parts[1].toFloatOrNull()
+                if (f != null && g != null) f to g else null
+            } else null
+        }.sortedBy { it.first }
+
+        if (pts.size >= 2) {
+            val isoFreqs = listOf(31f, 63f, 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f, 16000f)
+            val gains = isoFreqs.map { target ->
+                when {
+                    target <= pts.first().first -> pts.first().second
+                    target >= pts.last().first -> pts.last().second
+                    else -> {
+                        val idx = pts.indexOfFirst { it.first >= target }.coerceAtLeast(1)
+                        val (f0, g0) = pts[idx - 1]
+                        val (f1, g1) = pts[idx]
+                        val log0 = kotlin.math.ln(f0.toDouble())
+                        val log1 = kotlin.math.ln(f1.toDouble())
+                        val logT = kotlin.math.ln(target.toDouble())
+                        val t = if (log1 > log0) ((logT - log0) / (log1 - log0)).toFloat() else 0f
+                        (g0 + t * (g1 - g0)).coerceIn(-15f, 15f)
+                    }
+                }
+            }
+            return null to gains
+        }
+    }
+
+    // 3. Fallback: 10 raw dB numbers
+    val tokens = text
+        .replace(";", ",")
+        .split(",", " ", "\n", "\t")
+        .mapNotNull { it.trim().toFloatOrNull() }
+    if (tokens.size >= 10) {
+        return null to tokens.take(10).map { it.coerceIn(-15f, 15f) }
+    }
+
+    return null
 }

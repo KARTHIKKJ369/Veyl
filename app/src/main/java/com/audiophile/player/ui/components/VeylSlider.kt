@@ -66,6 +66,7 @@ fun VeylSlider(
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
                     val w = size.width.toFloat()
                     if (w > 0f) {
                         isDragging = true
@@ -73,8 +74,8 @@ fun VeylSlider(
                         onValueChange(dragFraction)
                     }
 
-                    var pointerId = down.id
-                    val isDrag = drag(pointerId) { change ->
+                    val pointerId = down.id
+                    drag(pointerId) { change ->
                         if (w > 0f) {
                             change.consume()
                             dragFraction = (change.position.x / w).coerceIn(0f, 1f)

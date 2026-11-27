@@ -1,5 +1,4 @@
 use num_complex::Complex;
-use rand::Rng;
 use std::f32::consts::PI;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -364,24 +363,53 @@ impl ParametricEqualizer {
     }
 }
 
-/// Triangular Probability Density Function (TPDF) Dither generator
+/// Triangular Probability Density Function (TPDF) Dither generator (lock-free, real-time safe)
 pub struct TpdfDither {
+    rng_state: u64,
     last_random: f32,
 }
 
 impl TpdfDither {
     pub fn new() -> Self {
-        Self { last_random: 0.0 }
+        Self {
+            rng_state: 0x9E37_79B9_7F4A_7C15,
+            last_random: 0.0,
+        }
+    }
+
+    #[inline]
+    fn next_unit_f32(&mut self) -> f32 {
+        // xorshift64* - zero allocation, zero TLS, real-time audio safe
+        let mut x = self.rng_state;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.rng_state = x;
+        let bits = (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 40) as u32;
+        (bits as f32) * (1.0 / 16777216.0)
     }
 
     /// Generates triangular dither in range [-1.0, +1.0] LSB
+    #[inline]
     pub fn next_dither(&mut self) -> f32 {
-        let mut rng = rand::thread_rng();
-        let r1: f32 = rng.gen_range(0.0..1.0);
-        let r2: f32 = rng.gen_range(0.0..1.0);
+        let r1 = self.next_unit_f32();
+        let r2 = self.next_unit_f32();
         let dither = r1 - r2;
         self.last_random = dither;
         dither
+    }
+
+    /// Apply TPDF dither directly to an f32 PCM buffer at target bit-depth (16 or 24-bit)
+    /// prior to HAL/AudioFlinger quantization, preventing low-level harmonic distortion.
+    pub fn dither_f32(&mut self, buffer: &mut [f32], target_bits: u32) {
+        let lsb = if target_bits <= 16 {
+            1.0 / 32767.0
+        } else {
+            1.0 / 8388607.0
+        };
+        for sample in buffer.iter_mut() {
+            *sample = (*sample + self.next_dither() * lsb).clamp(-1.0, 1.0);
+        }
     }
 
     /// Apply TPDF dither and quantize float sample [-1.0, 1.0] to 16-bit integer range

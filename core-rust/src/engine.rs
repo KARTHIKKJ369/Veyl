@@ -116,7 +116,6 @@ pub struct PlaybackEngine {
     limiter: Arc<Mutex<PeakLimiter>>,
     playback_speed: Arc<Mutex<f32>>,
     time_stretcher: Arc<Mutex<TimeStretcher>>,
-    #[allow(dead_code)]
     dither: Arc<Mutex<TpdfDither>>,
     resampler: Arc<Mutex<Option<StreamResampler>>>,
     render_volume: Arc<Mutex<f32>>,
@@ -355,7 +354,16 @@ impl PlaybackEngine {
                         let mut dec_guard = active_decoder.lock();
                         if let Some(ref mut dec) = *dec_guard {
                             let target_sec = seek_frame as f64 / dec.info().sample_rate as f64;
-                            let _ = dec.seek(target_sec);
+                            match dec.seek(target_sec) {
+                                Ok(actual_sec) => {
+                                    pos_nanos_atomic.store((actual_sec * 1_000_000_000.0) as u64, Ordering::Relaxed);
+                                }
+                                Err(e) => {
+                                    log::warn!("Seek to {:.2}s failed: {:?}", target_sec, e);
+                                    let cur = dec.current_time_seconds();
+                                    pos_nanos_atomic.store((cur * 1_000_000_000.0) as u64, Ordering::Relaxed);
+                                }
+                            }
                             if let Some(ref mut r) = *resampler.lock() {
                                 r.reset();
                             }
@@ -1189,31 +1197,45 @@ impl AudioRenderCallback for PlaybackEngine {
         // with alternating 0x05 / 0xFA marker sync bytes in the top 8 bits.
         // Any DSP or scaling mutates markers, so bypass completely for DoP.
         if !is_dop {
+            let mut signal_modified = volume < 0.999
+                || self.resampler.try_lock().map(|r| r.is_some()).unwrap_or(false);
+
             if let Some(mut eq) = self.equalizer.try_lock() {
+                if eq.enabled && (eq.preamp_db.abs() > 1e-4 || eq.bands.iter().any(|b| b.enabled && b.gain_db.abs() > 1e-4)) {
+                    signal_modified = true;
+                }
                 eq.process_interleaved(buffer);
             }
             if let Some(mut sub) = self.sub_bass.try_lock() {
+                if sub.enabled && sub.intensity >= 0.01 { signal_modified = true; }
                 sub.process_interleaved(buffer, channels);
             }
             if let Some(mut voc) = self.vocal_clarity.try_lock() {
+                if voc.enabled && voc.clarity >= 0.01 { signal_modified = true; }
                 voc.process_interleaved(buffer, channels);
             }
             if let Some(mut tube) = self.tube_exciter.try_lock() {
+                if tube.enabled && tube.drive >= 0.01 { signal_modified = true; }
                 tube.process_interleaved(buffer);
             }
             if let Some(mut spat) = self.spatializer.try_lock() {
+                if spat.enabled { signal_modified = true; }
                 spat.process_interleaved(buffer, channels);
             }
             if let Some(mut xfeed) = self.crossfeed.try_lock() {
+                if xfeed.preset != CrossfeedPreset::Off { signal_modified = true; }
                 xfeed.process_interleaved(buffer, channels);
             }
             if let Some(mut norm) = self.loudness_normalizer.try_lock() {
+                if norm.enabled { signal_modified = true; }
                 norm.process_interleaved(buffer, channels);
             }
             if let Some(bal) = self.channel_balance.try_lock() {
+                if bal.balance.abs() > 1e-4 { signal_modified = true; }
                 bal.process_interleaved(buffer, channels);
             }
             if let Some(lim) = self.limiter.try_lock() {
+                if lim.enabled { signal_modified = true; }
                 lim.process_interleaved(buffer);
             }
 
@@ -1222,6 +1244,7 @@ impl AudioRenderCallback for PlaybackEngine {
             if let Some(mut vol_guard) = self.render_volume.try_lock() {
                 let start_vol = *vol_guard;
                 if (start_vol - target_vol).abs() > 0.0001 || (target_vol - 1.0).abs() > f32::EPSILON {
+                    signal_modified = true;
                     let step = (target_vol - start_vol) / (frames as f32).max(1.0);
                     let mut current_v = start_vol;
                     for f in 0..frames {
@@ -1232,6 +1255,14 @@ impl AudioRenderCallback for PlaybackEngine {
                     }
                 }
                 *vol_guard = target_vol;
+            }
+
+            // Apply 24-bit TPDF dither only when DSP/volume/resampling modified the float stream
+            // (never add dither noise to bit-perfect streams)
+            if signal_modified && read_samples > 0 {
+                if let Some(mut dith) = self.dither.try_lock() {
+                    dith.dither_f32(&mut buffer[..read_samples], 24);
+                }
             }
 
             // Protect against NaN / denormals to guarantee speaker safety

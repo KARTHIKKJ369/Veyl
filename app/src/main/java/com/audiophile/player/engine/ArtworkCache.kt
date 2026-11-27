@@ -248,8 +248,8 @@ object ArtworkCache {
 
     suspend fun loadArtwork(uri: String, targetSizePx: Int = 128): Bitmap? {
         if (uri.isBlank()) return null
-        val clean = uri.removePrefix("file://")
-        val actualUri = getOnlineArtwork(uri) ?: uri
+        val clean = uri.removePrefix("file://").substringBefore("#cue=")
+        val actualUri = getOnlineArtwork(uri) ?: clean
         if (actualUri == uri && (noArtworkSet.contains(uri) || noArtworkSet.contains(clean))) return null
 
         val cacheKey = if (targetSizePx > 256) "${actualUri}_lg" else "${actualUri}_sm"
